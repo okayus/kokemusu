@@ -1,0 +1,100 @@
+# Drives Anthropic's published devcontainer image (.docker/Dockerfile) without
+# VS Code. Start with ./up.sh (resolves the sandbox GitHub token from 1Password),
+# then `docker compose exec dev zsh`. A plain `docker compose up -d` also works but
+# leaves the container WITHOUT a token (it can commit, not push) — by design.
+#
+# Project: kokemusu (苔むす). Host port 5273 (5173 = generic Vite, 5373 = mazuoboeru).
+services:
+  dev:
+    build:
+      context: .docker
+      dockerfile: Dockerfile
+      args:
+        TZ: Asia/Tokyo
+        CLAUDE_CODE_VERSION: latest
+        # Opt-in language toolchains. kokemusu is TypeScript-only.
+        INSTALL_RUST: "false"
+        INSTALL_HASKELL: "false"
+        INSTALL_GO: "false"
+    container_name: kokemusu-dev
+    # Required so init-firewall.sh can program iptables/ipset.
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    # Non-root so `--dangerously-skip-permissions` is usable; the firewall is the boundary.
+    user: node
+    working_dir: /workspace
+    volumes:
+      # Project bind mount: edit on the host, runs in the container.
+      - ./:/workspace:delegated
+      # Named volumes: Claude auth + shell history survive `docker compose down`.
+      - claude-config:/home/node/.claude
+      - bash-history:/commandhistory
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=4096"
+      CLAUDE_CONFIG_DIR: "/home/node/.claude"
+      # Individual flags instead of the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+      # umbrella (= these three + DISABLE_TELEMETRY). Leaving DISABLE_TELEMETRY
+      # unset re-enables ONLY Statsig: its feature flags drive the /model picker
+      # roster (flag-gated models stay hidden otherwise; the flags arrive via
+      # api.anthropic.com, so this works even if Statsig egress is blocked).
+      # Sentry stays off; updates are handled below, not by the auto-updater.
+      DISABLE_AUTOUPDATER: "1"
+      DISABLE_FEEDBACK_COMMAND: "1"
+      DISABLE_ERROR_REPORTING: "1"
+      # Default model for the in-container agent.
+      ANTHROPIC_MODEL: "claude-fable-5"
+      POWERLEVEL9K_DISABLE_GITSTATUS: "true"
+      TZ: Asia/Tokyo
+      # Repo-scoped GitHub fine-grained PAT (okayus/kokemusu only; Contents + Pull
+      # requests; no Workflows; 90-day expiry). No value here on purpose: compose
+      # resolves it from the `docker compose` process env — i.e. from `op run` in
+      # ./up.sh — and REMOVES the key when unset, silently, so a plain
+      # `docker compose up -d` yields a container that can commit but not push
+      # (fail closed; the startup NOTE below is the only signal). The token lives
+      # only in 1Password (.docker/sandbox.env holds the op:// reference) and in
+      # this container's env; nothing writes it to disk.
+      # Skill: sandboxed-agent-github-token-via-1password.
+      GH_TOKEN:
+    ports:
+      # host:container — host 5273 avoids collision with other local dev servers.
+      # Inside the container Vite listens on 5173; reach it at http://localhost:5273.
+      - "5273:5173" # Vite dev server (run with --host 0.0.0.0 in-container)
+    init: true
+    tty: true
+    stdin_open: true
+    # On every start: program the firewall, refresh global CLIs, wire git, enforce
+    # container-side Claude defaults, keep the container alive.
+    # - claude updates via npm (registry.npmjs.org is allowlisted): the native
+    #   auto-updater's download host (downloads.claude.ai) is OUTSIDE the egress
+    #   allowlist, so an image-baked claude silently goes stale without this.
+    # - pnpm lives in the container layer and vanishes on recreation; reinstall it too
+    #   (corepack enable fails: /usr/local/bin isn't writable by node).
+    # - git: credential helper = inline sh that echoes $GH_TOKEN at push time (nothing
+    #   under ~/.git-credentials), plus a distinguishable sandbox identity. ~/.gitconfig
+    #   is container-layer, so both are re-applied every start. `$$` = literal `$`
+    #   (compose interpolates `$VAR` at parse time).
+    # - defaultMode=bypassPermissions goes into the CONTAINER-scope user settings
+    #   (named volume), NOT the repo-shared .claude/settings.json — host sessions
+    #   keep normal prompting. Safe in here: the firewall is the boundary and deny
+    #   rules (force push / main / gh pr merge / gh auth / gh api) still apply in
+    #   bypass mode.
+    # - No step may kill the container on failure (fall back to image-baked versions).
+    command: >
+      sh -c "sudo /usr/local/bin/init-firewall.sh &&
+             (npm i -g @anthropic-ai/claude-code@latest pnpm@9.15.0 ||
+              echo 'WARN: claude/pnpm update failed; using image-baked versions') &&
+             (git config --global credential.helper '!f() { echo username=x-access-token; echo \"password=$$GH_TOKEN\"; }; f' &&
+              git config --global user.name 'Claude (kokemusu sandbox)' &&
+              git config --global user.email 'claude-sandbox@users.noreply.github.com' ||
+              echo 'WARN: git credential/identity setup failed') &&
+             ([ -n \"$$GH_TOKEN\" ] || echo 'NOTE: GH_TOKEN absent - this container can commit but NOT push. Start it via ./up.sh') &&
+             ([ -s /home/node/.claude/settings.json ] || echo '{}' > /home/node/.claude/settings.json) &&
+             (jq '.permissions.defaultMode = \"bypassPermissions\"' /home/node/.claude/settings.json > /tmp/cs.json &&
+              mv /tmp/cs.json /home/node/.claude/settings.json ||
+              echo 'WARN: could not set bypassPermissions default') &&
+             exec sleep infinity"
+
+volumes:
+  claude-config:
+  bash-history:
