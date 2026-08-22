@@ -83,7 +83,7 @@
 - トークン管理（設定画面・**セッション必須**＝PAT で PAT は作れない）: 名前を付けて発行 → **一度だけ表示** → 一覧（名前 / 作成 / 最終使用 / 状態）→ 失効（行は残す）。1 本の失効はセッションにも他の token にも影響しない。
 - 保存は `sha256(token + PAT_PEPPER)` のみ（[data-model.md](data-model.md) `api_token`）。D1 が漏れても生きた credential にならない。
 - PAT で届く mutation は bot スキャン対策の対象（ログイン用とは別のレート制限。接頭辞チェックで junk は D1 に触れる前に弾く）。ログに `Authorization` ヘッダや token を出さない（`id` だけ）。
-- **未決（[roadmap.md](roadmap.md) 決めること 8）**: mazuoboeru 側の連携を (i) **自分専用**（mazuoboeru の Worker Secret に苔むすの PAT を 1 本置き、Cron が日次で push）にするか、(ii) **per-user**（mazuoboeru の各ユーザが自分の苔むすの PAT を登録できる＝mazuoboeru 側に暗号化保存と配送台帳が要る）にするか。**受け側（苔むす）の作りはどちらでも同じ。**
+- ✅ **mazuoboeru 側は (i) 自分専用**（mazuoboeru の Worker Secret に苔むすの PAT を 1 本置き、Cron が日次で push。2026-08-23）。受け側（苔むす）は送り側を知らない汎用設計（[ADR-0002](adr/0002-api-posting-via-receiver-side-pat.md)）なので、mazuoboeru が per-user (ii) に広がっても苔むすは無変更。
 
 ## 機能の優先度
 
