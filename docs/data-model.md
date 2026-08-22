@@ -11,6 +11,7 @@ SQLite / D1 前提。1インスタンス＝1ユーザーだが、認証情報の
 - **id**: `text`、`crypto.randomUUID()`。例外は `credential.id`（WebAuthn の credential ID そのもの）。
 - **日時**: `integer` の epoch ms で統一（passkey skill の ISO `TEXT` は苔むすでは epoch ms に読み替える。PAT skill は epoch ms）。
 - **子テーブルは `user` に `ON DELETE CASCADE`**。⚠️ D1 は `PRAGMA foreign_keys=OFF` を無視するので、親テーブル（`user` / `post`）を**再構築する**マイグレ（NULL→NOT NULL、型変更、rename）は子行を cascade delete する罠（`cloudflare-d1-drizzle-migration`）。`user` の列は最初に決めきり、後から触らない。
+- **本文と title は暗号文、それ以外は平文**（[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。暗号文は `k<鍵ID>.<iv>.<暗号文>` の封筒で、鍵 `BODY_KEY` は Worker Secret。集計・可視化は平文のメタデータだけで成立する。
 - 純粋関数で扱える形を優先（ストリーク計算などは SQL でなく `packages/core` で）。
 
 ## エンティティ概観
@@ -84,10 +85,9 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 | --- | --- | --- |
 | id | text (uuid) | PK |
 | user_id | text | FK → user |
-| title | text? | **任意の見出し**。位置づけは未決（[roadmap.md](roadmap.md) 決めること 7）: API 自動投稿の機械的な見出し（例「mazuoboeru 2026-08-22」）専用か、手動投稿でも付けられるか、暗号化対象に含めるか。本文と同じセンシティブ扱いが安全側 |
-| body | text | 本文（Markdown）。暗号化する場合はここを暗号文に |
-| body_format | text | `markdown`（将来 `plain` 等） |
-| is_encrypted | integer (bool) | 本文（と title）が暗号化済みか |
+| title | text? | **任意の見出し**の暗号文（本文と同じ封筒・同じ鍵）。位置づけは未決（[roadmap.md](roadmap.md) 決めること 7）: API 自動投稿の機械的な見出し（例「mazuoboeru 2026-08-22」）専用か、手動投稿でも付けられるか |
+| body | text | 本文（Markdown）の**暗号文** `k<鍵ID>.<iv>.<暗号文>`。平文は D1 に入らない（ADR-0001）。鍵の世代は封筒の `k<鍵ID>` で見分ける |
+| body_format | text | `markdown`（将来 `plain` 等）。平文メタデータ |
 | created_at | integer | epoch ms。**平文メタデータ**（可視化の軸） |
 | updated_at | integer | |
 | deleted_at | integer? | ソフトデリート（null=生存） |
