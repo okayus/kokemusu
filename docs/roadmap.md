@@ -65,7 +65,7 @@
 4. **UI トーン**: 苔の世界観をどこまで前面に出すか（情緒重視 ↔ 実用ミニマル）。
 5. ~~**monorepo にするか**~~ → ✅ **pnpm workspace**。まず `apps/web` の単一パッケージ、`packages/core` はロジックが生えたら。
 6. **タグの構造**: フラットで開始。階層化は必要が出てから。
-7. **`post.title` の位置づけ**: API 自動投稿の機械的な見出し専用か、手動投稿にも開くか、一覧 / 検索でどう使うか。（暗号化対象に含めることは ✅ 決定済み: ADR-0001）→ **未決（grill）**
+7. ~~**`post.title` の位置づけ**~~ → ✅ **任意の見出し。手動でも API でも付けられ、UI は既定で隠す**（フォームは本文 1 欄のまま、ショートカット / トグルで見出し欄を出す。タイムラインは見出しのある苔片だけ本文の上に小さく表示。検索は見出しも復号走査に含める。暗号化は本文と同じ鍵）（2026-08-23）。
 8. **mazuoboeru 連携の形**: (i) 自分専用（mazuoboeru の Worker Secret に PAT 1 本、Cron が日次 push）か、(ii) per-user（mazuoboeru の各ユーザが自分の苔むす PAT を登録。送り側に暗号化保存・配送台帳が要る）か。受け側の作りは同じ。→ **未決（grill）**
 
 ## 次のアクション候補
@@ -73,5 +73,6 @@
 - [ ] Phase 0 人手: `wrangler login` → `wrangler d1 create kokemusu-db` → Workers Builds 接続。
 - [ ] 骨格 PR を merge → `/health` 200 を確認。
 - [x] `/grill-with-docs` 2（暗号化レベル）→ ADR-0001、`CONTEXT.md` 作成（2026-08-23）。
-- [ ] `/grill-with-docs` 7（`post.title`）・8（mazuoboeru 連携）を確定。
+- [x] `/grill-with-docs` 7（`post.title`）→ 任意の見出し（2026-08-23）。
+- [ ] `/grill-with-docs` 8（mazuoboeru 連携）を確定。
 - [ ] 最初の縦切り: 「投稿 → タグ → ヒートマップに1マス点く」を一本通す。

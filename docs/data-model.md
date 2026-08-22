@@ -85,7 +85,7 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 | --- | --- | --- |
 | id | text (uuid) | PK |
 | user_id | text | FK → user |
-| title | text? | **任意の見出し**の暗号文（本文と同じ封筒・同じ鍵）。位置づけは未決（[roadmap.md](roadmap.md) 決めること 7）: API 自動投稿の機械的な見出し（例「mazuoboeru 2026-08-22」）専用か、手動投稿でも付けられるか |
+| title | text? | **任意の見出し**の暗号文（本文と同じ封筒・同じ鍵）。手動でも API でも付けられる（例: mazuoboeru の日次投稿「まず覚える 2026-08-22」）。null = 見出しなし |
 | body | text | 本文（Markdown）の**暗号文** `k<鍵ID>.<iv>.<暗号文>`。平文は D1 に入らない（ADR-0001）。鍵の世代は封筒の `k<鍵ID>` で見分ける |
 | body_format | text | `markdown`（将来 `plain` 等）。平文メタデータ |
 | created_at | integer | epoch ms。**平文メタデータ**（可視化の軸） |
