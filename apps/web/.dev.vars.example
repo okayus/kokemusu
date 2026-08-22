@@ -1,0 +1,9 @@
+# Copy to .dev.vars (gitignored) for local dev. Keys only here; never commit values.
+#
+# WebAuthn relying party for local dev. Overrides the production values pinned in
+# wrangler.jsonc `vars` — .dev.vars never reaches production.
+RP_ID=localhost
+ORIGIN=http://localhost:5173
+
+# Later phases add: SESSION_SECRET, INITIAL_REGISTRATION_TOKEN (passkey auth),
+# PAT_PEPPER (API tokens). Production values go in via `wrangler secret put`.

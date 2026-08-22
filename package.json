@@ -1,0 +1,17 @@
+{
+  "name": "kokemusu",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @kokemusu/web dev",
+    "build": "pnpm --filter @kokemusu/web build",
+    "check": "pnpm --filter @kokemusu/web check",
+    "test": "pnpm --filter @kokemusu/web test",
+    "deploy": "pnpm --filter @kokemusu/web run deploy",
+    "db:migrate": "pnpm --filter @kokemusu/web db:migrate",
+    "db:migrate:prod": "pnpm --filter @kokemusu/web db:migrate:prod"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=24"
+  }
+}

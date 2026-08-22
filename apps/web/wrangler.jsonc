@@ -1,0 +1,42 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // Worker name = production hostname `kokemusu.shiraoka.workers.dev`. Workers Builds
+  // must use exactly this name, or the deploy creates a second Worker.
+  "name": "kokemusu",
+  "compatibility_date": "2026-08-20",
+  "main": "./worker/index.ts",
+  "assets": {
+    "binding": "ASSETS",
+    // L1: unmatched asset paths fall back to index.html (client-side routing).
+    "not_found_handling": "single-page-application",
+    // L2: the Worker sees every request before Assets, so secureHeaders can wrap
+    // the SPA HTML in a later phase. L3 is app.notFound in worker/index.ts.
+    "run_worker_first": true
+  },
+  "vars": {
+    // WebAuthn Relying Party — LOCKED to the production hostname on day 1.
+    // Changing RP_ID invalidates every registered passkey. Never edit these two
+    // (any diff here is an automatic PR reject). Local dev overrides them via
+    // .dev.vars (gitignored), which never reaches production.
+    "RP_ID": "kokemusu.shiraoka.workers.dev",
+    "ORIGIN": "https://kokemusu.shiraoka.workers.dev"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "kokemusu-db",
+      // TODO(Phase 0, human): replace with the UUID printed by
+      //   wrangler d1 create kokemusu-db
+      // (run on the host after `wrangler login`). Not a secret — commit the real
+      // UUID. `wrangler deploy` fails loudly while this placeholder remains;
+      // local dev (`pnpm dev`) works regardless.
+      "database_id": "<REPLACE_WITH_UUID_FROM_wrangler_d1_create_kokemusu-db>",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "triggers": {
+    // Hourly at minute 15 (avoids the minute-0 crowd). The handler only logs in
+    // the skeleton; it proves the Cron registration works (`wrangler tail`).
+    "crons": ["15 * * * *"]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@kokemusu/web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "pnpm build && wrangler deploy",
+    "types": "wrangler types",
+    "check": "pnpm run types && tsc --noEmit",
+    "test": "vitest run",
+    "db:migrate": "wrangler d1 migrations apply kokemusu-db --local",
+    "db:migrate:prod": "wrangler d1 migrations apply kokemusu-db --remote"
+  },
+  "dependencies": {
+    "hono": "^4.13.3",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.53.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.1.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.125.0"
+  }
+}
