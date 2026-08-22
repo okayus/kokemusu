@@ -17,7 +17,7 @@
 - **Hono**（軽量・関数志向・`class` 不要）。
   - Cloudflare Workers でも Node でも動く ＝ **デプロイ先を後で選べる**。これが今回の肝。
 - バリデーション: Zod（型と実行時検証を一致させる）。
-- 認証: `@simplewebauthn/server`（パスキー）。詳細は [security.md](security.md)。
+- 認証: `@simplewebauthn/server`（パスキー、single-user）。API 自動投稿は PAT（Bearer）。詳細は [security.md](security.md)。
 
 ## データベース
 
@@ -37,9 +37,10 @@ Workers / D1 / WebAuthn を実地で扱うのが学習になること。
 
 - 各自が自分の Cloudflare アカウントにデプロイ＝ある種のセルフホスト。
 - **メリット**: サーバ保守ほぼゼロ、無料枠で足りる、HTTPS 自動、既存スキル
-  （`cloudflare-workers-deploy-skeleton` で SPA+API+Cron を1 Worker・D1・GitHub Actions 自動デプロイ）が即使える。
+  （`cloudflare-workers-deploy-skeleton` で SPA+API+Cron を1 Worker・D1）が即使える。
+- **デプロイ経路は Workers Builds（キーレス）**: GitHub に Cloudflare トークンを置かない（`cloudflare-workers-builds-keyless-deploy`、[dev-environment.md](dev-environment.md)）。toolchain は wrangler 4 ＋ `@cloudflare/vite-plugin` 1.x、node 24。
 - **デメリット**: データが Cloudflare 上に乗る → プライバシー懸念は本文のクライアント側暗号化(C)で緩和（[security.md](security.md)）。
-- **注意**: WebAuthn の RP_ID（ドメイン）を最初に固定する（スキルの RP_ID ロックルール）。
+- **注意**: WebAuthn の RP_ID は **`kokemusu.shiraoka.workers.dev`** で固定済み（初回パスキー登録前に変えないこと。スキルの RP_ID ロックルール）。
 
 ### 案B: Docker（Node + Hono + SQLite ファイル）（推奨：プライバシー最優先）
 

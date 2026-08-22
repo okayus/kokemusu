@@ -8,30 +8,32 @@
 
 | 脅威 | 対策の方向性 |
 | --- | --- |
-| 第三者がアプリにログインしようとする | 強い認証（パスキー優先）、レート制限、ブルートフォート対策 |
+| 第三者がアプリにログインしようとする | パスキーのみ（閉じた登録）、レート制限、ブルートフォース対策 |
 | 通信の盗聴 | HTTPS 必須、HSTS |
 | セッション乗っ取り | HttpOnly / Secure / SameSite Cookie、短めの有効期限、再認証 |
 | サーバ/DB ファイルの流出（バックアップ含む） | 保存時暗号化、暗号化バックアップ |
 | ホスティング事業者がデータを覗く（CF/VPS） | 本文のクライアント側暗号化を検討 |
 | XSS（Markdown 描画経由） | サニタイズ、CSP |
-| CSRF | SameSite Cookie ＋ トークン |
+| CSRF | SameSite Cookie ＋ Origin チェック（Bearer PAT は免除） |
 | 依存ライブラリの脆弱性 | 依存最小化、定期更新、監査 |
 
 ## 認証
 
-- **第一候補: パスキー / WebAuthn**（@simplewebauthn）。
-  - フィッシング耐性が高く、パスワード管理の負担もない。単一ユーザーの自分用途に最適。
-  - 複数デバイス登録できるようにする（PC・スマホ）。
-  - リカバリ手段（バックアップコード等）を必ず用意（パスキー全消失でロックアウトしないため）。
-- **代替/併用: パスワード ＋ TOTP 2FA**。
-  - パスワードは Argon2id でハッシュ化。
-- ⚠️ WebAuthn を使うなら **RP_ID（ドメイン）を最初に確定** させる。後から変えると登録済みパスキーが無効になる
-  （cloudflare-workers-deploy-skeleton スキルの RP_ID ロックルール）。セルフホストで各自ドメインが異なる点に注意。
-- ログイン試行のレート制限・一時ロック。ログイン履歴の記録。
+✅ **決定（2026-08-22）: パスキー / WebAuthn のみ**（`@simplewebauthn` v13、`cloudflare-workers-passkey-auth` の single-user 変種）。
+パスワード ＋ TOTP の併用は **作らない**（単一ユーザの自分用途では、失うものより守るものが少ない）。
+
+- フィッシング耐性が高く、パスワード管理の負担もない。単一ユーザーの自分用途に最適。
+- **登録は閉じておく**: 一度きりの `INITIAL_REGISTRATION_TOKEN`（Worker Secret）で初回登録を開け、登録後に削除して閉じる。未設定なら `403 registration_closed`。
+- 複数デバイス登録できるようにする（PC・スマホ。**最低 2 台**登録するのを onboarding の一部にする）。
+- リカバリ: 全パスキー消失時は、自分（操作者）が `INITIAL_REGISTRATION_TOKEN` を再発行して新しいパスキーを登録する runbook（バックアップコードは作らない。D1 のデータはそのまま）。
+- 同期パスキー（iCloud / Google）は署名カウンタが常に 0 → カウンタ退行チェックは `stored !== 0` のときだけ。
+- ⚠️ **RP_ID ロック: `RP_ID = kokemusu.shiraoka.workers.dev` / `ORIGIN = https://kokemusu.shiraoka.workers.dev`** を初回登録より前に固定。後から変えると登録済みパスキーが全部無効。`RP_ID` / `ORIGIN` を変える diff は PR で自動 reject 扱い。セルフホストする人は各自のホスト名で同じルール。
+- ログイン試行のレート制限・一時ロック（`cloudflare-workers-bot-scan-defense`）。ログイン履歴の記録。
+- **API 自動投稿は PAT（Bearer）**: 苔むすが発行し、送り側が保持。`sha256(token + PAT_PEPPER)` だけ保存、スコープ `post:write`、セッションのみが発行・失効できる。詳細は [features.md](features.md) §7 / [data-model.md](data-model.md) `api_token`。
 
 ## セッション
 
-- サーバ側セッション（DB 保存）。Cookie は `HttpOnly` `Secure` `SameSite=Lax`（または Strict）。
+- サーバ側セッション（`session` 行に裏打ちされた HS256 JWT。行を消せば即失効）。Cookie は **host-only（`Domain` なし）の `__Host-session`**、`HttpOnly` `Secure` `SameSite=Lax` `Path=/`。`Domain=` を付けると同じ `*.workers.dev` 配下の他 Worker から読める。
 - 妥当な有効期限 ＋ アイドルタイムアウト。明示ログアウトで即無効化。
 - 重要操作（パスキー削除、エクスポート、全削除）は再認証を要求。
 
@@ -60,7 +62,7 @@
 - **CSP**（インラインスクリプト禁止、ソース限定）。
 - Markdown レンダリングは **サニタイズ必須**（DOMPurify 等）。生 HTML を許さない。
 - セキュリティヘッダ一式（`X-Content-Type-Options` `Referrer-Policy` `X-Frame-Options`/frame-ancestors 等）。
-- CSRF 対策（SameSite ＋ 必要なら同期トークン）。
+- CSRF 対策（SameSite ＋ 非 GET は `Origin` ヘッダが `ORIGIN` と一致することを要求。`Authorization: Bearer` 付きは免除＝Cookie を持たないので偽造できない）。
 - API は最小限の公開面。ヘルスチェック等から情報を漏らさない。
 
 ## バックアップと可搬性
@@ -80,5 +82,5 @@
 
 | 区分 | 内容 |
 | --- | --- |
-| MVP 必須 | パスキー認証（＋リカバリ）、安全な Cookie/セッション、HTTPS/HSTS、CSP、Markdown サニタイズ、レート制限、本文/メタデータ分離設計 |
-| 後続 | 本文のアプリ層暗号化(B)、クライアント側暗号化(C)、暗号化バックアップ、ログイン履歴 UI、TOTP 併用 |
+| MVP 必須 | パスキー認証（閉じた登録 ＋ リカバリ runbook）、安全な Cookie/セッション、HTTPS/HSTS、CSP、Markdown サニタイズ、レート制限、本文/メタデータ分離設計 |
+| 後続 | API 用 PAT（Phase 2）、本文のアプリ層暗号化(B)、クライアント側暗号化(C)、暗号化バックアップ、ログイン履歴 UI |
