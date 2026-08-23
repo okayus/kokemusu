@@ -30,6 +30,10 @@
 
 - 構成: `.docker/Dockerfile`（Anthropic 公式 devcontainer 由来、**node:24**、非 root `node`）、`.docker/init-firewall.sh`（egress 許可リスト）、`docker-compose.yml`（VS Code 非依存、`/workspace` に bind mount）、`up.sh`（後述）。
 - **起動は `./up.sh`**（= `op run --env-file=.docker/sandbox.env -- docker compose up -d`）。plain `docker compose up -d` でも動くが **GitHub token が無い**（fail closed。起動ログに `NOTE: GH_TOKEN absent`）。
+- **token の状態は起動ログで分かる**: `docker compose logs dev | grep GH_TOKEN` →
+  `present (len=93)` = 注入成功（値は出さず長さだけ）／ `is empty` = compose が空文字で渡した ／ `is unset` = compose がキーごと落とした（＝ `op run` を通していない起動）。
+  ⚠️ ホストで `op run --env-file=.docker/sandbox.env -- env` を見ると値は **`<concealed by 1Password>`（24 文字）にマスクされる** ので、
+  「24 文字 = 壊れている」ではない。実際の長さを見たいときは `op run --env-file=.docker/sandbox.env -- sh -c 'echo ${#GH_TOKEN}'`（出力が秘密と一致しないのでマスクされない）。
 - 起動時に毎回: firewall → `claude` / `pnpm` を npm から更新 → git の credential helper（env の `$GH_TOKEN` を読む inline 関数・ディスクに書かない）と sandbox 用の git identity → コンテナ scope の Claude Code 既定を `bypassPermissions` に（リポ共有の `.claude/settings.json` は触らない）。
 - **egress 許可リスト**（`.docker/init-firewall.sh`）:
   - 致命（解決失敗でコンテナ起動失敗）: `registry.npmjs.org`・`api.anthropic.com`・Cloudflare API・`developers.cloudflare.com`・`docs.mcp.cloudflare.com`・GitHub（IP レンジは動的取得）。

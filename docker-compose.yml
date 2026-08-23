@@ -51,7 +51,10 @@ services:
       # resolves it from the `docker compose` process env — i.e. from `op run` in
       # ./up.sh — and REMOVES the key when unset, silently, so a plain
       # `docker compose up -d` yields a container that can commit but not push
-      # (fail closed; the startup NOTE below is the only signal). The token lives
+      # (fail closed). The startup NOTE below is the only signal, and it separates
+      # the two failure shapes: `is unset` = compose never got the variable (not
+      # started via ./up.sh), `is empty` = it got an empty one. `present (len=N)`
+      # prints the length only, never the value. The token lives
       # only in 1Password (.docker/sandbox.env holds the op:// reference) and in
       # this container's env; nothing writes it to disk.
       # Skill: sandboxed-agent-github-token-via-1password.
@@ -88,7 +91,8 @@ services:
               git config --global user.name 'Claude (kokemusu sandbox)' &&
               git config --global user.email 'claude-sandbox@users.noreply.github.com' ||
               echo 'WARN: git credential/identity setup failed') &&
-             ([ -n \"$$GH_TOKEN\" ] || echo 'NOTE: GH_TOKEN absent - this container can commit but NOT push. Start it via ./up.sh') &&
+             ([ -n \"$$GH_TOKEN\" ] && echo \"NOTE: GH_TOKEN present (len=$${#GH_TOKEN})\" ||
+              echo \"NOTE: GH_TOKEN $${GH_TOKEN+is empty}$${GH_TOKEN-is unset} - this container can commit but NOT push. Start it via ./up.sh\") &&
              ([ -s /home/node/.claude/settings.json ] || echo '{}' > /home/node/.claude/settings.json) &&
              (jq '.permissions.defaultMode = \"bypassPermissions\"' /home/node/.claude/settings.json > /tmp/cs.json &&
               mv /tmp/cs.json /home/node/.claude/settings.json ||
