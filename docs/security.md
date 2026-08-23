@@ -25,7 +25,7 @@
 - フィッシング耐性が高く、パスワード管理の負担もない。単一ユーザーの自分用途に最適。
 - **登録は閉じておく**: 一度きりの `INITIAL_REGISTRATION_TOKEN`（Worker Secret）で初回登録を開け、登録後に削除して閉じる。未設定なら `403 registration_closed`。
 - 複数デバイス登録できるようにする（PC・スマホ。**最低 2 台**登録するのを onboarding の一部にする）。
-- リカバリ: 全パスキー消失時は、自分（操作者）が `INITIAL_REGISTRATION_TOKEN` を再発行して新しいパスキーを登録する runbook（バックアップコードは作らない。D1 のデータはそのまま）。
+- リカバリ: 全パスキー消失時は、自分（操作者）が `INITIAL_REGISTRATION_TOKEN` を再発行して新しいパスキーを登録する runbook（バックアップコードは作らない。D1 のデータはそのまま）。**再登録は既存の `user` 行に `credential` を足す**（新しい user を作らない —— `post` が古い `user_id` に紐づいて孤児になる）。RP_ID を変えざるを得なくなったときも同じ経路。
 - 同期パスキー（iCloud / Google）は署名カウンタが常に 0 → カウンタ退行チェックは `stored !== 0` のときだけ。
 - ⚠️ **RP_ID ロック: `RP_ID = kokemusu.shiraoka.workers.dev` / `ORIGIN = https://kokemusu.shiraoka.workers.dev`** を初回登録より前に固定。後から変えると登録済みパスキーが全部無効。`RP_ID` / `ORIGIN` を変える diff は PR で自動 reject 扱い。セルフホストする人は各自のホスト名で同じルール。
 - ログイン試行のレート制限・一時ロック（`cloudflare-workers-bot-scan-defense`）。ログイン履歴の記録。

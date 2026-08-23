@@ -3,6 +3,9 @@
 SQLite / D1 前提。1インスタンス＝1ユーザーだが、認証情報のためにユーザーレコードは持つ。
 本文とメタデータを分離できる設計にしておく（暗号化と可視化の両立 → [security.md](security.md)）。
 
+2026-08-23 更新: `tag.norm`（表記ゆれの正規化キー）を追加、集計の「日」を `Asia/Tokyo` 固定に確定、
+最初の実スキーマ（`0001`）に入れる範囲を明記。
+
 2026-08-22 更新: 認証をパスキー single-user に確定（`password_hash` 廃止、`credential` / `session` を
 `cloudflare-workers-passkey-auth` の形に合わせた）、API 自動投稿用の **`api_token`** と **`post.title`** を追加。
 
@@ -12,7 +15,7 @@ SQLite / D1 前提。1インスタンス＝1ユーザーだが、認証情報の
 - **日時**: `integer` の epoch ms で統一（passkey skill の ISO `TEXT` は苔むすでは epoch ms に読み替える。PAT skill は epoch ms）。
 - **子テーブルは `user` に `ON DELETE CASCADE`**。⚠️ D1 は `PRAGMA foreign_keys=OFF` を無視するので、親テーブル（`user` / `post`）を**再構築する**マイグレ（NULL→NOT NULL、型変更、rename）は子行を cascade delete する罠（`cloudflare-d1-drizzle-migration`）。`user` の列は最初に決めきり、後から触らない。
 - **本文と title は暗号文、それ以外は平文**（[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。暗号文は `k<鍵ID>.<iv>.<暗号文>` の封筒で、鍵 `BODY_KEY` は Worker Secret。集計・可視化は平文のメタデータだけで成立する。
-- 純粋関数で扱える形を優先（ストリーク計算などは SQL でなく `packages/core` で）。
+- 純粋関数で扱える形を優先（ストリーク計算・日付バケット化などは SQL でなくコアで。置き場所は当面 `apps/web/worker/core/`、共有する相手ができたら `packages/core` に切る）。
 
 ## エンティティ概観
 
@@ -92,14 +95,18 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 | updated_at | integer | |
 | deleted_at | integer? | ソフトデリート（null=生存） |
 
-> created_at はローカルタイムゾーンでの「その日」を集計に使うため、表示TZと集計TZの扱いを決めておく（設定の週開始曜日/TZ）。
+> ✅ **集計の「日」= `Asia/Tokyo` で切る**（2026-08-23）。`created_at` は epoch ms（UTC の一瞬）で保存し、
+> 「その日」はコアの定数 `APP_TZ = "Asia/Tokyo"` を使う純粋関数 `dayKey()` で決める。**`user` に TZ 列は持たない** ——
+> 見る場所で過去のマスが動かないことを優先し、設定化が要るようになったら NULLABLE 列か API パラメータで足す
+> （どちらもテーブル再構築を伴わない）。週の開始曜日も当面は日曜固定。
 
 ### tag
 | カラム | 型 | 備考 |
 | --- | --- | --- |
 | id | text (uuid) | PK |
 | user_id | text | FK → user |
-| name | text | 表示名。`(user_id, name)` で一意 |
+| name | text | 表示名。最初に作られた表記をそのまま保つ（`TypeScript` と書いたなら以後もそう表示する） |
+| norm | text | 正規化キー = `trim` ＋ NFKC ＋ 小文字化。**`(user_id, norm)` で一意**。`TypeScript` / `typescript` / ` typescript ` は同じ石に落ちる。`ＴＳ` → `ts` は別の石（別名は Phase 2 の `tag_alias`）。`COLLATE NOCASE` では ASCII の大小しか吸収できないのでアプリ層で正規化する。NOT NULL |
 | color | text? | 苔の色（可視化） |
 | emoji | text? | 任意 |
 | description | text? | このタグの説明 |
@@ -132,8 +139,9 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 
 これらは **メタデータ（created_at, tag）だけ** で計算でき、本文暗号化と両立する。
 
-- **タグ別 日次ヒートマップ**:
-  `post_tags` JOIN `post` を `tag_id` × `date(created_at)` で GROUP BY、件数を数える。
+- **タグ別 日次ヒートマップ**: `post_tags` JOIN `post` を期間で絞って `created_at` と `tag_id` だけ取り、
+  **`Asia/Tokyo` の「日」へのバケット化はコアの純粋関数 `dayKey()`** で行う（SQLite の `date()` は UTC 基準なので
+  朝 9 時前の苔片が前日にずれる。オフセット加算での回避は TZ を変えたときに壊れる）。
 - **累積（積み上げ）**: 上記を日付昇順で累積和。
 - **ストリーク**: タグ別に投稿のある日付集合を取り、連続日数を計算（純粋関数でやる）。
 - **内訳**: 期間内のタグ別件数。
@@ -142,12 +150,19 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 
 > パフォーマンス: 1ユーザーの個人日記規模なら素朴な集計で十分。必要になったら日次集計テーブル（マテビュー的な `daily_tag_count`）を足す。
 
+## 最初のマイグレーション（`0001`）に入れる範囲
+
+`user` / `credential` / `session` / `post` / `tag` / `post_tags` の 6 つ。`api_token`（Phase 2）・`tag_alias`（Phase 2）・
+`attachment`（Phase 4）は**葉テーブルなので後から追加しても既存テーブルを再構築しない** ＝ 必要になってから足す。
+逆に **`user` / `post` / `tag` は CASCADE の親**なので、NOT NULL にしたい列は `0001` で決めきる（後から NOT NULL 列を
+足す・型を変える・rename するとテーブル再構築 → 子行が消える。`cloudflare-d1-drizzle-migration`）。NULLABLE 列の追加は安全。
+
 ## インデックス（目安）
 
 - `post(user_id, created_at)` ── タイムライン・期間絞り込み。
 - `post(deleted_at)` ── 生存フィルタ。
 - `post_tags(tag_id)` / `post_tags(post_id)` ── 多対多双方向（共起クエリもこれで足りる）。
-- `tag(user_id, name)` UNIQUE ── 重複・補完。
+- `tag(user_id, norm)` UNIQUE ── 表記ゆれの吸収・重複防止・補完。
 - `credential(user_id)` ── 端末一覧。
 - `session(user_id)` / `session(expires_at)` ── 失効・期限切れ掃除。
 - `api_token(token_hash)` UNIQUE ── 認証のホットパス（1 点読み）。

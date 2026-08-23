@@ -1,13 +1,13 @@
 #!/usr/bin/env sh
-# Start the dev sandbox WITH the repo-scoped GitHub token resolved from 1Password.
+# Start (or recreate) the dev sandbox. No credential is involved: the GitHub token is
+# injected per shell by ./shell.sh, so this is plain, idempotent `docker compose up`.
 #
-#   ./up.sh            # = op run --env-file=.docker/sandbox.env -- docker compose up -d
+#   ./up.sh            # = docker compose up -d
 #   ./up.sh --build    # extra args go to `docker compose up`
 #
-# Any other way of starting the container (plain `docker compose up -d`) yields a
-# container WITHOUT a token — by design: compose drops an unresolved `GH_TOKEN:` key,
-# so the agent can commit but not push (fail closed). Run from this directory without
-# -f so docker-compose.override.yml (skills mount) is auto-loaded. ADR-0003 (2026-08-22).
+# Run from this directory without -f so docker-compose.override.yml (skills mount)
+# is auto-loaded. History: until 2026-08-23 this wrapped `op run` and the token rode
+# in the container env; see docs/dev-environment.md §1 for why that moved to exec time.
 set -eu
 cd "$(dirname "$0")"
-exec op run --env-file=.docker/sandbox.env -- docker compose up -d "$@"
+exec docker compose up -d "$@"
