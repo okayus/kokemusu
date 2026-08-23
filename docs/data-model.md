@@ -3,6 +3,9 @@
 SQLite / D1 前提。1インスタンス＝1ユーザーだが、認証情報のためにユーザーレコードは持つ。
 本文とメタデータを分離できる設計にしておく（暗号化と可視化の両立 → [security.md](security.md)）。
 
+2026-08-24 更新: 実スキーマを `drizzle/0001_kokemusu_schema.sql` として生成（[schema.ts](../apps/web/worker/db/schema.ts) が実物）。
+`post_tags(post_id)` は PK の暗黙 index と重複するので張らないことにした。
+
 2026-08-23 更新: `tag.norm`（表記ゆれの正規化キー）を追加、集計の「日」を `Asia/Tokyo` 固定に確定、
 最初の実スキーマ（`0001`）に入れる範囲を明記。
 
@@ -152,7 +155,8 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 
 ## 最初のマイグレーション（`0001`）に入れる範囲
 
-`user` / `credential` / `session` / `post` / `tag` / `post_tags` の 6 つ。`api_token`（Phase 2）・`tag_alias`（Phase 2）・
+✅ **`drizzle/0001_kokemusu_schema.sql` として生成済み**（`user` / `credential` / `session` / `post` / `tag` / `post_tags` の 6 つ。
+ローカル D1 に適用して検証済み。本番へは merge 時に Workers Builds の deploy command が当てる）。`api_token`（Phase 2）・`tag_alias`（Phase 2）・
 `attachment`（Phase 4）は**葉テーブルなので後から追加しても既存テーブルを再構築しない** ＝ 必要になってから足す。
 逆に **`user` / `post` / `tag` は CASCADE の親**なので、NOT NULL にしたい列は `0001` で決めきる（後から NOT NULL 列を
 足す・型を変える・rename するとテーブル再構築 → 子行が消える。`cloudflare-d1-drizzle-migration`）。NULLABLE 列の追加は安全。
@@ -161,7 +165,10 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 
 - `post(user_id, created_at)` ── タイムライン・期間絞り込み。
 - `post(deleted_at)` ── 生存フィルタ。
-- `post_tags(tag_id)` / `post_tags(post_id)` ── 多対多双方向（共起クエリもこれで足りる）。
+- `post_tags(tag_id)` ── 多対多の逆方向（共起クエリもこれで足りる）。
+  **`post_tags(post_id)` は張らない** ── PK `(post_id, tag_id)` が作る暗黙の index
+  `sqlite_autoindex_post_tags_1` が `WHERE post_id = ?` を covering index で捌く（`0001` 適用後の
+  `EXPLAIN QUERY PLAN` で確認済み）。明示的に張ると純粋な書き込みコスト増。
 - `tag(user_id, norm)` UNIQUE ── 表記ゆれの吸収・重複防止・補完。
 - `credential(user_id)` ── 端末一覧。
 - `session(user_id)` / `session(expires_at)` ── 失効・期限切れ掃除。
