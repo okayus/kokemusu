@@ -19,6 +19,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+      - name: Status hub size check (docs/status.md ≤ 40 lines / 3 KB, fixed headings)
+        run: bash .claude/hooks/check-status.sh docs/status.md
       - uses: pnpm/action-setup@v6 # no `version:` — it reads packageManager from package.json
       - uses: actions/setup-node@v7
         with:

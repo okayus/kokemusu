@@ -71,10 +71,10 @@ main へ merge（ruleset: PR 必須・required check `ci`・force push 禁止・
 
 - **不変条件: `main` は常に CI 緑**。Workers Builds は GitHub CI の結果を **待たない** ので、ゲートは merge 時の ruleset に置く。
 - **一度だけの人手（secret-zero）**:
-  1. **カスタムビルドトークン**を先に作る: dash → My Profile → API Tokens → Create Custom Token。**Account / Workers Scripts / Edit ＋ Account / D1 / Edit ＋ Account / Account Settings / Read ＋ User / User Details / Read ＋ User / Memberships / Read**。IP 制限なし・期限なし（Cloudflare の外に出ない）。値はどこにもコピーしない（設定画面で一覧から選ぶだけ）。
-  2. リポ接続: dash → Workers & Pages → Create → Import a repository（GitHub 認可は **Only select repositories** で `okayus/kokemusu` だけ）。
-  3. 設定（下表）。⚠️ **Root directory は "Advanced settings" アコーディオンの中**に隠れている。
-  4. 作成後: Settings → Build → API token をカスタムトークンに差し替え、**Branch control で非本番ブランチビルドを OFF**。
+  1. **My Profile でカスタムトークンを先に作らない**（2026-08-23 に実測: 作っても設定画面の API トークン picker に**出てこない**。picker に並ぶのは dash が生成した他プロジェクトの `<project> Workers Builds` トークンと「新しいトークンを作成する」だけ）。
+  2. リポ接続: dash → Workers & Pages → Create → Continue with GitHub。GitHub App が既にインストール済みなら認可画面は出ず、リポ一覧が直接出る（scope は GitHub 側 Settings → Applications で管理）。
+  3. 設定（下表）。⚠️ **Root directory は「詳細設定 / Advanced settings」アコーディオンの中で「パス」表記**。同じ中に API トークン picker がある: **「新しいトークンを作成する」** を選び `kokemusu Workers Builds` と命名（既定は直前に接続した別プロジェクトのトークンになっている）。「非本番ブランチのビルド」のチェックはこのダイアログで外せる。
+  4. デプロイ → 初回は**手動ビルド**として走る（GitHub の check-run は付かない）。作成後 Settings → ビルド で watch paths の除外を追加。画面別の手順と browser agent 向けの注意は skill 0.3.0 の `references/dashboard-walkthrough.md`。
 
 | 設定 | 値 | 間違えたとき |
 | --- | --- | --- |
@@ -82,12 +82,12 @@ main へ merge（ruleset: PR 必須・required check `ci`・force push 禁止・
 | Root directory（Advanced settings） | `apps/web`（`wrangler.jsonc` のあるパッケージ） | 全コマンドがリポ root で走って失敗 |
 | Build command | `pnpm install --frozen-lockfile && pnpm run build` | lockfile はリポ root にある。pnpm は workspace root を上向きに見つける |
 | Deploy command | `pnpm exec wrangler d1 migrations apply kokemusu-db --remote && pnpm exec wrangler deploy` | migrate が deploy に先行する。`pnpm exec` でリポ pin の wrangler を使う |
-| API token | 上記カスタムトークン（**D1 Edit 入り**） | 既定の自動生成トークンは **D1 権限が無く**、migrate が `Authentication error [code: 10000]` で落ちる（原因を名指ししない） |
+| API token（Advanced settings） | picker の「新しいトークンを作成する」で生成した `kokemusu Workers Builds` | docs は生成トークンに D1 が無いと書くが、2026-08-23 の dash では **D1 Storage (edit) 入り**で migrate が通った。migrate が `Authentication error [code: 10000]` で落ちたら My Profile → API Tokens でそのトークンに D1 Edit を足す（原因を名指ししない） |
 | Branch control | production = `main`、**非本番ブランチビルド OFF** | ⚠️ preview version も **本番 D1** を共有する（`preview_database_id` は `wrangler dev` 専用）。PR preview が本番データを触り、migrate まで走る |
 | Build watch paths（Advanced） | include `*`、exclude `docs/*` と `*.md`（docs-only commit でデプロイしない） | required check `ci` は Workers Builds と独立なので merge ゲートは保たれる。CI 側を `paths-ignore` で間引くのは **不可**（required check が pending で PR が詰まる） |
 
 - **確認**: merge 後に commit の check-run に `Workers Builds: kokemusu` が付く（`gh pr checks` / dash の Builds タブ。`gh api` は deny）。ホストで `wrangler deployments list`、`wrangler d1 migrations list kokemusu-db --remote`、`curl https://kokemusu.shiraoka.workers.dev/health`。
-- **ハマりどころ**: Root directory 未設定（Advanced の中）／既定トークンで migrate だけ落ちる／**push しても何も起きない** = 非本番ブランチ（意図どおり）・watch paths が全部除外・稀に build が作られない（check-run に `Workers Builds:` が無い＝未トリガー。`main` に新しい commit を push して再トリガー。dash の Retry は最新 build の再実行で、取りこぼした commit は拾わない）。
+- **ハマりどころ**: Root directory 未設定（Advanced の中の「パス」）／本番ブランチに `apps/web` が未 merge（設定ミスに見える）／トークンに D1 が無く migrate だけ落ちる／**初回の手動ビルドには check-run が付かない**（未トリガーと誤診しない。push 起動は次の merge で実証）／**push しても何も起きない** = 非本番ブランチ（意図どおり）・watch paths が全部除外・稀に build が作られない（check-run に `Workers Builds:` が無い＝未トリガー。`main` に新しい commit を push して再トリガー。dash の Retry は最新 build の再実行で、取りこぼした commit は拾わない）。
 - Free プラン: 3,000 build 分 / 月、同時 1、20 分タイムアウト。個人規模には十分。
 - `workers.dev` の URL は常に `<worker>.<account-subdomain>.workers.dev`。**苔むすは `https://kokemusu.shiraoka.workers.dev`**（`kokemusu.workers.dev` は存在しない）。account subdomain を変えると全 Worker の URL が変わる → パスキー登録前に確定（下記 RP_ID）。
 
@@ -119,16 +119,16 @@ main へ merge（ruleset: PR 必須・required check `ci`・force push 禁止・
 
 ## セットアップ順（Phase 0）
 
+> 2026-08-23 にすべて完了（[log.md](log.md)）。以下はセルフホスト時の再現用。
+
 1. ~~コンテナ（`docker compose build && ./up.sh`）・token 注入・MCP・docs egress・ruleset~~ → **完了（2026-08-22）**。
 2. **人手（ホスト・対話）**: `wrangler login` → `wrangler d1 create kokemusu-db` → `database_id` の UUID を控える。
 3. **エージェント（コンテナ内）**: 骨格を生成（`apps/web`、`name: kokemusu`、`RP_ID` / `ORIGIN` は本番ホスト名で day 1 固定）→ `pnpm install` → `pnpm check` → ローカルマイグレ → `pnpm dev` で `/health` と `/` を確認 → `claude/<topic>` に commit → push → PR。
 4. **人手（ホスト）**: `database_id` を実 UUID に置換して push（エージェントに UUID を渡して置換させてもよい）。`ci.yml` の typecheck / build / test 化はエージェントが commit 済みのものを **ホストから push**（token に workflows 権限が無い）。
-5. **人手（dash）**: カスタムビルドトークン作成 → リポ接続（Root directory = `apps/web`、上表の通り）→ 非本番ブランチビルド OFF。
+5. **人手（dash）**: リポ接続（Root directory = `apps/web`、API トークンは「新しいトークンを作成する」、非本番ブランチビルド OFF。上表の通り）。
 6. **人手**: PR を merge → Workers Builds が走る → `curl https://kokemusu.shiraoka.workers.dev/health` → `{"status":"ok"}`、`/` → SPA HTML。ホストで `wrangler d1 migrations list kokemusu-db --remote` に `0000_init` が並ぶ。
 7. 以降、ロジック（Phase 1）。
 
-## 現在の状態（2026-08-22）
+## 現在の状態
 
-- サンドボックス: `kokemusu-dev`（node:24）。`./up.sh` で起動、token 注入・fail closed・deny probe・docs egress 10 ドメイン・MCP 2 系統（✔ Connected）の E2E を通過（詳細は `CLAUDE.md` 次のアクション 3）。
-- GitHub: リポ public。`main` ruleset（PR 必須・required check `ci`・force push 禁止・bypass なし）。CI は placeholder（骨格と同時に typecheck / build / test に置換）。
-- Cloudflare: **未着手**（`wrangler login` / `d1 create` / Workers Builds 接続は人手）。本番 URL と RP_ID は `kokemusu.shiraoka.workers.dev` で確定済み。
+[status.md](status.md)（SessionStart hook がセッション開始時に注入）。履歴は [log.md](log.md) と git。

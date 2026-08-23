@@ -5,15 +5,7 @@
 
 ## Phase 0 — スキャフォールド（土台）
 
-> 配線の詳細と人手 / エージェントの分担は [dev-environment.md](dev-environment.md) を参照。
-
-- ~~開発サンドボックス（node:24・egress firewall・1Password からの GitHub token 注入・docs MCP・`modern-web-guidance`）、public リポ、`main` ruleset（PR 必須・required check `ci`・force push 禁止・bypass なし）~~ → **完了（2026-08-22）**。
-- **デプロイ骨格**（`cloudflare-workers-deploy-skeleton`、wrangler 4 / `@cloudflare/vite-plugin` 1.x）: `apps/web` に SPA + API + Cron を 1 Worker で、空の D1 マイグレ込み。**ビジネスロジック = ゼロ**。
-- **デプロイ経路 = Workers Builds（キーレス）**: GitHub に Cloudflare トークンを置かない。人手で `wrangler login` → `wrangler d1 create kokemusu-db` → リポ接続（D1 Edit 入りカスタムビルドトークン・Root directory `apps/web`・非本番ブランチビルド OFF）。`deploy.yml` は作らない。
-- `.github/workflows/ci.yml` を placeholder から typecheck / build / test に置換（人手でホストから push）。
-- **完了条件**: `main` merge → `https://kokemusu.shiraoka.workers.dev/health` 200 ＆ `/` が SPA HTML、`wrangler d1 migrations list kokemusu-db --remote` に `0000_init`。
-- `RP_ID = kokemusu.shiraoka.workers.dev` を `wrangler.jsonc` の `vars` に day 1 で固定（認証そのものは Phase 1。骨格には載せない）。
-- `packages/core`（純粋関数のドメインロジック）はロジックが生えた時点で切る（空パッケージは作らない）。
+**完了（2026-08-23）**。サンドボックス・token 注入・MCP・`main` ruleset（08-22）→ 歩く骨格 `apps/web`（#4）→ Workers Builds キーレス接続・本番 `/health` 200・`0000_init` 適用（08-23）。経緯は [log.md](log.md)、再現手順は [dev-environment.md](dev-environment.md)。`RP_ID` は `wrangler.jsonc` に day 1 で固定済み。`packages/core` はロジックが生えた時点で切る（空パッケージは作らない）。
 
 ## Phase 1 — MVP（毎日使える最小形）
 
@@ -68,11 +60,6 @@
 7. ~~**`post.title` の位置づけ**~~ → ✅ **任意の見出し。手動でも API でも付けられ、UI は既定で隠す**（フォームは本文 1 欄のまま、ショートカット / トグルで見出し欄を出す。タイムラインは見出しのある苔片だけ本文の上に小さく表示。検索は見出しも復号走査に含める。暗号化は本文と同じ鍵）（2026-08-23）。
 8. ~~**mazuoboeru 連携の形**~~ → ✅ **(i) 自分専用**（mazuoboeru の Worker Secret に苔むすの PAT を 1 本、Cron が日次 push）。受け側は汎用のまま＝送り側を知らない設計を [ADR-0002](adr/0002-api-posting-via-receiver-side-pat.md) に記録。per-user (ii) は他の mazuoboeru ユーザが苔むすをセルフホストしたら mazuoboeru 側だけで足す（2026-08-23）。
 
-## 次のアクション候補
+## 次のアクション
 
-- [ ] Phase 0 人手: `wrangler login` → `wrangler d1 create kokemusu-db` → Workers Builds 接続。
-- [ ] 骨格 PR を merge → `/health` 200 を確認。
-- [x] `/grill-with-docs` 2（暗号化レベル）→ ADR-0001、`CONTEXT.md` 作成（2026-08-23）。
-- [x] `/grill-with-docs` 7（`post.title`）→ 任意の見出し（2026-08-23）。
-- [x] `/grill-with-docs` 8（mazuoboeru 連携）→ (i) 自分専用、ADR-0002（2026-08-23）。
-- [ ] 最初の縦切り: 「投稿 → タグ → ヒートマップに1マス点く」を一本通す。
+[status.md](status.md) の「次の 3 手」が正。ここには書かない。
