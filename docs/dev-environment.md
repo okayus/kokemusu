@@ -45,7 +45,8 @@
 
 ### 日常運用
 
-- 起動 `./up.sh` ／ シェル `docker compose exec dev zsh` ／ 停止 `docker compose stop`（env は保持。`down` したら次は必ず `./up.sh`）。
+- 起動 `./up.sh` ／ シェル **`docker exec -it kokemusu-dev zsh`** ／ 停止 `docker compose stop`（env は保持。`down` したら次は必ず `./up.sh`）。
+- ⚠️ **op 無しで `docker compose up -d` を打たない**（2026-08-23 に踏んだ）。token が `environment:` にある＝**コンテナ設定の一部**なので、op を通さない `up` は「設定変更」と判定され、compose が[コンテナを停止して作り直す](https://docs.docker.com/reference/cli/docker/compose/up/)。token は消え、中で動いていた Claude のセッションも落ちる。`docker exec` は作成時の env を継承するだけで再作成しないので、シェルはこちらで取る。
 - `.docker/*` や `docker-compose.yml` を変えたら **`docker compose down && docker compose build && ./up.sh`**（プロジェクトディレクトリで `-f` を付けず＝override 自動ロード）。`down -v` は Claude の認証も消える。
 - コンテナ内 Claude の認証は named volume `claude-config` に永続。期限切れ時は `docker compose exec dev claude` で再ログイン。
 
