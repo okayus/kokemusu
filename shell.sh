@@ -13,21 +13,20 @@
 #    silently dropping the token and every process inside (including a running agent
 #    session). Injecting at exec time keeps `./up.sh` credential-free and idempotent.
 #
-# 2. The interactive process is NOT wrapped in `op run`. `op run` masks secrets on the
-#    stdout/stderr of its child, i.e. it interposes on those streams — an interactive
-#    `docker exec -it` then loses its terminal: the prompt leaks raw escape templates
-#    and the pty falls back to 80x24 (a small window in the corner of your terminal).
-#    So resolve the value first with `op read`, then exec docker with the real
-#    terminal still attached. The value travels in the environment, never in argv,
-#    so it does not show up in `ps` on the host.
+# 2. The interactive process is NOT wrapped in `op run`. `op run` conceals secrets on
+#    the stdout/stderr of its child, i.e. it interposes on those streams — an
+#    interactive `docker exec -it` then loses its terminal: the prompt leaks raw
+#    escape templates and the pty falls back to 80x24. So resolve the value first with
+#    `op read`, then exec docker with the real terminal still attached. The value
+#    travels in the environment, never in argv, so it stays out of `ps` on the host.
 #
 # Fail closed: no 1Password, no token, no push.
-# Skill: sandboxed-agent-github-token-via-1password (exec-time variant, 2026-08-23).
+# Skill: sandboxed-agent-github-token-via-1password 0.2.1 (exec-time variant).
 set -eu
 cd "$(dirname "$0")"
 [ "$#" -gt 0 ] || set -- zsh
 
-container=kokemusu-dev
+container="kokemusu-dev"
 envfile=.docker/sandbox.env
 
 state=$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null || echo missing)
@@ -41,8 +40,12 @@ state=$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null || echo 
   exit 1
 }
 
-# `GH_TOKEN="op://<vault>/<item>/credential"` -> the bare op:// reference
-ref=$(sed -n 's/^[[:space:]]*GH_TOKEN[[:space:]]*=[[:space:]]*//p' "$envfile" | head -1 | tr -d '"'\''')
+# `GH_TOKEN="op://<vault>/<item>/credential"` -> the bare op:// reference.
+# Tolerates an `export` prefix, spaces round the `=`, quotes, a trailing comment,
+# trailing whitespace and CRLF — each of which makes `op read` fail on a reference
+# that looks perfectly correct in the editor.
+ref=$(sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}GH_TOKEN[[:space:]]*=[[:space:]]*//p' "$envfile" \
+      | head -1 | sed 's/[[:space:]]*#.*$//' | tr -d '"'"'"'\r' | sed 's/[[:space:]]*$//')
 case "$ref" in
   op://*) ;;
   *) echo "shell.sh: no op:// reference for GH_TOKEN in $envfile" >&2; exit 1 ;;
@@ -55,4 +58,8 @@ GH_TOKEN=$(op read "$ref") || {
 [ -n "$GH_TOKEN" ] || { echo "shell.sh: resolved GH_TOKEN is empty" >&2; exit 1; }
 export GH_TOKEN
 
-exec docker exec -it -e GH_TOKEN "$container" "$@"
+# -t only when stdin AND stdout are terminals: `./shell.sh zsh -lc '…'` from a script
+# otherwise dies with "cannot attach stdin to a TTY-enabled container", and
+# `./shell.sh … > out.txt` would litter the file with pty escapes and CRLF.
+[ -t 0 ] && [ -t 1 ] && TT=-it || TT=-i
+exec docker exec $TT -e GH_TOKEN "$container" "$@"
