@@ -1,127 +1,134 @@
-# 開発環境・デプロイ基盤（okayus-skills 調査メモ）
+# 開発環境・デプロイ基盤
 
-`okayus-skills` を調査し、苔むす（案A: Cloudflare Workers + D1）に適用できる構成をまとめる。
-これらのスキルは production パターンの抽出で、苔むすのセキュリティ要件と非常に相性が良い。
+苔むす（Cloudflare Workers + D1）の開発環境と、デプロイ / 認証の配線。
+2026-06-05 の okayus-skills 調査メモを **2026-08-22 に現行構成へ全面更新** した
+（旧メモの「GitHub Actions に Cloudflare トークン」「git はホスト側のみ」「node:20」は廃止）。
+
+> このファイルは「どう配線されているか」。日々の規約は `CLAUDE.md`、手順の詳細は各スキルが正。
 
 ## 使うスキルとフェーズ対応
 
 | スキル | 用途 | 苔むすでの使いどころ |
 | --- | --- | --- |
-| `claude-code-docker-sandbox` | 開発をegressファイアウォール付きDockerに隔離 | **Phase 0 最初**。npm/エージェント実行をホストから隔離 |
-| `cloudflare-workers-deploy-skeleton` | SPA+API+Cron を1 Worker・D1・GH Actionsで自動デプロイ | **Phase 0** 骨格構築 |
-| `cloudflare-api-token-permissions` | CIデプロイ用APIトークンの権限マッピング | **Phase 0** CI認証設定／binding追加時の診断 |
-| `cloudflare-d1-drizzle-migration` | D1でdrizzle-kitマイグレを安全に | **Phase 1** 実スキーマ投入時（必読） |
-| `cloudflare-workers-e2e-playwright` | Workers+Vite+HonoのPlaywright e2e | **Phase 1** WebAuthn含むe2e（仮想authenticator） |
-| `cloudflare-workers-bot-scan-defense` | 公開直後のbotスキャン耐性・認証routeのレート制限 | **Phase 1〜** 認証 begin/verify のレート制限 |
-| `cloudflare-d1-weekly-backup-via-pr` | D1を毎週バックアップしPRで保存 | **Phase 3** バックアップ |
-| `cloudflare-cron-to-discord` | Cron→Discord通知 | 任意（リマインド等を作るなら） |
-| `cloudflare-workflows-for-long-tasks` | 30秒超の処理をWorkflowへ | 当面不要（重い処理が出たら） |
+| `claude-code-docker-sandbox` | 開発を egress ファイアウォール付き Docker に隔離（node:24） | **Phase 0 — 構築済み**。npm / エージェント実行をホストから隔離 |
+| `sandboxed-agent-github-token-via-1password` | 1 リポ限定の GitHub PAT を 1Password から起動時だけ注入 | **Phase 0 — 構築済み**。コンテナ内から push / `gh pr create` |
+| `cloudflare-mcp-claude-tooling` | docs MCP・permissions・docs egress・`grill-with-docs` | **Phase 0 — 構築済み** |
+| `cloudflare-workers-deploy-skeleton` | SPA + API + Cron を 1 Worker で、D1 マイグレ込みの「歩く骨格」 | **Phase 0** 骨格構築（wrangler 4 / `@cloudflare/vite-plugin` 1.x） |
+| `cloudflare-workers-builds-keyless-deploy` | Workers Builds で **GitHub に Cloudflare トークンを置かずに** デプロイ ＋ main ruleset | **Phase 0** デプロイ経路（`deploy.yml` は作らない） |
+| `cloudflare-d1-drizzle-migration` | D1 で drizzle-kit を安全に | **Phase 1** 実スキーマ投入時（必読） |
+| `cloudflare-workers-passkey-auth` | パスキー認証（single-user 変種 = spaces / invite なし） | **Phase 1** 認証 |
+| `cloudflare-workers-pat-bearer-auth` | API 自動投稿用 PAT（受け側） | **Phase 2** `POST /api/posts` を `post:write` で開ける |
+| `cloudflare-workers-bot-scan-defense` | 公開直後の bot スキャン耐性・認証 / PAT route のレート制限 | **Phase 1〜** |
+| `cloudflare-workers-e2e-playwright` / `playwright-e2e-in-docker-sandbox` | WebAuthn 仮想 authenticator の e2e をコンテナ内で | **Phase 1** |
+| `cloudflare-d1-weekly-backup-via-pr` | D1 の定期バックアップ | **Phase 3**。public リポなので「git に commit」変種は不可 → keyless 変種（ホスト timer か Worker→R2）を skill 側で追加してから |
+| `cloudflare-api-token-permissions` | CI 用 API トークンの権限診断 | **原則不要**（GitHub に CF トークンを置かない）。Workers Builds のビルドトークンの権限不足を引くときの参照 |
+| `cloudflare-cron-to-discord` / `cloudflare-workflows-for-long-tasks` | Cron 通知 / 30 秒超の処理 | 当面不要 |
 
-## 1. 開発環境コンテナ（claude-code-docker-sandbox）
+## 1. 開発サンドボックス（claude-code-docker-sandbox ＋ token 注入）
 
-**狙い**: npm の postinstall 等のサプライチェーン攻撃を、デフォルト拒否のegressファイアウォール付きコンテナに封じ込める。`npm install` もエージェント実行もコンテナ内、ホストの `~/.ssh` や認証情報には触れない。プライベート日記＝セキュリティ厳重、という方針に直結。
+**狙い**: npm の postinstall 等のサプライチェーン攻撃と、エージェントの実行を、デフォルト拒否の egress ファイアウォール付きコンテナに封じ込める。ホストの `~/.ssh` や認証情報には触れない。
 
-- 構成3ファイル: `.docker/Dockerfile`（Anthropic公式devcontainer image: node:20, 非root `node`ユーザ）、`.docker/init-firewall.sh`（egress許可リスト）、`docker-compose.yml`（VS Code非依存、任意のホストエディタをbind mount）。
-- **egress許可リスト**（苔むす向け）:
-  - `registry.npmjs.org`（npm install 必須）
-  - `api.anthropic.com`（Claude Code がモデルに到達）
-  - `api.cloudflare.com` / `dash.cloudflare.com` / `workers.cloudflare.com`（Cloudflareデプロイ）
-  - GitHub IPレンジは動的取得される
-  - **不要なドメインは消す**（VS Code / Statsig / Sentry 等を残すとDNS失敗でコンテナごと落ちる "telemetry-domain DNS trap"）。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を設定。
-- **境界の鉄則**: `git commit`/`push` は**ホスト側**で行う（GitHubトークンを隔離境界に入れない）。コンテナ内からは `.git` をbind mountして `git status`/`log` の閲覧のみ。
-- **build-time と runtime のネットワーク区別**: ファイアウォールはentrypoint（`up`時）。ツールチェーン導入は`build`時で素通り。苔むすはTSのみなのでRust/Haskellの build-arg は不要。
-- **限界**: 許可ドメイン経由の流出やカーネル攻撃は防げない。許可リストは狭く保つ。真に信頼できないコードはVM/microVMで。
-
-> 完了条件: `docker compose up -d` のログに「Firewall verification passed」2行 → `example.com` は `000`（遮断）、`registry.npmjs.org` は `200`。コンテナ内 `claude` で認証でき、`down/up` 後も保持される。
-
-## 2. Cloudflare の認証方式（2系統あるので注意）
-
-「Cloudflareの認証方式」には **(a) デプロイ用の認証** と **(b) アプリのユーザ認証** の2つがある。苔むすは両方使う。
-
-### (a) Cloudflare へのデプロイ認証
-
-- **ローカル**: `wrangler login`（OAuth, フルアカウントアクセス）。権限の悩みは出ない。
-- **CI（GitHub Actions）**: `CLOUDFLARE_API_TOKEN`（＋`CLOUDFLARE_ACCOUNT_ID`）。**狭い権限のカスタムトークン**を使う。
-- **苔むすの最小トークン権限**（SPA+API+D1構成）:
-  - `Account / Workers Scripts / Edit`
-  - `Account / D1 / Edit`
-  - `Account / Account Settings / Read`
-  - （skeleton では `User Details / Read` も）
-  - Account Resources は自分のアカウントに限定（All accounts にしない）
-- ⚠️ **「Edit Cloudflare Workers」テンプレートを使わない**。D1 / R2 / Queues が**黙って欠落**しており、CIで `wrangler d1 migrations apply --remote` が `code: 7403` で落ちる。**Create Custom Token** で必要分を選ぶ。
-- 権限編集はトークン値を変えない（**Edit**であって**Roll**でない）→ GitHub Secret の更新不要。binding追加で `code: 10000/7403/9106` が出たら `cloudflare-api-token-permissions` の表で引く。
-
-### (b) アプリのユーザ認証（パスキー / WebAuthn）
-
-- 苔むすは単一ユーザのプライベート日記 → **パスキー（WebAuthn）**が最適（[security.md](security.md)）。
-- ⚠️ **RP_ID ロックルール**: RP_ID（ホスト名）は**初回デプロイで固定**。後で変えると登録済みパスキーが全部無効。
-  - **決定済み: RP_ID = `<project>.workers.dev` サブドメイン**（[tech-stack.md](tech-stack.md)）。day 1 から固定し、永続として扱う。
-  - skeleton の `wrangler.jsonc` の `RP_ID` / `ORIGIN` を本番ホスト名に設定 → デプロイ。
-- e2e は `cloudflare-workers-e2e-playwright` の **WebAuthn仮想authenticator** で register/login の配線まで実テスト（`DEV_BYPASS_USER_ID` で逃げない）。
-
-## 3. デプロイ骨格（cloudflare-workers-deploy-skeleton）
-
-ゴール: **`main` push → 本番URLが `/health` 200 ＆ SPA HTMLを返す**、ビジネスロジック=ゼロの「歩く骨格」。
-
-- **3層SPAルーティング**（どれか欠けると `/` が404）:
-  - L1 `wrangler.jsonc`: `assets.not_found_handling: "single-page-application"`
-  - L2 `wrangler.jsonc`: `assets.run_worker_first: true`（後で secureHeaders がSPA HTMLを包める）
-  - L3 `worker/index.ts`: `app.notFound` で `c.env.ASSETS.fetch` に委譲
-- コピー元テンプレ: `wrangler.jsonc` / `worker/{index,cron,types}.ts` / `deploy.yml` / tsconfig+vite / 空の `drizzle/0000_init.sql` / `.dev.vars.example`。
-- **ハマりどころ**:
-  - `pnpm deploy` が pnpm 組込みと衝突 → root の `package.json` で `"deploy": "pnpm --filter <pkg> run deploy"`（明示 `run`）。
-  - `database_id` の `<placeholder>` 放置で失敗 → `wrangler d1 create` 直後に実UUIDへ置換。
-  - `@cloudflare/vite-plugin@0.1.x` は dev で `/__scheduled` を未ルーティング（Cron dev検証は `cloudflare-cron-to-discord` のfallback）。
-- **スコープ外（骨格では作らない）**: 認証・secureHeaders/CSP・ドメインスキーマ・drizzle本体。**デプロイが通ってからロジックを載せる**。
-
-## セットアップ順（苔むす Phase 0）
-
-1. **コンテナ先**: `claude-code-docker-sandbox` の3ファイルを配置 → `docker compose build && up -d` → ファイアウォール検証。以降の作業はコンテナ内。
-2. **ユーザ操作（対話）**: `wrangler login` → `wrangler d1 create kokemusu-db`（`database_id` UUID控え）。
-3. **ユーザ操作**: Custom Token を上記の最小権限で作成 → GitHub Secret `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`。
-4. **エージェント**: skeleton テンプレ生成（`database_id` 即置換）。`RP_ID`/`ORIGIN` は workers.dev 本番ホスト名で固定。
-5. **エージェント**: `pnpm install` → `check` → ローカルマイグレ → dev確認。
-6. **エージェント**: commit（ホスト側push）→ PR → merge → GH Actions グリーン → 本番URLで `/health` 200 確認。
-
-> ※ 現在エージェントはホスト上で動作中。サンドボックス運用にするなら「コンテナを立てて、その中で `claude` を動かす」ワークフローへの切替が必要（要相談）。
-
-## 現在の状態（2026-06-05 構築済み）
-
-サンドボックスを構築・起動・検証済み。
-
-- 配置: `.docker/Dockerfile` / `.docker/init-firewall.sh` / `docker-compose.yml`（egress許可リストは npm/anthropic/cloudflare のまま、Rust/Haskell は false）。
-- イメージ `kokemusu-dev:latest` ビルド済み。コンテナ `kokemusu-dev` 起動中。
-- **ポート**: ホスト `5173` は別プロジェクト（`todo-web-dev-1`）が使用中だったため、**ホスト側を `5273` に変更**（`5273:5173`）。コンテナ内 Vite は 5173、ブラウザからは `http://localhost:5273`。
-- **ファイアウォール検証 OK**: `example.com` → `000`（遮断）、`registry.npmjs.org` → `200`、`api.cloudflare.com` → `404`（到達可）、`api.github.com` 到達可。
-- コンテナ内: 実行ユーザ `node`、`/workspace` に bind mount 済み、`node v20.20.2` / `git` / `gh` / `claude 2.1.x` 導入済み。
-- **pnpm は未導入**（skeleton で使う）。コンテナ内で `corepack enable pnpm`（または `npm i -g pnpm`）で有効化する。corepack は npmjs から取得＝許可済み。
-
-### コンテナ内 Claude のコンテキスト（モデルA採用）
-
-開発は**コンテナ内の `claude`** で行う（モデルA）。コンテナは別インスタンスなので、ホストの設定は継承されない。
-橋渡しとして以下を用意済み:
-
-- **`CLAUDE.md`（プロジェクトルート）**: `/workspace` 直下にあり自動ロードされる。概要・確定済み決定・働き方の規約（関数のみ/classなし、git はホスト側、骨格優先）・docs目次・参照スキル一覧を集約。
-- **スキル**: `okayus-skills` はマウント外で見えないため、`docker-compose.override.yml`（**gitignore対象・ローカル専用**）で
-  `../okayus-skills/skills` を `/home/node/.claude/skills:ro` に**読み取り専用マウント**。単一ソース（コピーせずdriftなし）。
-  → コンテナ内 `claude` から cloudflare-* / sandbox の9スキルが**スキルとして**認識される（検証済み）。
-  コミット対象の `docker-compose.yml` はセルフホスト配布用に汚さない。
-- **継承されないもの（割り切り）**: この会話の履歴、ホストの自動メモリ（要点は `CLAUDE.md` に転記）、ホスト側の他スキル（kokemusu に無関係）。
-
-### 次にやる対話ステップ（ユーザ操作）
-
-1. コンテナ内で Claude Code 認証（初回のみ。`/home/node/.claude` は named volume で永続）:
-   ```sh
-   docker compose exec dev zsh
-   # in-container:
-   claude
-   #   表示されたURLをホストのブラウザで開く → 承認 → 出たコードを貼り戻す
-   #   /status で account と model を確認
-   ```
-2. その後、コンテナ内で deploy-skeleton 構築へ（`wrangler login` / `wrangler d1 create kokemusu-db` / Custom Token 作成）。
+- 構成: `.docker/Dockerfile`（Anthropic 公式 devcontainer 由来、**node:24**、非 root `node`）、`.docker/init-firewall.sh`（egress 許可リスト）、`docker-compose.yml`（VS Code 非依存、`/workspace` に bind mount）、`up.sh`（後述）。
+- **起動は `./up.sh`**（= `op run --env-file=.docker/sandbox.env -- docker compose up -d`）。plain `docker compose up -d` でも動くが **GitHub token が無い**（fail closed。起動ログに `NOTE: GH_TOKEN absent`）。
+- 起動時に毎回: firewall → `claude` / `pnpm` を npm から更新 → git の credential helper（env の `$GH_TOKEN` を読む inline 関数・ディスクに書かない）と sandbox 用の git identity → コンテナ scope の Claude Code 既定を `bypassPermissions` に（リポ共有の `.claude/settings.json` は触らない）。
+- **egress 許可リスト**（`.docker/init-firewall.sh`）:
+  - 致命（解決失敗でコンテナ起動失敗）: `registry.npmjs.org`・`api.anthropic.com`・Cloudflare API・`developers.cloudflare.com`・`docs.mcp.cloudflare.com`・GitHub（IP レンジは動的取得）。
+  - **OPTIONAL**（解決失敗でも起動継続）: Statsig・本番ホスト `kokemusu.shiraoka.workers.dev`・docs ホスト（`mcp.context7.com` `developer.mozilla.org` `react.dev` `hono.dev` `orm.drizzle.team` `vite.dev` `vitest.dev` `zod.dev` `developer.chrome.com` `web.dev`）。IP ベースなので同じ anycast 上の兄弟サイトも通る＝読み取り用途として許容。`mcp.context7.com` は AWS ELB で IP が変わり得る → Context7 が応答しなくなったらコンテナ再起動で再解決。
+- **ポート**: ホスト `5273` → コンテナ `5173`（5173 は汎用 Vite、5373 は mazuoboeru）。ブラウザからは `http://localhost:5273`。
+- **Claude Code のツール**（共有設定、`cloudflare-mcp-claude-tooling`）: `.mcp.json` に `cloudflare-docs`（公式・認証不要）と `context7`（MDN 含むライブラリ docs）。`.claude/settings.json` の deny = force push・`main` への push（refspec 形含む）・リモートブランチ削除・`gh pr merge`・`gh auth`・`gh api`（bypass 下でも deny だけは効く）。`modern-web-guidance`（Google Chrome・Apache-2.0）を `.claude/skills/` に同梱、`grill-with-docs` も同梱。okayus-skills は gitignore の `docker-compose.override.yml` で `~/.claude/skills:ro` に read-only mount（コピーしない＝drift なし）。
+- **限界**: 許可ドメイン経由の流出やカーネル攻撃は防げない。許可リストは狭く保つ。
 
 ### 日常運用
 
-- 起動: `docker compose up -d` ／ シェル: `docker compose exec dev zsh` ／ 停止: `docker compose stop`。
-- `git commit`/`push` は**ホスト側**で（トークンを境界に入れない）。コンテナ内は閲覧のみ。
-- `.docker/*` や `docker-compose.yml` を変えたら `docker compose down && build && up -d`。`down -v` は認証も消える。
+- 起動 `./up.sh` ／ シェル `docker compose exec dev zsh` ／ 停止 `docker compose stop`（env は保持。`down` したら次は必ず `./up.sh`）。
+- `.docker/*` や `docker-compose.yml` を変えたら **`docker compose down && docker compose build && ./up.sh`**（プロジェクトディレクトリで `-f` を付けず＝override 自動ロード）。`down -v` は Claude の認証も消える。
+- コンテナ内 Claude の認証は named volume `claude-config` に永続。期限切れ時は `docker compose exec dev claude` で再ログイン。
+
+## 2. GitHub 運用（コンテナ内 git・2026-08-22 から）
+
+旧「commit / push はホスト側」は廃止。コンテナ内の Claude が自分で push と PR まで行う（`sandboxed-agent-github-token-via-1password`）。
+
+- **token**: 自分の GitHub **fine-grained PAT**、Repository access = `okayus/kokemusu` のみ、**Contents + Pull requests**（Metadata 自動）、**Workflows なし**、**90 日**。1Password にだけ保存し、`.docker/sandbox.env`（gitignore・`op://` 参照のみ）経由で `./up.sh` が **コンテナの env にだけ** 注入する。ディスクには書かない（`~/.git-credentials` も `~/.config/gh/hosts.yml` も無い）。
+- **流れ**: `claude/<topic>` ブランチで commit → `git push -u origin claude/<topic>` → `gh pr create --fill` → PR URL を報告。**merge は人間がホストで**（`gh pr merge` は deny）。状態確認は `gh pr view` / `gh pr checks`（fine-grained PAT は Checks REST API を呼べないので `gh api …/check-runs` は使えない＝deny でもある）。merge 後は `git fetch --prune`。
+- **`.github/workflows/**` は人間がホストから push**（token に `workflows` 権限が無く、remote が `without \`workflow\` scope` で拒否する。これは意図的＝エージェントが自分の CI ゲートを書き換えられない）。
+- **禁止**: token の印字（`echo $GH_TOKEN`）・`gh auth login`（ディスクに書く）・URL への埋め込み。
+- **境界は ruleset と token scope**。Claude Code の allow / deny は「行儀の良いエージェント」向けの利便で、セキュリティ境界ではない。侵害されたサンドボックスが出来ること = この 1 リポの非保護ブランチへの push と PR 操作（CI 緑の PR の merge 含む）、token 失効まで。
+- **ローテーション**: 90 日ごと（1Password の `expires` が一次情報）。push が `401` になったらまず期限を疑う。
+
+## 3. Cloudflare の認証方式（2 系統）
+
+「Cloudflare の認証」には **(a) デプロイ用** と **(b) アプリのユーザ認証** の 2 つがある。
+
+### (a) デプロイ = Workers Builds（キーレス）
+
+**GitHub にも、リポにも、サンドボックスにも Cloudflare のトークンは置かない。** Cloudflare 側の git 連携 CI（Workers Builds）が GitHub App 経由でリポを pull してビルド・デプロイする（`cloudflare-workers-builds-keyless-deploy`）。GitHub Actions は test / typecheck のみで **Actions Secrets は空**。2026-08 時点で Cloudflare API に OIDC は無く、これが唯一の「GitHub 側ゼロ credential」経路。
+
+```
+PR ブランチ push → GitHub Actions `ci`（typecheck / build / test。秘密なし）
+main へ merge（ruleset: PR 必須・required check `ci`・force push 禁止・bypass なし）
+   └→ Workers Builds: install → build → D1 migrate → wrangler deploy（Cloudflare 側）
+```
+
+- **不変条件: `main` は常に CI 緑**。Workers Builds は GitHub CI の結果を **待たない** ので、ゲートは merge 時の ruleset に置く。
+- **一度だけの人手（secret-zero）**:
+  1. **カスタムビルドトークン**を先に作る: dash → My Profile → API Tokens → Create Custom Token。**Account / Workers Scripts / Edit ＋ Account / D1 / Edit ＋ Account / Account Settings / Read ＋ User / User Details / Read ＋ User / Memberships / Read**。IP 制限なし・期限なし（Cloudflare の外に出ない）。値はどこにもコピーしない（設定画面で一覧から選ぶだけ）。
+  2. リポ接続: dash → Workers & Pages → Create → Import a repository（GitHub 認可は **Only select repositories** で `okayus/kokemusu` だけ）。
+  3. 設定（下表）。⚠️ **Root directory は "Advanced settings" アコーディオンの中**に隠れている。
+  4. 作成後: Settings → Build → API token をカスタムトークンに差し替え、**Branch control で非本番ブランチビルドを OFF**。
+
+| 設定 | 値 | 間違えたとき |
+| --- | --- | --- |
+| Worker 名 | `kokemusu`（`wrangler.jsonc` の `name` と一致） | 不一致だと 2 つ目の Worker ができる |
+| Root directory（Advanced settings） | `apps/web`（`wrangler.jsonc` のあるパッケージ） | 全コマンドがリポ root で走って失敗 |
+| Build command | `pnpm install --frozen-lockfile && pnpm run build` | lockfile はリポ root にある。pnpm は workspace root を上向きに見つける |
+| Deploy command | `pnpm exec wrangler d1 migrations apply kokemusu-db --remote && pnpm exec wrangler deploy` | migrate が deploy に先行する。`pnpm exec` でリポ pin の wrangler を使う |
+| API token | 上記カスタムトークン（**D1 Edit 入り**） | 既定の自動生成トークンは **D1 権限が無く**、migrate が `Authentication error [code: 10000]` で落ちる（原因を名指ししない） |
+| Branch control | production = `main`、**非本番ブランチビルド OFF** | ⚠️ preview version も **本番 D1** を共有する（`preview_database_id` は `wrangler dev` 専用）。PR preview が本番データを触り、migrate まで走る |
+| Build watch paths（Advanced） | include `*`、exclude `docs/*` と `*.md`（docs-only commit でデプロイしない） | required check `ci` は Workers Builds と独立なので merge ゲートは保たれる。CI 側を `paths-ignore` で間引くのは **不可**（required check が pending で PR が詰まる） |
+
+- **確認**: merge 後に commit の check-run に `Workers Builds: kokemusu` が付く（`gh pr checks` / dash の Builds タブ。`gh api` は deny）。ホストで `wrangler deployments list`、`wrangler d1 migrations list kokemusu-db --remote`、`curl https://kokemusu.shiraoka.workers.dev/health`。
+- **ハマりどころ**: Root directory 未設定（Advanced の中）／既定トークンで migrate だけ落ちる／**push しても何も起きない** = 非本番ブランチ（意図どおり）・watch paths が全部除外・稀に build が作られない（check-run に `Workers Builds:` が無い＝未トリガー。`main` に新しい commit を push して再トリガー。dash の Retry は最新 build の再実行で、取りこぼした commit は拾わない）。
+- Free プラン: 3,000 build 分 / 月、同時 1、20 分タイムアウト。個人規模には十分。
+- `workers.dev` の URL は常に `<worker>.<account-subdomain>.workers.dev`。**苔むすは `https://kokemusu.shiraoka.workers.dev`**（`kokemusu.workers.dev` は存在しない）。account subdomain を変えると全 Worker の URL が変わる → パスキー登録前に確定（下記 RP_ID）。
+
+### (b) アプリのユーザ認証 = パスキー（single-user）＋ API 用 PAT
+
+- **パスキー / WebAuthn**（`cloudflare-workers-passkey-auth` の single-user 変種: spaces / invite なし）。初回登録は一度きりの `INITIAL_REGISTRATION_TOKEN`（Worker Secret）で開け、登録後に削除して閉じる。セッションは `sessions` 行に裏打ちされた HS256 JWT（失効可能・30 日 sliding）、Cookie は host-only `__Host-`。詳細は [security.md](security.md) / [data-model.md](data-model.md)。
+- ⚠️ **RP_ID ロック: `RP_ID = kokemusu.shiraoka.workers.dev` / `ORIGIN = https://kokemusu.shiraoka.workers.dev`** を `wrangler.jsonc` の `vars` に **初回パスキー登録より前に固定**。後で変えると登録済みパスキーが **全部無効**（custom domain に移るなら登録より前に）。`RP_ID` / `ORIGIN` を変える diff は PR で自動 reject 扱い。
+- ローカルは `.dev.vars`（gitignore）で `RP_ID=localhost` / `ORIGIN=http://localhost:5173` に上書き（`.dev.vars` は `vars` より優先、本番には届かない）。
+- **API 自動投稿 = PAT（Bearer）**（`cloudflare-workers-pat-bearer-auth`）: 苔むすが発行し（設定画面・セッション必須・一度だけ表示）、送り側（まず mazuoboeru）が保持して `Authorization: Bearer kokemusu_pat_…` で `POST /api/posts`。苔むすは送り側を知らない。DB には `sha256(token + PAT_PEPPER)` だけ（pepper は Worker Secret）。→ [features.md](features.md) §7。
+- e2e: `cloudflare-workers-e2e-playwright` の **WebAuthn 仮想 authenticator** で register / login の配線まで実テスト（`DEV_BYPASS_USER_ID` で逃げない）。コンテナ内で走らせる手順は `playwright-e2e-in-docker-sandbox`（Chromium をイメージに焼く・`127.0.0.1` bind・rate limit binding を外す）。
+
+## 4. デプロイ骨格（cloudflare-workers-deploy-skeleton）
+
+ゴール: **`main` merge → Workers Builds → `https://kokemusu.shiraoka.workers.dev/health` が 200 ＆ `/` が SPA HTML**、ビジネスロジック = ゼロ。
+
+- toolchain: **wrangler 4 ＋ `@cloudflare/vite-plugin` 1.x**（skill の現行基準。0.1.x / wrangler 3 はローカル Cron endpoint が無い）。node は host / sandbox / CI / Workers Builds とも **24**。
+- 配置: pnpm workspace。`apps/web/` に SPA（`src/`）と Worker（`worker/{index,cron,types}.ts`）と `wrangler.jsonc`、`drizzle/0000_init.sql`（`SELECT 1;` の空マイグレ＝パイプライン検証用）、`.dev.vars.example`。`packages/core`（純粋関数のドメインロジック）はロジックが生えた時点で切る（空パッケージは作らない）。
+- **3 層 SPA ルーティング**（どれか欠けると `/` が 404）:
+  - L1 `wrangler.jsonc`: `assets.not_found_handling: "single-page-application"`
+  - L2 `wrangler.jsonc`: `assets.run_worker_first: true`（後で secureHeaders が SPA HTML を包める）
+  - L3 `worker/index.ts`: `app.notFound` で `c.env.ASSETS.fetch` に委譲
+- **`deploy.yml` は作らない**（skill のテンプレのうち GitHub Actions デプロイ部分は Workers Builds に置き換え）。`.github/workflows/ci.yml` = `pnpm install --frozen-lockfile` → typecheck → build → test（job id `ci` は ruleset の required check 名。**変えない**）。
+- 型は `wrangler types`（`worker-configuration.d.ts` を生成。binding を変えたら再生成）。`@cloudflare/workers-types` は使わない。
+- **ハマりどころ**:
+  - `pnpm deploy` が pnpm 組込みと衝突 → root の `package.json` は `"deploy": "pnpm --filter @kokemusu/web run deploy"`（明示 `run`）。
+  - `database_id` の placeholder → `wrangler d1 create kokemusu-db` の UUID に置換してからでないとデプロイできない（UUID は秘密ではない。public リポに commit してよい）。
+  - ローカル Cron は `curl "http://localhost:5173/cdn-cgi/handler/scheduled?cron=<expr>"`（vite-plugin 1.x / wrangler 4）。Dashboard から手動発火は **できない**。
+- **スコープ外（骨格では作らない）**: 認証・secureHeaders / CSP・ドメインスキーマ・drizzle-orm / drizzle-kit（実スキーマが要るまで入れない。入れる前に `cloudflare-d1-drizzle-migration` 必読）。**デプロイが通ってからロジックを載せる。**
+
+## セットアップ順（Phase 0）
+
+1. ~~コンテナ（`docker compose build && ./up.sh`）・token 注入・MCP・docs egress・ruleset~~ → **完了（2026-08-22）**。
+2. **人手（ホスト・対話）**: `wrangler login` → `wrangler d1 create kokemusu-db` → `database_id` の UUID を控える。
+3. **エージェント（コンテナ内）**: 骨格を生成（`apps/web`、`name: kokemusu`、`RP_ID` / `ORIGIN` は本番ホスト名で day 1 固定）→ `pnpm install` → `pnpm check` → ローカルマイグレ → `pnpm dev` で `/health` と `/` を確認 → `claude/<topic>` に commit → push → PR。
+4. **人手（ホスト）**: `database_id` を実 UUID に置換して push（エージェントに UUID を渡して置換させてもよい）。`ci.yml` の typecheck / build / test 化はエージェントが commit 済みのものを **ホストから push**（token に workflows 権限が無い）。
+5. **人手（dash）**: カスタムビルドトークン作成 → リポ接続（Root directory = `apps/web`、上表の通り）→ 非本番ブランチビルド OFF。
+6. **人手**: PR を merge → Workers Builds が走る → `curl https://kokemusu.shiraoka.workers.dev/health` → `{"status":"ok"}`、`/` → SPA HTML。ホストで `wrangler d1 migrations list kokemusu-db --remote` に `0000_init` が並ぶ。
+7. 以降、ロジック（Phase 1）。
+
+## 現在の状態（2026-08-22）
+
+- サンドボックス: `kokemusu-dev`（node:24）。`./up.sh` で起動、token 注入・fail closed・deny probe・docs egress 10 ドメイン・MCP 2 系統（✔ Connected）の E2E を通過（詳細は `CLAUDE.md` 次のアクション 3）。
+- GitHub: リポ public。`main` ruleset（PR 必須・required check `ci`・force push 禁止・bypass なし）。CI は placeholder（骨格と同時に typecheck / build / test に置換）。
+- Cloudflare: **未着手**（`wrangler login` / `d1 create` / Workers Builds 接続は人手）。本番 URL と RP_ID は `kokemusu.shiraoka.workers.dev` で確定済み。
