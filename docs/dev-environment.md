@@ -29,9 +29,10 @@
 **狙い**: npm の postinstall 等のサプライチェーン攻撃と、エージェントの実行を、デフォルト拒否の egress ファイアウォール付きコンテナに封じ込める。ホストの `~/.ssh` や認証情報には触れない。
 
 - 構成: `.docker/Dockerfile`（Anthropic 公式 devcontainer 由来、**node:24**、非 root `node`）、`.docker/init-firewall.sh`（egress 許可リスト）、`docker-compose.yml`（VS Code 非依存、`/workspace` に bind mount）、`up.sh`（後述）。
-- **起動は `./up.sh`**（= `op run --env-file=.docker/sandbox.env -- docker compose up -d`）。plain `docker compose up -d` でも動くが **GitHub token が無い**（fail closed。起動ログに `NOTE: GH_TOKEN absent`）。
+- **起動は `./up.sh`**（= `op run --env-file=.docker/sandbox.env -- docker compose up -d`）。plain `docker compose up -d` でも動くが **GitHub token が無い**（fail closed。起動ログに `NOTE: GH_TOKEN is empty`）。
+- ⚠️ **2026-08-23**: compose の `GH_TOKEN:`（値なし＝ shell env から拾う形）が**このホストで解決されなくなった**（`docker inspect` の `Config.Env` に `=` の無い裸の `GH_TOKEN` が入り、コンテナ側は未設定）。`./up.sh` を通しても token が入らないので、`GH_TOKEN: "${GH_TOKEN:-}"` の明示補間に変更した。
 - **token の状態は起動ログで分かる**: `docker compose logs dev | grep GH_TOKEN` →
-  `present (len=93)` = 注入成功（値は出さず長さだけ）／ `is empty` = compose が空文字で渡した ／ `is unset` = compose がキーごと落とした（＝ `op run` を通していない起動）。
+  `present (len=93)` = 注入成功（値は出さず長さだけ）／ `is empty` = compose が解決できなかった（`./up.sh` を通していない、または op → compose の受け渡し不良）／ `is unset` = キー自体がコンテナに届いていない。
   ⚠️ ホストで `op run --env-file=.docker/sandbox.env -- env` を見ると値は **`<concealed by 1Password>`（24 文字）にマスクされる** ので、
   「24 文字 = 壊れている」ではない。実際の長さを見たいときは `op run --env-file=.docker/sandbox.env -- sh -c 'echo ${#GH_TOKEN}'`（出力が秘密と一致しないのでマスクされない）。
 - 起動時に毎回: firewall → `claude` / `pnpm` を npm から更新 → git の credential helper（env の `$GH_TOKEN` を読む inline 関数・ディスクに書かない）と sandbox 用の git identity → コンテナ scope の Claude Code 既定を `bypassPermissions` に（リポ共有の `.claude/settings.json` は触らない）。

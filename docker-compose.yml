@@ -47,18 +47,25 @@ services:
       POWERLEVEL9K_DISABLE_GITSTATUS: "true"
       TZ: Asia/Tokyo
       # Repo-scoped GitHub fine-grained PAT (okayus/kokemusu only; Contents + Pull
-      # requests; no Workflows; 90-day expiry). No value here on purpose: compose
-      # resolves it from the `docker compose` process env — i.e. from `op run` in
-      # ./up.sh — and REMOVES the key when unset, silently, so a plain
-      # `docker compose up -d` yields a container that can commit but not push
-      # (fail closed). The startup NOTE below is the only signal, and it separates
-      # the two failure shapes: `is unset` = compose never got the variable (not
-      # started via ./up.sh), `is empty` = it got an empty one. `present (len=N)`
-      # prints the length only, never the value. The token lives
+      # requests; no Workflows; 90-day expiry). No value in this file: it is
+      # interpolated from the `docker compose` process env — i.e. from `op run` in
+      # ./up.sh — and falls back to "" so a plain `docker compose up -d` yields a
+      # container that can commit but not push (fail closed). The startup NOTE
+      # below is the only signal and separates the failure shapes: `is empty` =
+      # compose resolved nothing (not started via ./up.sh, or op -> compose broke),
+      # `is unset` = the key never reached the container at all, `present (len=N)`
+      # = injected (length only, never the value). The token lives
       # only in 1Password (.docker/sandbox.env holds the op:// reference) and in
       # this container's env; nothing writes it to disk.
       # Skill: sandboxed-agent-github-token-via-1password.
-      GH_TOKEN:
+      #
+      # 2026-08-23: the bare `GH_TOKEN:` (null value) form stopped working on this
+      # host — `docker inspect` showed an UNRESOLVED bare `GH_TOKEN` entry (no `=`)
+      # in Config.Env, i.e. compose forwarded the key to the engine instead of
+      # resolving it from its own environment, so the container got nothing even
+      # when started via ./up.sh. Explicit interpolation resolves in the compose
+      # process (which `op run` populates) and still fails closed: unset -> "".
+      GH_TOKEN: "${GH_TOKEN:-}"
     ports:
       # host:container — host 5273 avoids collision with other local dev servers.
       # Inside the container Vite listens on 5173; reach it at http://localhost:5273.
