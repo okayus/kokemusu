@@ -94,7 +94,8 @@ main へ merge（ruleset: PR 必須・required check `ci`・force push 禁止・
 ### (b) アプリのユーザ認証 = パスキー（single-user）＋ API 用 PAT
 
 - **パスキー / WebAuthn**（`cloudflare-workers-passkey-auth` の single-user 変種: spaces / invite なし）。初回登録は一度きりの `INITIAL_REGISTRATION_TOKEN`（Worker Secret）で開け、登録後に削除して閉じる。セッションは `sessions` 行に裏打ちされた HS256 JWT（失効可能・30 日 sliding）、Cookie は host-only `__Host-`。詳細は [security.md](security.md) / [data-model.md](data-model.md)。
-- ⚠️ **RP_ID ロック: `RP_ID = kokemusu.shiraoka.workers.dev` / `ORIGIN = https://kokemusu.shiraoka.workers.dev`** を `wrangler.jsonc` の `vars` に **初回パスキー登録より前に固定**。後で変えると登録済みパスキーが **全部無効**（custom domain に移るなら登録より前に）。`RP_ID` / `ORIGIN` を変える diff は PR で自動 reject 扱い。
+- ⚠️ **RP_ID ロック: `RP_ID = kokemusu.shiraoka.workers.dev` / `ORIGIN = https://kokemusu.shiraoka.workers.dev`** を `wrangler.jsonc` の `vars` に **初回パスキー登録より前に固定**。後で変えると登録済みパスキーが **全部無効**。`RP_ID` / `ORIGIN` を変える diff は PR で自動 reject 扱い。
+- ✅ **2026-08-23 決定: custom domain を待たずロックしてよい**（[roadmap.md](roadmap.md) 決めること 1）。独自ドメインを取っても**ログインの origin は `workers.dev` のまま**にする。移行が必要になったら `RP_ID`/`ORIGIN` 変更 → 既存パスキー無効 → `INITIAL_REGISTRATION_TOKEN` 再発行 → 端末 2 台を再登録。その際 **既存の `user` 行に `credential` を足す**（新 user を作ると `post` が孤児になる）。single-user なので費用は「2 台の再登録」だけ。
 - ローカルは `.dev.vars`（gitignore）で `RP_ID=localhost` / `ORIGIN=http://localhost:5173` に上書き（`.dev.vars` は `vars` より優先、本番には届かない）。
 - **API 自動投稿 = PAT（Bearer）**（`cloudflare-workers-pat-bearer-auth`）: 苔むすが発行し（設定画面・セッション必須・一度だけ表示）、送り側（まず mazuoboeru）が保持して `Authorization: Bearer kokemusu_pat_…` で `POST /api/posts`。苔むすは送り側を知らない。DB には `sha256(token + PAT_PEPPER)` だけ（pepper は Worker Secret）。→ [features.md](features.md) §7。
 - e2e: `cloudflare-workers-e2e-playwright` の **WebAuthn 仮想 authenticator** で register / login の配線まで実テスト（`DEV_BYPASS_USER_ID` で逃げない）。コンテナ内で走らせる手順は `playwright-e2e-in-docker-sandbox`（Chromium をイメージに焼く・`127.0.0.1` bind・rate limit binding を外す）。

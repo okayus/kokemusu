@@ -81,6 +81,10 @@ Phase 1 MVP の最初の縦切り。**完了したらこのファイルは削除
 - CSRF: `/api/*` の非 GET は `Origin === ORIGIN`（`403 csrf_origin_mismatch`）。
 - `secureHeaders` + CSP。**`vite dev` の HMR インライン preamble と衝突する**（skill `cloudflare-workers-e2e-playwright`）ので
   dev と本番で分ける。レート制限は `ratelimits` binding（skill `cloudflare-workers-bot-scan-defense`）。
+- **single-user 固有の要件**: `register/verify` は **`user` 行が既にあるなら新しい user を作らず、その行に `credential` を足す**
+  （`INITIAL_REGISTRATION_TOKEN` が一致する場合のみ）。skill の既定は「初期トークンの再発行 = 新しい owner user」だが、
+  苔むすは 1 人 1 インスタンスで `post` が `user_id` に紐づくため、新 user を作ると**過去の苔片が全部孤児になる**。
+  この 1 行が「全パスキー紛失からの復帰」と「将来 RP_ID を変えたくなったときの再登録」の両方を安くする。
 - 人手（ホスト）: `SESSION_SECRET` と `INITIAL_REGISTRATION_TOKEN` を `wrangler secret put` →
   **端末 2 台**登録 → `wrangler secret delete INITIAL_REGISTRATION_TOKEN` で閉じる。
 - 検証: 本番でログイン / ログアウト、未認証で `GET /api/auth/me` が 401、`register/begin` が 403。
@@ -131,10 +135,16 @@ Markdown レンダリング / 全文検索 / 投稿の編集・削除 UI（`dele
 
 ## 着手前に人手で確認すること（ホスト側）
 
-1. **本番マイグレーションの適用経路**: Workers Builds の deploy command に `d1 migrations apply --remote` が
-   含まれているか（`0000_init` が手動適用だった場合、PR1 のテーブルが本番に出来ずアプリが 500 になる）。
-   含まれていなければ dash で deploy command を直すか、merge 後にホストから `pnpm db:migrate:prod` を回す運用にする。
-2. **独自ドメインの最終判断**（PR2 の前。RP_ID ロック）。
+1. **本番マイグレーションの適用経路**: 設定値は [dev-environment.md](../dev-environment.md) §3(a) の表に記録済み
+   （Deploy command = `pnpm exec wrangler d1 migrations apply kokemusu-db --remote && pnpm exec wrangler deploy`）。
+   dash の実物と一致しているかは 30 秒で見られる（dash → Workers & Pages → kokemusu → 設定 → ビルド → ビルド構成）。
+   **決定的な答えは PR1 が出す**: merge 後にホストで `pnpm exec wrangler d1 migrations list kokemusu-db --remote` が
+   未適用 0 件なら deploy command が migrate している。1 件残っていたら dash を直すか、
+   merge 後にホストから `pnpm db:migrate:prod` を回す運用にする（PR1 は D1 に触るルートを持たないので、
+   どちらでも本番は無傷 —— これが PR1 を先頭に置く理由でもある）。
+2. ~~独自ドメインの最終判断~~ → ✅ **`RP_ID = kokemusu.shiraoka.workers.dev` を永久固定でよい**（2026-08-23）。
+   将来 custom domain を取っても**ログインの origin は `workers.dev` のまま**（RP_ID は origin の登録可能サフィックスで
+   なければならず、`kokemusu.example.com` では既存パスキーが使えない）。移りたくなったときの逃げ道は下の PR2 の要件を参照。
 3. コンテナの `GH_TOKEN`（`./up.sh` で起動しないと push / PR ができない）。
 
 ## リスク

@@ -52,7 +52,11 @@
 実装に入る前にここを確定させたい。未決のものは `/grill-with-docs` で詰め、結論は `CONTEXT.md` / `docs/adr/` に残す。
 
 1. ~~**デプロイ方式**~~ → ✅ **案A Cloudflare Workers + D1**（2026-06-05）、**経路は Workers Builds キーレス**（2026-08-22）。
-   ✅ 本番ドメイン = **`kokemusu.shiraoka.workers.dev`** で確定（RP_ID もこれ）。custom domain へ移るなら**初回パスキー登録より前**。
+   ✅ 本番ドメイン = **`kokemusu.shiraoka.workers.dev`** で確定（RP_ID もこれ）。
+   ✅ **2026-08-23: custom domain を待たず `RP_ID` を永久固定してよい**と判断。独自ドメインを取る可能性は残るが、
+   その場合もログインの origin は `workers.dev` のまま（RP_ID は origin の登録可能サフィックスである必要があるため）。
+   どうしても移るなら「`RP_ID`/`ORIGIN` 変更 → 既存パスキー無効 → `INITIAL_REGISTRATION_TOKEN` 再発行 → 端末 2 台を再登録」で、
+   **既存の `user` 行に `credential` を足す**（新しい user を作らない = 苔片が孤児にならない）。
 2. ~~**暗号化レベル**~~ → ✅ **(B) アプリ層の本文暗号化を Phase 1 から、鍵は Worker Secret。(C) は不採用**（2026-08-23、[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。全文検索は復号して走査。`title` も本文と同じく暗号化。
 3. ~~**認証方式**~~ → ✅ **パスキーのみ（single-user。パスワード / TOTP は作らない）＋ API は PAT**（2026-08-22）。リカバリ = 端末 2 台登録 ＋ 自分（操作者）が `INITIAL_REGISTRATION_TOKEN` を再発行して新しいパスキーを登録する runbook。
 4. ~~**UI トーン**~~ → ✅ **ミニマル ＋ 苔の言葉と色**（2026-08-23）。骨格は実用ミニマルのまま、苔らしさは用語（苔片）・
