@@ -26,7 +26,7 @@
 - **タグ別ヒートマップ**（可視化1種）。
 - **パスキー認証（single-user）**: `INITIAL_REGISTRATION_TOKEN` で一度だけ登録を開けて閉じる、端末 2 台登録、リカバリ runbook。安全な Cookie/セッション、HTTPS/HSTS、CSP、認証 route のレート制限（`cloudflare-workers-bot-scan-defense`）。
 - WebAuthn 仮想 authenticator の e2e（コンテナ内）。
-- 本文/メタデータ分離の設計だけ仕込む（暗号化は後でも入れられるように）。
+- **本文のアプリ層暗号化 (B)**: 最初の実データより前に。`BODY_KEY`（Worker Secret、1Password にも控える）、メタデータは平文、検索は復号して走査（[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。
 
 ## Phase 2 — 振り返りを豊かに
 
@@ -40,7 +40,7 @@
 
 ## Phase 3 — 堅牢・安心
 
-- 本文のアプリ層暗号化(B)、必要ならクライアント側暗号化(C)（「決めること」2 の結論に従う）。
+- ~~本文のアプリ層暗号化(B)~~ → Phase 1 に前倒し（ADR-0001）。端末側 E2E (C) は採用しない。鍵ローテーション手順（`k2` を足して順次再暗号化）。
 - D1 バックアップ: **public リポなので「git に commit」変種は不可** → keyless 変種（ホスト timer か Worker→R2）を skill 側に足してから。暗号化バックアップ。
 - インポート、ログイン履歴 UI。
 - セルフホスト配布物の整備（案B: `docker compose up` 一発、セットアップ/運用ドキュメント）。
@@ -60,17 +60,19 @@
 
 1. ~~**デプロイ方式**~~ → ✅ **案A Cloudflare Workers + D1**（2026-06-05）、**経路は Workers Builds キーレス**（2026-08-22）。
    ✅ 本番ドメイン = **`kokemusu.shiraoka.workers.dev`** で確定（RP_ID もこれ）。custom domain へ移るなら**初回パスキー登録より前**。
-2. **暗号化レベル**: MVP は (A) インフラ暗号化のみ？ 本文暗号化(B)/E2E(C) はいつ入れる？（全文検索の方式と `title` の扱いに影響）→ **未決（grill）**
+2. ~~**暗号化レベル**~~ → ✅ **(B) アプリ層の本文暗号化を Phase 1 から、鍵は Worker Secret。(C) は不採用**（2026-08-23、[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。全文検索は復号して走査。`title` も本文と同じく暗号化。
 3. ~~**認証方式**~~ → ✅ **パスキーのみ（single-user。パスワード / TOTP は作らない）＋ API は PAT**（2026-08-22）。リカバリ = 端末 2 台登録 ＋ 自分（操作者）が `INITIAL_REGISTRATION_TOKEN` を再発行して新しいパスキーを登録する runbook。
 4. **UI トーン**: 苔の世界観をどこまで前面に出すか（情緒重視 ↔ 実用ミニマル）。
 5. ~~**monorepo にするか**~~ → ✅ **pnpm workspace**。まず `apps/web` の単一パッケージ、`packages/core` はロジックが生えたら。
 6. **タグの構造**: フラットで開始。階層化は必要が出てから。
-7. **`post.title` の位置づけ**: API 自動投稿の機械的な見出し専用か、手動投稿にも開くか、暗号化対象に含めるか、一覧 / 検索でどう使うか。→ **未決（grill）**
-8. **mazuoboeru 連携の形**: (i) 自分専用（mazuoboeru の Worker Secret に PAT 1 本、Cron が日次 push）か、(ii) per-user（mazuoboeru の各ユーザが自分の苔むす PAT を登録。送り側に暗号化保存・配送台帳が要る）か。受け側の作りは同じ。→ **未決（grill）**
+7. ~~**`post.title` の位置づけ**~~ → ✅ **任意の見出し。手動でも API でも付けられ、UI は既定で隠す**（フォームは本文 1 欄のまま、ショートカット / トグルで見出し欄を出す。タイムラインは見出しのある苔片だけ本文の上に小さく表示。検索は見出しも復号走査に含める。暗号化は本文と同じ鍵）（2026-08-23）。
+8. ~~**mazuoboeru 連携の形**~~ → ✅ **(i) 自分専用**（mazuoboeru の Worker Secret に苔むすの PAT を 1 本、Cron が日次 push）。受け側は汎用のまま＝送り側を知らない設計を [ADR-0002](adr/0002-api-posting-via-receiver-side-pat.md) に記録。per-user (ii) は他の mazuoboeru ユーザが苔むすをセルフホストしたら mazuoboeru 側だけで足す（2026-08-23）。
 
 ## 次のアクション候補
 
 - [ ] Phase 0 人手: `wrangler login` → `wrangler d1 create kokemusu-db` → Workers Builds 接続。
 - [ ] 骨格 PR を merge → `/health` 200 を確認。
-- [ ] `/grill-with-docs` で 2・7・8 を確定 → `CONTEXT.md` / ADR。
+- [x] `/grill-with-docs` 2（暗号化レベル）→ ADR-0001、`CONTEXT.md` 作成（2026-08-23）。
+- [x] `/grill-with-docs` 7（`post.title`）→ 任意の見出し（2026-08-23）。
+- [x] `/grill-with-docs` 8（mazuoboeru 連携）→ (i) 自分専用、ADR-0002（2026-08-23）。
 - [ ] 最初の縦切り: 「投稿 → タグ → ヒートマップに1マス点く」を一本通す。

@@ -40,7 +40,7 @@
   3. **WebSearch → WebFetch** — WebSearch は Anthropic 側で実行されるので egress 不要（返るのはタイトルと URL）。見つけた URL が allowlist 外なら取得できないので 1 に戻る。
 - **HTML / CSS / UI を書く前に `modern-web-guidance` を読む**: `<dialog>`・popover・`<details>`・`<form>` のネイティブ検証・anchor positioning・container queries・subgrid・view transitions・`:has()` など**プラットフォームにある機能を React / JS で再発明しない**。Baseline を確認し、ガイドの anti-pattern 節にある古い書き方を避ける。可視化（ヒートマップ・積み上げ・苔の庭）は自作 SVG が基本（`docs/visualization.md`）。
 - **git: コンテナ内で `claude/<topic>` に commit → `git push -u origin claude/<topic>` → `gh pr create --fill` → PR の URL を報告する。merge は人間がホストで行う**（`gh pr merge` / `gh api` は deny）。PR・CI の状態は `gh pr view` / `gh pr checks`（fine-grained PAT は Checks REST API を呼べない）。**token は印字しない（`echo $GH_TOKEN` 禁止）・`gh auth login` しない・URL に埋めない。** `.github/workflows/**` は人間がホストから push（token に `workflows` 権限が無く remote が拒否する）。merge 後は `git fetch --prune`。
-- セキュリティ最優先。本文（センシティブ）は将来暗号化、日時・タグ等メタデータは平文にして可視化集計と両立させる方針（`docs/security.md`）。
+- セキュリティ最優先。**本文（と見出し）は Phase 1 から Worker がアプリ層で暗号化（鍵 `BODY_KEY` は Worker Secret・1Password にも控える）、日時・タグ等メタデータは平文**で可視化集計と両立（`docs/adr/0001-body-encrypted-at-app-layer.md`、`docs/security.md`）。端末側 E2E (C) は不採用。用語は `CONTEXT.md`。
 - Claude Code 自体の機能・設定で不明な点は https://code.claude.com/docs/llms.txt を WebFetch して確認する。
 
 ## 参照スキル（okayus-skills）
