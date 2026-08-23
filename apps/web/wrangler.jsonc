@@ -25,12 +25,9 @@
     {
       "binding": "DB",
       "database_name": "kokemusu-db",
-      // TODO(Phase 0, human): replace with the UUID printed by
-      //   wrangler d1 create kokemusu-db
-      // (run on the host after `wrangler login`). Not a secret — commit the real
-      // UUID. `wrangler deploy` fails loudly while this placeholder remains;
-      // local dev (`pnpm dev`) works regardless.
-      "database_id": "<REPLACE_WITH_UUID_FROM_wrangler_d1_create_kokemusu-db>",
+      // Created 2026-08-23 on the host: `wrangler d1 create kokemusu-db` (region APAC).
+      // Not a secret; Workers Builds' deploy command applies migrations against it.
+      "database_id": "ca1fbe56-999a-4bc9-b297-1c0b5578b4c5",
       "migrations_dir": "drizzle"
     }
   ],
