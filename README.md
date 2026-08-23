@@ -31,24 +31,27 @@
 | [docs/visualization.md](docs/visualization.md) | 可視化のアイデア（核心） |
 | [docs/security.md](docs/security.md) | セキュリティ・プライバシー設計 |
 | [docs/tech-stack.md](docs/tech-stack.md) | 技術選定とデプロイ方式 |
-| [docs/dev-environment.md](docs/dev-environment.md) | 開発環境コンテナ・Cloudflare認証・デプロイ骨格（okayus-skills 調査） |
+| [docs/dev-environment.md](docs/dev-environment.md) | 開発サンドボックス・GitHub token 注入・Workers Builds キーレスデプロイ・デプロイ骨格 |
 | [docs/data-model.md](docs/data-model.md) | データモデル |
 | [docs/roadmap.md](docs/roadmap.md) | ロードマップ（MVP → 拡張） |
 
-## 想定ディレクトリ構成（実装時）
+## ディレクトリ構成
 
 ```
 kokemusu/
-├── docs/              # この企画ドキュメント群
-├── apps/
-│   └── web/           # React 19 + Vite フロントエンド
-├── server/            # Hono API（Workers / Node 両対応）
-├── packages/
-│   └── core/          # ドメインロジック（純粋関数・ランタイム非依存）
-└── migrations/        # DB スキーマ（SQLite / D1）
+├── apps/web/            # 1 Worker に全部: React 19 + Vite の SPA（src/）＋ Hono API / Cron（worker/）
+│   ├── drizzle/         #   D1 マイグレーション（wrangler d1 migrations apply）
+│   └── wrangler.jsonc   #   Worker 名 kokemusu・3 層 SPA ルーティング・D1・Cron・RP_ID
+├── packages/            # （予定）core = ドメインロジックの純粋関数。ロジックが生えた時点で切る
+├── docs/                # この企画ドキュメント群
+├── .docker/ + up.sh     # 開発サンドボックス（docker-compose.yml と合わせて）
+└── .github/workflows/   # ci.yml = typecheck / build / test（デプロイは Workers Builds、GitHub に秘密なし）
 ```
+
+pnpm workspace。`pnpm dev`（コンテナ内 5173 → ホスト 5273）/ `pnpm check` / `pnpm test` / `pnpm build` はルートから。
 
 ## ステータス
 
-🌱 **企画段階** ── アイデアをまとめ、デプロイ方式は **案A（Cloudflare Workers + D1）** に決定。
-次は Phase 0 スキャフォールド。残りの未決定事項は [docs/roadmap.md](docs/roadmap.md) の「決めること」を参照。
+🌱 **Phase 0（土台）** ── 企画 docs、開発サンドボックス、public リポ ＋ `main` ruleset、**デプロイ骨格（`apps/web`、ロジック = ゼロ）** まで。
+次は人手で Cloudflare 側（`wrangler d1 create kokemusu-db` → Workers Builds 接続）→ `https://kokemusu.shiraoka.workers.dev/health` が 200 になったら Phase 1。
+未決定事項は [docs/roadmap.md](docs/roadmap.md) の「決めること」を参照。

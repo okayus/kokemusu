@@ -62,16 +62,14 @@ Workers / D1 / WebAuthn を実地で扱うのが学習になること。
 - 型は厳密に（`strict` ON）。Zod スキーマから型を導出して二重定義を避ける。
 - テスト: Vitest（ドメイン純粋関数と API 境界を重点的に）。
 
-## 想定ディレクトリ構成
+## ディレクトリ構成（2026-08-22 の骨格）
 
 ```
 kokemusu/
-├── apps/web/        # React 19 + Vite（SPA）
-├── server/          # Hono（Workers/Node 両対応のエントリ）
-├── packages/core/   # ドメインロジック：純粋関数（投稿・タグ・集計）
-├── packages/db/     # Drizzle スキーマ & クエリ（SQLite/D1）
-├── migrations/      # マイグレーション
-└── docs/            # 本企画ドキュメント
+├── apps/web/            # 1 Worker: SPA（src/）＋ Hono API / Cron（worker/）＋ D1 マイグレ（drizzle/）＋ wrangler.jsonc
+├── packages/core/       # （予定）ドメインロジック：純粋関数（投稿・タグ・集計）。ロジックが生えた時点で切る
+└── docs/                # 本企画ドキュメント
 ```
 
-> ※ monorepo にするか単一パッケージにするかは規模次第。MVP は単一パッケージ＋フォルダ分割でも可。
+> pnpm workspace（`apps/*` と `packages/*`）。Drizzle のスキーマは実スキーマが要る Phase 1 で `apps/web/worker/db/` に置き、
+> 別パッケージ（`packages/db`）に切るかは規模を見てから。Node 向けエントリ（案B）は Hono の別 entry を足すだけなので `server/` は作らない。

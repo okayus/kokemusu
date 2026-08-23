@@ -1,4 +1,4 @@
-# test/lint/typecheck only. Deploys are done by Workers Builds (Cloudflare side) =
+# test/typecheck/build only. Deploys are done by Workers Builds (Cloudflare side) =
 # no Cloudflare secret exists in this repo's Actions (cloudflare-workers-builds-keyless-deploy).
 # The main ruleset requires this workflow's job id `ci` as a status check — keep the name.
 name: CI
@@ -19,8 +19,15 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      # Placeholder until the walking skeleton lands (cloudflare-workers-deploy-skeleton).
-      # Then: pnpm/action-setup + actions/setup-node (node 24, cache pnpm) +
-      # `pnpm install --frozen-lockfile` + `pnpm -r run check` / build / test.
-      - name: Placeholder (docs + sandbox only, no code yet)
-        run: echo "ci placeholder — replace with typecheck/build/test once the skeleton exists"
+      - uses: pnpm/action-setup@v6 # no `version:` — it reads packageManager from package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24 # same major as the sandbox image and Workers Builds' default
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck (wrangler types + tsc)
+        run: pnpm -r run check
+      - name: Build
+        run: pnpm -r run build
+      - name: Test
+        run: pnpm -r run test
