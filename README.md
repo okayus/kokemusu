@@ -46,7 +46,7 @@ kokemusu/
 │   └── wrangler.jsonc   #   Worker 名 kokemusu・3 層 SPA ルーティング・D1・Cron・RP_ID
 ├── packages/            # （予定）core = ドメインロジックの純粋関数。ロジックが生えた時点で切る
 ├── docs/                # この企画ドキュメント群
-├── .docker/ + up.sh     # 開発サンドボックス（docker-compose.yml と合わせて）
+├── .docker/ + up.sh + shell.sh  # 開発サンドボックス（docker-compose.yml と合わせて。token は shell.sh で注入）
 └── .github/workflows/   # ci.yml = typecheck / build / test（デプロイは Workers Builds、GitHub に秘密なし）
 ```
 

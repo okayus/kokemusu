@@ -1,8 +1,7 @@
 # Drives Anthropic's published devcontainer image (.docker/Dockerfile) without
-# VS Code. Start with ./up.sh (resolves the sandbox GitHub token from 1Password),
-# then `docker exec -it kokemusu-dev zsh`. A plain `docker compose up -d` also works
-# but leaves the container WITHOUT a token (it can commit, not push) — by design,
-# AND it recreates an already-running container, dropping a token that was there.
+# VS Code. Start with ./up.sh (= docker compose up -d, no credential), then open a
+# shell with ./shell.sh — that is where the repo-scoped GitHub token enters, resolved
+# from 1Password and injected into that shell only. This file never carries a secret.
 #
 # Project: kokemusu (苔むす). Host port 5273 (5173 = generic Vite, 5373 = mazuoboeru).
 services:
@@ -47,33 +46,15 @@ services:
       ANTHROPIC_MODEL: "claude-fable-5"
       POWERLEVEL9K_DISABLE_GITSTATUS: "true"
       TZ: Asia/Tokyo
-      # Repo-scoped GitHub fine-grained PAT (okayus/kokemusu only; Contents + Pull
-      # requests; no Workflows; 90-day expiry). No value in this file: it is
-      # interpolated from the `docker compose` process env — i.e. from `op run` in
-      # ./up.sh — and falls back to "" so a plain `docker compose up -d` yields a
-      # container that can commit but not push (fail closed). The startup NOTE
-      # below is the only signal and separates the failure shapes: `is empty` =
-      # compose resolved nothing (not started via ./up.sh, or op -> compose broke),
-      # `is unset` = the key never reached the container at all, `present (len=N)`
-      # = injected (length only, never the value). The token lives
-      # only in 1Password (.docker/sandbox.env holds the op:// reference) and in
-      # this container's env; nothing writes it to disk.
-      # Skill: sandboxed-agent-github-token-via-1password.
-      #
-      # 2026-08-23: the bare `GH_TOKEN:` (null value) form stopped working on this
-      # host — `docker inspect` showed an UNRESOLVED bare `GH_TOKEN` entry (no `=`)
-      # in Config.Env, i.e. compose forwarded the key to the engine instead of
-      # resolving it from its own environment, so the container got nothing even
-      # when started via ./up.sh. Explicit interpolation resolves in the compose
-      # process (which `op run` populates) and still fails closed: unset -> "".
-      #
-      # SHARP EDGE of that fix: the token is now part of the container's config,
-      # so a plain `docker compose up -d` (no op run) is a config CHANGE and
-      # compose stops and RECREATES the container — silently dropping the token
-      # and killing every process in it. Start with ./up.sh, then get a shell with
-      # `docker exec -it kokemusu-dev zsh` (docker exec inherits the env set at
-      # container creation and never reconciles), NOT `docker compose up`/`exec`.
-      GH_TOKEN: "${GH_TOKEN:-}"
+      # The repo-scoped GitHub PAT is deliberately NOT here. Putting it in
+      # `environment:` makes it part of the container config, so any
+      # `docker compose up -d` that doesn't go through `op run` is a config change:
+      # compose stops and RECREATES the container, silently dropping the token and
+      # every process inside (2026-08-23). It is injected per shell instead:
+      # ./shell.sh = `op run --env-file=.docker/sandbox.env -- docker exec -e GH_TOKEN …`.
+      # The credential helper below reads $GH_TOKEN at push time, so it works in
+      # exactly those shells and nowhere else. Skill:
+      # sandboxed-agent-github-token-via-1password (exec-time variant).
     ports:
       # host:container — host 5273 avoids collision with other local dev servers.
       # Inside the container Vite listens on 5173; reach it at http://localhost:5273.
@@ -89,9 +70,10 @@ services:
     # - pnpm lives in the container layer and vanishes on recreation; reinstall it too
     #   (corepack enable fails: /usr/local/bin isn't writable by node).
     # - git: credential helper = inline sh that echoes $GH_TOKEN at push time (nothing
-    #   under ~/.git-credentials), plus a distinguishable sandbox identity. ~/.gitconfig
-    #   is container-layer, so both are re-applied every start. `$$` = literal `$`
-    #   (compose interpolates `$VAR` at parse time).
+    #   under ~/.git-credentials; the variable exists only in ./shell.sh shells), plus
+    #   a distinguishable sandbox identity. ~/.gitconfig is container-layer, so both
+    #   are re-applied every start. `$$` = literal `$` (compose interpolates `$VAR`
+    #   at parse time).
     # - defaultMode=bypassPermissions goes into the CONTAINER-scope user settings
     #   (named volume), NOT the repo-shared .claude/settings.json — host sessions
     #   keep normal prompting. Safe in here: the firewall is the boundary and deny
@@ -106,8 +88,7 @@ services:
               git config --global user.name 'Claude (kokemusu sandbox)' &&
               git config --global user.email 'claude-sandbox@users.noreply.github.com' ||
               echo 'WARN: git credential/identity setup failed') &&
-             ([ -n \"$$GH_TOKEN\" ] && echo \"NOTE: GH_TOKEN present (len=$${#GH_TOKEN})\" ||
-              echo \"NOTE: GH_TOKEN $${GH_TOKEN+is empty}$${GH_TOKEN-is unset} - this container can commit but NOT push. Start it via ./up.sh\") &&
+             echo 'NOTE: no GitHub token in the container env by design - open a shell with ./shell.sh to push / gh pr create' &&
              ([ -s /home/node/.claude/settings.json ] || echo '{}' > /home/node/.claude/settings.json) &&
              (jq '.permissions.defaultMode = \"bypassPermissions\"' /home/node/.claude/settings.json > /tmp/cs.json &&
               mv /tmp/cs.json /home/node/.claude/settings.json ||

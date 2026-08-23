@@ -38,7 +38,7 @@
 
 - `.claude/settings.json`: 日常コマンドの allow。deny = force push・`main` への push（`HEAD:main` 等の refspec 形も）・リモートブランチ削除・`gh pr merge`・`gh auth`・`gh api`（コンテナ既定の bypassPermissions では deny だけが効く）。`hooks.SessionStart` → `.claude/hooks/session-start.sh`。
 - `.mcp.json`: `cloudflare-docs`（認証不要）と `context7`（キー無し）。`.claude/skills/`: `grill-with-docs`（決定を `CONTEXT.md` / ADR に落とす）、`handoff`（進捗の書き戻し）、`modern-web-guidance`（出自と版は `skills-lock.json`、更新は `npx skills update`）。
-- GitHub token はコンテナの **env にだけ** `./up.sh`（= `op run --env-file=.docker/sandbox.env -- docker compose up -d`）で注入。plain `docker compose up -d` では token 無し = fail closed。firewall allowlist と反映手順（`docker compose down && docker compose build && ./up.sh`）は `docs/dev-environment.md` §1。
+- GitHub token は **`./shell.sh` が開くシェルにだけ** 注入（= `op run --env-file=.docker/sandbox.env -- docker exec -e GH_TOKEN kokemusu-dev zsh`）。コンテナ設定には載せない（`./up.sh` = plain `docker compose up -d`、資格情報なし・冪等）。op 無しのシェルは token 無し = fail closed。firewall allowlist と反映手順（`docker compose down && docker compose build && ./up.sh`）は `docs/dev-environment.md` §1。
 
 ## 参照スキル（okayus-skills。コンテナには `~/.claude/skills:ro`）
 

@@ -28,13 +28,16 @@
 
 **狙い**: npm の postinstall 等のサプライチェーン攻撃と、エージェントの実行を、デフォルト拒否の egress ファイアウォール付きコンテナに封じ込める。ホストの `~/.ssh` や認証情報には触れない。
 
-- 構成: `.docker/Dockerfile`（Anthropic 公式 devcontainer 由来、**node:24**、非 root `node`）、`.docker/init-firewall.sh`（egress 許可リスト）、`docker-compose.yml`（VS Code 非依存、`/workspace` に bind mount）、`up.sh`（後述）。
-- **起動は `./up.sh`**（= `op run --env-file=.docker/sandbox.env -- docker compose up -d`）。plain `docker compose up -d` でも動くが **GitHub token が無い**（fail closed。起動ログに `NOTE: GH_TOKEN is empty`）。
-- ⚠️ **2026-08-23**: compose の `GH_TOKEN:`（値なし＝ shell env から拾う形）が**このホストで解決されなくなった**（`docker inspect` の `Config.Env` に `=` の無い裸の `GH_TOKEN` が入り、コンテナ側は未設定）。`./up.sh` を通しても token が入らないので、`GH_TOKEN: "${GH_TOKEN:-}"` の明示補間に変更した。
-- **token の状態は起動ログで分かる**: `docker compose logs dev | grep GH_TOKEN` →
-  `present (len=93)` = 注入成功（値は出さず長さだけ）／ `is empty` = compose が解決できなかった（`./up.sh` を通していない、または op → compose の受け渡し不良）／ `is unset` = キー自体がコンテナに届いていない。
-  ⚠️ ホストで `op run --env-file=.docker/sandbox.env -- env` を見ると値は **`<concealed by 1Password>`（24 文字）にマスクされる** ので、
-  「24 文字 = 壊れている」ではない。実際の長さを見たいときは `op run --env-file=.docker/sandbox.env -- sh -c 'echo ${#GH_TOKEN}'`（出力が秘密と一致しないのでマスクされない）。
+- 構成: `.docker/Dockerfile`（Anthropic 公式 devcontainer 由来、**node:24**、非 root `node`）、`.docker/init-firewall.sh`（egress 許可リスト）、`docker-compose.yml`（VS Code 非依存、`/workspace` に bind mount、**秘密を一切持たない**）、`up.sh`（= `docker compose up -d`）、`shell.sh`（token 付きのシェル。後述）。
+- **起動は `./up.sh`**（= `docker compose up -d`。**資格情報なし・冪等**）。**GitHub token は exec 時にシェル単位で注入**: `./shell.sh`（= `op run --env-file=.docker/sandbox.env -- docker exec -it -e GH_TOKEN kokemusu-dev zsh`）。
+  token を持つのはこのスクリプトで開いたシェル（とその子 = Claude / git / gh）だけ。コンテナの設定（`docker inspect`）にも PID 1 にも載らない。
+  `./shell.sh claude --continue` のように引数でコマンドも渡せる。
+- **なぜコンテナ env ではなく exec 時か（2026-08-23 の実測）**:
+  1. 値なしの `GH_TOKEN:`（shell env からの pass-through）が**このホストで解決されなくなった**（`docker inspect` の `Config.Env` に `=` の無い裸の `GH_TOKEN` が入り、コンテナ側は未設定）。
+  2. `"${GH_TOKEN:-}"` の明示補間に直すと入るが、token が**コンテナ設定の一部**になる。すると op を通さない `docker compose up -d` が「設定変更」と判定され、compose が[コンテナを停止して作り直す](https://docs.docker.com/reference/cli/docker/compose/up/) → token 消失 + 中の Claude セッションも消える。
+  3. exec 時注入なら `docker compose up -d` に秘密が絡まないので何度打っても安全。`docker exec -e NAME`（値なし）はホストプロセスの env から転送し、未設定なら何も渡さない = fail closed のまま。
+- **確認**: `./shell.sh` の中で `test -n "$GH_TOKEN" && echo "len=${#GH_TOKEN}"`（fine-grained PAT は 93 文字。値は印字しない）。`docker exec -it kokemusu-dev zsh`（op 無し）で入ったシェルには無い＝意図どおり。
+  ⚠️ ホストで `op run -- env` を見ると値は **`<concealed by 1Password>`（24 文字）にマスクされる** ので「24 文字 = 壊れている」ではない。長さは `op run --env-file=.docker/sandbox.env -- sh -c 'echo ${#GH_TOKEN}'` で。
 - 起動時に毎回: firewall → `claude` / `pnpm` を npm から更新 → git の credential helper（env の `$GH_TOKEN` を読む inline 関数・ディスクに書かない）と sandbox 用の git identity → コンテナ scope の Claude Code 既定を `bypassPermissions` に（リポ共有の `.claude/settings.json` は触らない）。
 - **egress 許可リスト**（`.docker/init-firewall.sh`）:
   - 致命（解決失敗でコンテナ起動失敗）: `registry.npmjs.org`・`api.anthropic.com`・Cloudflare API・`developers.cloudflare.com`・`docs.mcp.cloudflare.com`・GitHub（IP レンジは動的取得）。
@@ -45,16 +48,15 @@
 
 ### 日常運用
 
-- 起動 `./up.sh` ／ シェル **`docker exec -it kokemusu-dev zsh`** ／ 停止 `docker compose stop`（env は保持。`down` したら次は必ず `./up.sh`）。
-- ⚠️ **op 無しで `docker compose up -d` を打たない**（2026-08-23 に踏んだ）。token が `environment:` にある＝**コンテナ設定の一部**なので、op を通さない `up` は「設定変更」と判定され、compose が[コンテナを停止して作り直す](https://docs.docker.com/reference/cli/docker/compose/up/)。token は消え、中で動いていた Claude のセッションも落ちる。`docker exec` は作成時の env を継承するだけで再作成しないので、シェルはこちらで取る。
+- 起動 `./up.sh` ／ **token 付きシェル `./shell.sh`**（`./shell.sh claude --continue` も可）／ token 無しのシェル `docker exec -it kokemusu-dev zsh` ／ 停止 `docker compose stop`。
 - `.docker/*` や `docker-compose.yml` を変えたら **`docker compose down && docker compose build && ./up.sh`**（プロジェクトディレクトリで `-f` を付けず＝override 自動ロード）。`down -v` は Claude の認証も消える。
-- コンテナ内 Claude の認証は named volume `claude-config` に永続。期限切れ時は `docker compose exec dev claude` で再ログイン。
+- コンテナ内 Claude の認証は named volume `claude-config` に永続。期限切れ時は `./shell.sh claude` で再ログイン。
 
 ## 2. GitHub 運用（コンテナ内 git・2026-08-22 から）
 
 旧「commit / push はホスト側」は廃止。コンテナ内の Claude が自分で push と PR まで行う（`sandboxed-agent-github-token-via-1password`）。
 
-- **token**: 自分の GitHub **fine-grained PAT**、Repository access = `okayus/kokemusu` のみ、**Contents + Pull requests**（Metadata 自動）、**Workflows なし**、**90 日**。1Password にだけ保存し、`.docker/sandbox.env`（gitignore・`op://` 参照のみ）経由で `./up.sh` が **コンテナの env にだけ** 注入する。ディスクには書かない（`~/.git-credentials` も `~/.config/gh/hosts.yml` も無い）。
+- **token**: 自分の GitHub **fine-grained PAT**、Repository access = `okayus/kokemusu` のみ、**Contents + Pull requests**（Metadata 自動）、**Workflows なし**、**90 日**。1Password にだけ保存し、`.docker/sandbox.env`（gitignore・`op://` 参照のみ）経由で **`./shell.sh` が開くシェルの env にだけ** 注入する（コンテナ設定には載せない）。ディスクには書かない（`~/.git-credentials` も `~/.config/gh/hosts.yml` も無い）。
 - **流れ**: `claude/<topic>` ブランチで commit → `git push -u origin claude/<topic>` → `gh pr create --fill` → PR URL を報告。**merge は人間がホストで**（`gh pr merge` は deny）。状態確認は `gh pr view` / `gh pr checks`（fine-grained PAT は Checks REST API を呼べないので `gh api …/check-runs` は使えない＝deny でもある）。merge 後は `git fetch --prune`。
 - **`.github/workflows/**` は人間がホストから push**（token に `workflows` 権限が無く、remote が `without \`workflow\` scope` で拒否する。これは意図的＝エージェントが自分の CI ゲートを書き換えられない）。
 - **禁止**: token の印字（`echo $GH_TOKEN`）・`gh auth login`（ディスクに書く）・URL への埋め込み。
@@ -128,7 +130,7 @@ main へ merge（ruleset: PR 必須・required check `ci`・force push 禁止・
 
 > 2026-08-23 にすべて完了（[log.md](log.md)）。以下はセルフホスト時の再現用。
 
-1. ~~コンテナ（`docker compose build && ./up.sh`）・token 注入・MCP・docs egress・ruleset~~ → **完了（2026-08-22）**。
+1. ~~コンテナ（`docker compose build && ./up.sh`）・token 注入・MCP・docs egress・ruleset~~ → **完了（2026-08-22）**。token 注入は 2026-08-23 に exec 時（`./shell.sh`）へ移行。
 2. **人手（ホスト・対話）**: `wrangler login` → `wrangler d1 create kokemusu-db` → `database_id` の UUID を控える。
 3. **エージェント（コンテナ内）**: 骨格を生成（`apps/web`、`name: kokemusu`、`RP_ID` / `ORIGIN` は本番ホスト名で day 1 固定）→ `pnpm install` → `pnpm check` → ローカルマイグレ → `pnpm dev` で `/health` と `/` を確認 → `claude/<topic>` に commit → push → PR。
 4. **人手（ホスト）**: `database_id` を実 UUID に置換して push（エージェントに UUID を渡して置換させてもよい）。`ci.yml` の typecheck / build / test 化はエージェントが commit 済みのものを **ホストから push**（token に workflows 権限が無い）。
