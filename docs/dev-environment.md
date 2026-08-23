@@ -29,13 +29,14 @@
 **狙い**: npm の postinstall 等のサプライチェーン攻撃と、エージェントの実行を、デフォルト拒否の egress ファイアウォール付きコンテナに封じ込める。ホストの `~/.ssh` や認証情報には触れない。
 
 - 構成: `.docker/Dockerfile`（Anthropic 公式 devcontainer 由来、**node:24**、非 root `node`）、`.docker/init-firewall.sh`（egress 許可リスト）、`docker-compose.yml`（VS Code 非依存、`/workspace` に bind mount、**秘密を一切持たない**）、`up.sh`（= `docker compose up -d`）、`shell.sh`（token 付きのシェル。後述）。
-- **起動は `./up.sh`**（= `docker compose up -d`。**資格情報なし・冪等**）。**GitHub token は exec 時にシェル単位で注入**: `./shell.sh`（= `op run --env-file=.docker/sandbox.env -- docker exec -it -e GH_TOKEN kokemusu-dev zsh`）。
+- **起動は `./up.sh`**（= `docker compose up -d`。**資格情報なし・冪等**）。**GitHub token は exec 時にシェル単位で注入**: `./shell.sh`（= `op read` で `.docker/sandbox.env` の `op://` 参照を解決 → `docker exec -it -e GH_TOKEN kokemusu-dev zsh`）。
   token を持つのはこのスクリプトで開いたシェル（とその子 = Claude / git / gh）だけ。コンテナの設定（`docker inspect`）にも PID 1 にも載らない。
   `./shell.sh claude --continue` のように引数でコマンドも渡せる。
 - **なぜコンテナ env ではなく exec 時か（2026-08-23 の実測）**:
   1. 値なしの `GH_TOKEN:`（shell env からの pass-through）が**このホストで解決されなくなった**（`docker inspect` の `Config.Env` に `=` の無い裸の `GH_TOKEN` が入り、コンテナ側は未設定）。
   2. `"${GH_TOKEN:-}"` の明示補間に直すと入るが、token が**コンテナ設定の一部**になる。すると op を通さない `docker compose up -d` が「設定変更」と判定され、compose が[コンテナを停止して作り直す](https://docs.docker.com/reference/cli/docker/compose/up/) → token 消失 + 中の Claude セッションも消える。
   3. exec 時注入なら `docker compose up -d` に秘密が絡まないので何度打っても安全。`docker exec -e NAME`（値なし）はホストプロセスの env から転送し、未設定なら何も渡さない = fail closed のまま。
+- ⚠️ **対話プロセスを `op run` で包まない**（2026-08-23 に踏んだ）。[`op run` は子プロセスの stdout / stderr の秘密をマスクする](https://developer.1password.com/docs/cli/secret-references/)＝そのストリームに介入するので、`docker exec -it` が端末を失う: **プロンプトが `${_p9k__…}` の生テンプレートのまま吐かれ、pty が 80x24 に落ちる**（ターミナルの左上 1/4 だけに表示される）。`./shell.sh` は先に `op read` で値を解決し、`docker exec` は端末を繋いだまま exec する。値は env で渡すので `ps` の argv には出ない。
 - **確認**: `./shell.sh` の中で `test -n "$GH_TOKEN" && echo "len=${#GH_TOKEN}"`（fine-grained PAT は 93 文字。値は印字しない）。`docker exec -it kokemusu-dev zsh`（op 無し）で入ったシェルには無い＝意図どおり。
   ⚠️ ホストで `op run -- env` を見ると値は **`<concealed by 1Password>`（24 文字）にマスクされる** ので「24 文字 = 壊れている」ではない。長さは `op run --env-file=.docker/sandbox.env -- sh -c 'echo ${#GH_TOKEN}'` で。
 - 起動時に毎回: firewall → `claude` / `pnpm` を npm から更新 → git の credential helper（env の `$GH_TOKEN` を読む inline 関数・ディスクに書かない）と sandbox 用の git identity → コンテナ scope の Claude Code 既定を `bypassPermissions` に（リポ共有の `.claude/settings.json` は触らない）。
