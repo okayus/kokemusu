@@ -10,6 +10,7 @@
 ## Phase 1 — MVP（毎日使える最小形）
 
 ゴール: **自分が毎日投稿して、最低限の苔（ヒートマップ）を眺められる。**
+最初の縦切り「投稿 → タグ → ヒートマップに 1 マス点く」の PR 分割・DoD・リスクは [plans/vertical-slice.md](plans/vertical-slice.md)。
 
 - DB スキーマとマイグレーション（[data-model.md](data-model.md)）。実スキーマ投入前に `cloudflare-d1-drizzle-migration` 必読。
 - 投稿 CRUD（作成・編集・ソフトデリート、Markdown ＋ サニタイズ、任意の `title`）。
@@ -54,11 +55,16 @@
    ✅ 本番ドメイン = **`kokemusu.shiraoka.workers.dev`** で確定（RP_ID もこれ）。custom domain へ移るなら**初回パスキー登録より前**。
 2. ~~**暗号化レベル**~~ → ✅ **(B) アプリ層の本文暗号化を Phase 1 から、鍵は Worker Secret。(C) は不採用**（2026-08-23、[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。全文検索は復号して走査。`title` も本文と同じく暗号化。
 3. ~~**認証方式**~~ → ✅ **パスキーのみ（single-user。パスワード / TOTP は作らない）＋ API は PAT**（2026-08-22）。リカバリ = 端末 2 台登録 ＋ 自分（操作者）が `INITIAL_REGISTRATION_TOKEN` を再発行して新しいパスキーを登録する runbook。
-4. **UI トーン**: 苔の世界観をどこまで前面に出すか（情緒重視 ↔ 実用ミニマル）。
+4. ~~**UI トーン**~~ → ✅ **ミニマル ＋ 苔の言葉と色**（2026-08-23）。骨格は実用ミニマルのまま、苔らしさは用語（苔片）・
+   空状態のコピー・苔の配色トークン（ライト/ダーク）で出す。動きは「投稿後にマスが濃くなる」1 箇所だけ。情緒の主役は Phase 4 の苔の庭ビュー。
 5. ~~**monorepo にするか**~~ → ✅ **pnpm workspace**。まず `apps/web` の単一パッケージ、`packages/core` はロジックが生えたら。
-6. **タグの構造**: フラットで開始。階層化は必要が出てから。
+6. ~~**タグの構造**~~ → ✅ **フラット確定。表記ゆれは `tag.norm`（`trim` ＋ NFKC ＋ 小文字化、`(user_id, norm)` で一意）で吸収**
+   （2026-08-23）。階層は作らない —— タグ同士の関係は共起グラフで見る（[visualization.md](visualization.md) §6）。
 7. ~~**`post.title` の位置づけ**~~ → ✅ **任意の見出し。手動でも API でも付けられ、UI は既定で隠す**（フォームは本文 1 欄のまま、ショートカット / トグルで見出し欄を出す。タイムラインは見出しのある苔片だけ本文の上に小さく表示。検索は見出しも復号走査に含める。暗号化は本文と同じ鍵）（2026-08-23）。
 8. ~~**mazuoboeru 連携の形**~~ → ✅ **(i) 自分専用**（mazuoboeru の Worker Secret に苔むすの PAT を 1 本、Cron が日次 push）。受け側は汎用のまま＝送り側を知らない設計を [ADR-0002](adr/0002-api-posting-via-receiver-side-pat.md) に記録。per-user (ii) は他の mazuoboeru ユーザが苔むすをセルフホストしたら mazuoboeru 側だけで足す（2026-08-23）。
+
+9. ~~**集計の「日」**~~ → ✅ **`Asia/Tokyo` 定数で切る**（2026-08-23、[data-model.md](data-model.md)）。`user` に TZ 列は持たず、
+   見る場所で過去のマスが動かないことを優先。設定化は後から NULLABLE 列 / API パラメータで足せる。
 
 ## 次のアクション
 
