@@ -1,11 +1,11 @@
 import { eq } from "drizzle-orm";
 import type { Context } from "hono";
-import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import { getCookie, setCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { sign, verify } from "hono/jwt";
 import { createDb } from "../db";
 import { session, user } from "../db/schema";
-import { cookieBase, sessionCookieName } from "../lib/cookies";
+import { clearCookie, cookieBase, sessionCookieName } from "../lib/cookies";
 import { fail } from "../lib/errors";
 import { getSessionSecret } from "../lib/secret";
 import type { Env } from "../types";
@@ -62,7 +62,7 @@ export async function revokeSession(c: Context<Env>): Promise<void> {
       // invalid token: nothing to revoke
     }
   }
-  deleteCookie(c, name, { path: "/", secure: cookieBase(c).secure });
+  clearCookie(c, name);
 }
 
 export function sessionMiddleware() {
@@ -97,13 +97,13 @@ export function sessionMiddleware() {
     const row = rows[0];
     if (!row) {
       // Revoked elsewhere, or rows were cleared after a secret rotation.
-      deleteCookie(c, name, { path: "/", secure: cookieBase(c).secure });
+      clearCookie(c, name);
       return fail(c, "session_expired");
     }
     if (row.expiresAt < Date.now()) {
       // Lazy cleanup of the expired row on presentation.
       await db.delete(session).where(eq(session.id, row.sid));
-      deleteCookie(c, name, { path: "/", secure: cookieBase(c).secure });
+      clearCookie(c, name);
       return fail(c, "session_expired");
     }
 

@@ -165,6 +165,64 @@ describe("challenge cookie validation on verify", () => {
   });
 });
 
+// Regression for the production-only 500 (2026-08-24): over an https ORIGIN the
+// challenge cookie is named `__Host-challenge`, and hono's cookie serializer
+// THROWS when a `__Host-` cookie is written without `secure` — which is exactly
+// what a deleteCookie({ path: "/" }) without `secure: true` does. Every unit
+// test and local dev run used http (bare `challenge` name), so only production
+// hit it: consumeChallenge crashed on its delete-before-validate step and every
+// verify endpoint answered 500. These tests pin the https shape.
+describe("challenge consumption over an https ORIGIN (production shape)", () => {
+  const HTTPS_ENV = () =>
+    testEnv({
+      RP_ID: "kokemusu.shiraoka.workers.dev",
+      ORIGIN: "https://kokemusu.shiraoka.workers.dev",
+    });
+  const httpsJson = (path: string, cookie?: string) =>
+    app.request(
+      path,
+      {
+        method: "POST",
+        headers: {
+          Origin: "https://kokemusu.shiraoka.workers.dev",
+          "Content-Type": "application/json",
+          ...(cookie === undefined ? {} : { Cookie: cookie }),
+        },
+        body: JSON.stringify({ response: { id: "some-credential-id" } }),
+      },
+      HTTPS_ENV(),
+    );
+
+  it("login/verify without a cookie is 400, not 500", async () => {
+    const res = await httpsJson("/api/auth/login/verify");
+    expect(res.status).toBe(400);
+    expect(await errType(res)).toBe("challenge_mismatch");
+  });
+
+  it("register/verify with a wrong-kind __Host-challenge cookie is 400, not 500", async () => {
+    const wrongKind = await sign(
+      { challenge: "x", state: { kind: "authentication" }, aud: "kokemusu:challenge", exp: futureExp() },
+      TEST_SECRET,
+    );
+    const res = await httpsJson("/api/auth/register/verify", `__Host-challenge=${wrongKind}`);
+    expect(res.status).toBe(400);
+    expect(await errType(res)).toBe("challenge_mismatch");
+  });
+
+  it("the consumed cookie is cleared with Secure + Path=/ (the __Host- contract)", async () => {
+    const wrongKind = await sign(
+      { challenge: "x", state: { kind: "authentication" }, aud: "kokemusu:challenge", exp: futureExp() },
+      TEST_SECRET,
+    );
+    const res = await httpsJson("/api/auth/register/verify", `__Host-challenge=${wrongKind}`);
+    const cleared = res.headers.getSetCookie().find((c) => c.startsWith("__Host-challenge="));
+    expect(cleared).toBeDefined();
+    expect(cleared).toContain("Max-Age=0");
+    expect(cleared).toContain("Secure");
+    expect(cleared).toContain("Path=/");
+  });
+});
+
 describe("session-guarded routes fail closed", () => {
   it.each([
     ["GET", "/api/auth/me"],

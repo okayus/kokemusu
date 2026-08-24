@@ -1,7 +1,7 @@
 import type { Context } from "hono";
-import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import { getCookie, setCookie } from "hono/cookie";
 import { sign, verify } from "hono/jwt";
-import { challengeCookieName, cookieBase } from "../lib/cookies";
+import { challengeCookieName, clearCookie, cookieBase } from "../lib/cookies";
 import { getSessionSecret } from "../lib/secret";
 import type { Env } from "../types";
 
@@ -53,7 +53,7 @@ export async function consumeChallenge(
 ): Promise<{ challenge: string; state: ChallengeState } | null> {
   const name = challengeCookieName(c);
   const token = getCookie(c, name);
-  deleteCookie(c, name, { path: "/" });
+  clearCookie(c, name);
   if (!token) return null;
   const secret = getSessionSecret(c.env);
   if (!secret) return null;
