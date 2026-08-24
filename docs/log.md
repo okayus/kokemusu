@@ -3,6 +3,8 @@
 1 行 = 1 節目（PR の merge・ADR・人手作業の完了・本番の状態変化）。`- YYYY-MM-DD 何を（#PR / ADR / skill）`。
 自動ロードはされない。必要なら `head -20 docs/log.md`。作業中の試行錯誤は書かない（git log と PR にある）。
 
+- 2026-08-24 Workers Builds の deploy command が本番マイグレを当てることを実証（#11 merge 直後、ホストの `wrangler d1 migrations list --remote` = 未適用 0 件）。以後マイグレを含む PR は merge するだけでよい（#12、dev-environment.md §3 に恒久記録）
+- 2026-08-24 縦切り PR1 merge: 6 テーブル（user/credential/session/post/tag/post_tags）の実スキーマ + Drizzle 配線（ルート無し）、additive 検査 migrations.test.ts を CI に。0000_init との連番衝突は 0001 へずらして解決（#11、skill cloudflare-d1-drizzle-migration）
 - 2026-08-23 push 起動の Workers Builds を実証（`main` の #7 / #8 / #9 の各 commit に check-run `Workers Builds: kokemusu` が success）。Phase 0 の残件が消えた
 - 2026-08-23 対話シェルを `op run` で包むのをやめ（TTY が壊れる）、`shell.sh` に TTY 判定と `op://` パーサの堅牢化、`.claude/settings.json` の deny の穴（refspec 形の push / ブランチ削除）を塞ぐ（#8 / #9）
 - 2026-08-23 最初の縦切り「投稿 → タグ → ヒートマップに 1 マス点く」を PR1〜6 に分割（`docs/plans/vertical-slice.md`）。決めること 4（UI トーン）・6（タグ構造）・9（集計の「日」）を確定、`RP_ID = kokemusu.shiraoka.workers.dev` を永久固定、GitHub token を `./shell.sh` の exec 時シェルへ移動（#7）
