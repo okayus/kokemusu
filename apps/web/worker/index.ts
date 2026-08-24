@@ -1,10 +1,43 @@
 import { Hono } from "hono";
 import { runScheduled } from "./cron";
-import type { Bindings } from "./types";
+import { fail } from "./lib/errors";
+import { csrfOriginCheck } from "./middleware/csrf";
+import { securityHeaders } from "./middleware/security-headers";
+import { sessionMiddleware } from "./middleware/session";
+import { authRoutes } from "./routes/auth";
+import type { Bindings, Env } from "./types";
 
-export const app = new Hono<{ Bindings: Bindings }>();
+export const app = new Hono<Env>();
+
+// First, so every response — SPA HTML included (that is why run_worker_first
+// exists) — carries the security headers.
+app.use("*", securityHeaders);
+
+app.onError((err, c) => {
+  // Generic 500 only; never a stack trace to the client.
+  console.error(err);
+  return fail(c, "internal");
+});
 
 app.get("/health", (c) => c.json({ status: "ok" }));
+
+const api = new Hono<Env>();
+api.use("*", csrfOriginCheck);
+
+// Mount order matters (skill cloudflare-workers-passkey-auth): the public
+// /auth routes must be registered BEFORE the session-guarded catch-all below —
+// its `use("*")` also matches /api/auth/*, and the public handlers only win
+// because they answered first. Swap the two and login/begin returns 401.
+api.route("/auth", authRoutes);
+
+// Everything else under /api requires a session. PR4+ domain routes register
+// on `protectedApi` ABOVE the 404 catch-all.
+const protectedApi = new Hono<Env>();
+protectedApi.use("*", sessionMiddleware());
+protectedApi.all("*", (c) => fail(c, "not_found"));
+api.route("/", protectedApi);
+
+app.route("/api", api);
 
 // L3 of the 3-layer SPA routing: with `run_worker_first: true` every request
 // enters the Worker, so unmatched paths must be handed back to the Assets

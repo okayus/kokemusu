@@ -1,0 +1,164 @@
+/* 苔むす — PR2 の最小限。トーンの本体（苔の配色トークン・空状態のコピー）は
+   縦切り PR4 で入る。ここでは light/dark 両対応の器だけを用意する。 */
+
+:root {
+  /* Native UI (scrollbars, form controls) follows the user's scheme.
+     index.html の <meta name="color-scheme"> と対で機能する。 */
+  color-scheme: light dark;
+
+  --bg: light-dark(#f7f6f1, #141813);
+  --ink: light-dark(#26302a, #d9e2d6);
+  --quiet: light-dark(#65735f, #8a978c);
+  --moss: light-dark(#3d6b4f, #7fae8f);
+  --moss-ink: light-dark(#f7f6f1, #141813);
+  --line: light-dark(#d8dcd2, #2c332b);
+  --error: light-dark(#a03d2e, #e08a76);
+
+  accent-color: var(--moss);
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.7;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.shell {
+  max-width: 34rem;
+  margin-inline: auto;
+  padding: 2.5rem 1.25rem 5rem;
+}
+
+.hero {
+  margin-block-end: 2rem;
+}
+
+.bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-block-end: 1rem;
+}
+
+h1 {
+  font-size: 1.5rem;
+  margin-block: 0 0.25rem;
+  color: var(--moss);
+}
+
+h2 {
+  font-size: 1.1rem;
+  margin-block: 0 0.5rem;
+}
+
+.quiet {
+  color: var(--quiet);
+  margin-block: 0;
+}
+
+.hint {
+  font-size: 0.85rem;
+  color: var(--quiet);
+  margin-block: 0.25rem 0;
+}
+
+.error {
+  color: var(--error);
+  margin-block: 0.75rem 0;
+}
+
+button {
+  font: inherit;
+  min-height: 48px;
+  padding: 0.5rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--moss);
+  border-color: var(--moss);
+  color: var(--moss-ink);
+  font-weight: 600;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+input {
+  font: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 48px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+}
+
+/* 触り終えたフィールドだけを警告する（打っている最中に騒がない）。 */
+input:user-invalid {
+  border-color: var(--error);
+}
+
+:is(button, input, summary):focus-visible {
+  outline: 3px solid var(--moss);
+  outline-offset: 2px;
+}
+
+.field {
+  margin-block-end: 1.25rem;
+}
+
+.field label {
+  display: block;
+  font-weight: 600;
+  margin-block-end: 0.25rem;
+}
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  margin-block-start: 2rem;
+}
+
+.panel summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.panel form {
+  margin-block-start: 1.25rem;
+}
+
+.devices {
+  list-style: none;
+  padding: 0;
+  margin-block: 1rem;
+}
+
+.devices li {
+  padding-block: 0.75rem;
+  border-block-start: 1px solid var(--line);
+}
+
+.badge {
+  font-size: 0.75rem;
+  color: var(--quiet);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  margin-inline-start: 0.5rem;
+  white-space: nowrap;
+}
