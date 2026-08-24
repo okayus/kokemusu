@@ -21,6 +21,24 @@
     "RP_ID": "kokemusu.shiraoka.workers.dev",
     "ORIGIN": "https://kokemusu.shiraoka.workers.dev"
   },
+  // Workers Observability: structured logs of every invocation (bot probes
+  // included). Low-traffic single-user app, so 100% sampling costs nothing.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  // Per-IP rate limit for the unauthenticated auth routes (register/login
+  // begin|verify) — the only public endpoints that spend CPU before auth
+  // (skill cloudflare-workers-bot-scan-defense). The middleware fails OPEN
+  // when the binding is absent, so stripping this key (e2e in the sandbox)
+  // degrades to "no limit", never to an outage. `period` must be 10 or 60.
+  "ratelimits": [
+    {
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 30, "period": 60 }
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
