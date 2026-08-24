@@ -45,7 +45,7 @@ Phase 1 MVP の最初の縦切り。**完了したらこのファイルは削除
 
 ## PR の並び
 
-### PR1 — スキーマ + Drizzle 配線（ルート無し）
+### PR1 — スキーマ + Drizzle 配線（ルート無し） ✅ merged (#11, 2026-08-24)
 
 - 依存追加: `drizzle-orm` / `drizzle-kit`（`drizzle-kit generate` は資格情報不要＝サンドボックスで走る。
   `push` / `migrate` / `studio` は使わない ＝ 本番適用は wrangler 側に任せる）。
@@ -139,13 +139,10 @@ Markdown レンダリング / 全文検索 / 投稿の編集・削除 UI（`dele
 
 ## 着手前に人手で確認すること（ホスト側）
 
-1. **本番マイグレーションの適用経路**: 設定値は [dev-environment.md](../dev-environment.md) §3(a) の表に記録済み
-   （Deploy command = `pnpm exec wrangler d1 migrations apply kokemusu-db --remote && pnpm exec wrangler deploy`）。
-   dash の実物と一致しているかは 30 秒で見られる（dash → Workers & Pages → kokemusu → 設定 → ビルド → ビルド構成）。
-   **決定的な答えは PR1 が出す**: merge 後にホストで `pnpm exec wrangler d1 migrations list kokemusu-db --remote` が
-   未適用 0 件なら deploy command が migrate している。1 件残っていたら dash を直すか、
-   merge 後にホストから `pnpm db:migrate:prod` を回す運用にする（PR1 は D1 に触るルートを持たないので、
-   どちらでも本番は無傷 —— これが PR1 を先頭に置く理由でもある）。
+1. ~~**本番マイグレーションの適用経路**~~ → ✅ **deploy command が当てている**（2026-08-24、PR #11 で実証）。
+   `0001_kokemusu_schema.sql` を merge した直後、ホストの `wrangler d1 migrations list kokemusu-db --remote` が
+   「No migrations to apply!」。**PR2 以降は merge するだけでスキーマが追随する** ——
+   マイグレを含む PR に人手の手順を足さなくてよい（[dev-environment.md](../dev-environment.md) §3(a) に恒久記録）。
 2. ~~独自ドメインの最終判断~~ → ✅ **`RP_ID = kokemusu.shiraoka.workers.dev` を永久固定でよい**（2026-08-23）。
    将来 custom domain を取っても**ログインの origin は `workers.dev` のまま**（RP_ID は origin の登録可能サフィックスで
    なければならず、`kokemusu.example.com` では既存パスキーが使えない）。移りたくなったときの逃げ道は下の PR2 の要件を参照。
@@ -155,7 +152,7 @@ Markdown レンダリング / 全文検索 / 投稿の編集・削除 UI（`dele
 
 | リスク | 対応 |
 | --- | --- |
-| 本番マイグレが自動で当たらず 500 | 上記の事前確認 1。PR1 は route を足さないので、当たっていなくても本番は無傷（切り分けが楽な順序） |
+| ~~本番マイグレが自動で当たらず 500~~ | ✅ 解消（2026-08-24）。deploy command の migrate が当たることを PR #11 の merge で実証 |
 | RP_ID ロックが PR2 で発効 | 事前確認 2。`wrangler.jsonc` の `RP_ID` / `ORIGIN` への diff は PR 自動 reject |
 | CSP が `vite dev` の HMR を壊す | dev と本番で CSP を分ける。e2e はビルド成果物に対して `wrangler dev` |
 | `BODY_KEY` 紛失 = 本文が永久に読めない | `wrangler secret put` と同時に 1Password。PR3 のチェックリストに入れる |

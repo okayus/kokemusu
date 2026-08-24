@@ -97,6 +97,7 @@ main へ merge（ruleset: PR 必須・required check `ci`・force push 禁止・
 | Branch control | production = `main`、**非本番ブランチビルド OFF** | ⚠️ preview version も **本番 D1** を共有する（`preview_database_id` は `wrangler dev` 専用）。PR preview が本番データを触り、migrate まで走る |
 | Build watch paths（Advanced） | include `*`、exclude `docs/*` と `*.md`（docs-only commit でデプロイしない） | required check `ci` は Workers Builds と独立なので merge ゲートは保たれる。CI 側を `paths-ignore` で間引くのは **不可**（required check が pending で PR が詰まる） |
 
+- ✅ **2026-08-24 実証: deploy command の migrate は実際に当たっている**。最初の実スキーマ（`0001_kokemusu_schema.sql`、PR #11）を merge した直後、ホストで `wrangler d1 migrations list kokemusu-db --remote` が「No migrations to apply!」＝ **merge 以外に人手の migrate は要らない**（`db:migrate:prod` は事故時の手動経路として残すだけ）。
 - **確認**: merge 後に commit の check-run に `Workers Builds: kokemusu` が付く（`gh pr checks` / dash の Builds タブ。`gh api` は deny）。ホストで `wrangler deployments list`、`wrangler d1 migrations list kokemusu-db --remote`、`curl https://kokemusu.shiraoka.workers.dev/health`。
 - **ハマりどころ**: Root directory 未設定（Advanced の中の「パス」）／本番ブランチに `apps/web` が未 merge（設定ミスに見える）／トークンに D1 が無く migrate だけ落ちる／**初回の手動ビルドには check-run が付かない**（未トリガーと誤診しない。push 起動は次の merge で実証）／**push しても何も起きない** = 非本番ブランチ（意図どおり）・watch paths が全部除外・稀に build が作られない（check-run に `Workers Builds:` が無い＝未トリガー。`main` に新しい commit を push して再トリガー。dash の Retry は最新 build の再実行で、取りこぼした commit は拾わない）。
 - Free プラン: 3,000 build 分 / 月、同時 1、20 分タイムアウト。個人規模には十分。
