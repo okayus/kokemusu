@@ -16,5 +16,5 @@
     "noEmit": true,
     "types": ["./worker-configuration.d.ts", "vite/client"]
   },
-  "include": ["src/**/*", "worker/**/*", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src/**/*", "worker/**/*", "vite.config.ts", "vitest.config.ts", "drizzle.config.ts"]
 }

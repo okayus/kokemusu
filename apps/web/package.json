@@ -11,10 +11,12 @@
     "types": "wrangler types",
     "check": "pnpm run types && tsc --noEmit",
     "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply kokemusu-db --local",
     "db:migrate:prod": "wrangler d1 migrations apply kokemusu-db --remote"
   },
   "dependencies": {
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.13.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
@@ -24,6 +26,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",
+    "drizzle-kit": "^0.31.10",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",
     "vitest": "^4.1.11",

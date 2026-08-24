@@ -53,16 +53,20 @@ Phase 1 MVP の最初の縦切り。**完了したらこのファイルは削除
 - テーブル: **`user` / `credential` / `session` / `post` / `tag` / `post_tags`**（列は [data-model.md](../data-model.md) 準拠。
   skill 側の複数形 `users/credentials/sessions` は苔むすでは単数形、日時は epoch ms `integer`）。
   `api_token`（Phase 2）・`tag_alias`（Phase 2）・`attachment`（Phase 4）は**葉テーブルなので後から追加しても安全**＝入れない。
-- INDEX: `post(user_id, created_at)` / `post(deleted_at)` / `post_tags(tag_id)` / `post_tags(post_id)` /
+- INDEX: `post(user_id, created_at)` / `post(deleted_at)` / `post_tags(tag_id)` /
   `tag(user_id, norm)` UNIQUE / `credential(user_id)` / `session(user_id)` / `session(expires_at)`。
-- **`drizzle-kit generate` の出力レイアウトを実物で確認する**（既存の `drizzle/0000_init.sql` と噛み合わせる）:
-  - flat（`drizzle/0001_*.sql`）なら現状の `migrations_dir: "drizzle"` のまま。
-  - nested（`drizzle/0001_*/migration.sql`）なら `wrangler.jsonc` の D1 binding に
-    `"migrations_pattern": "drizzle/**/*.sql"` を足す（2026-05 追加の D1 機能。
-    [d1/reference/migrations #nested-migration-layouts](https://developers.cloudflare.com/d1/reference/migrations/)）。
-  - 生成物の連番が `0000` から始まって既存とぶつかる場合は、drizzle の journal に `0000_init` を先に登録してからずらす。
-- 検証: `pnpm db:migrate`（--local）→ `wrangler d1 migrations list kokemusu-db --local` が**未適用 0 件**、
-  `--remote` 側は「未適用が 1 件だけ」であること。生成 SQL に `DROP TABLE` が**無い**ことを目視（additive の証明）。
+  当初挙げていた `post_tags(post_id)` は**張らない** —— PK `(post_id, tag_id)` の暗黙 index が
+  `WHERE post_id = ?` を covering index で捌く（[data-model.md](../data-model.md) のインデックス節）。
+- ✅ **出力レイアウトは flat**（`drizzle/0001_kokemusu_schema.sql` + `drizzle/meta/`）＝ `migrations_pattern` は不要、
+  `migrations_dir: "drizzle"` のままでよい。wrangler は `meta/*.json` をマイグレーションとして拾わない。
+  連番は既存の `0000_init.sql` とぶつかった（drizzle は journal が空なら `0000` から振る）ので、生成物を `0001` に
+  ずらし、journal に `0000_init` を、`meta/0000_snapshot.json` に空スナップショットを後追いで登録した。
+  スナップショットは `id` / `prevId` の連結リストなので、2 つが同じ親を指すと `drizzle-kit check` が
+  collision として弾く（実際に弾かれた）。現在は `check` が green、再 `generate` が no-op ＝ 次は `0002` が出る。
+- ✅ 検証済み: `pnpm db:migrate` 後に `migrations list --local` が**未適用 0 件**、生成 SQL に `DROP TABLE` / `__new_` /
+  `PRAGMA foreign_keys=OFF` が**無い**（`worker/db/migrations.test.ts` が CI で毎回見張る）。
+  ローカル D1 で cascade（`DELETE FROM user` → 子行全滅）・`tag.norm` の NOT NULL・`(user_id, norm)` UNIQUE・
+  `body_format` の既定値 `markdown` も実挙動を確認。
 
 ### PR2 — パスキー認証 + セキュリティヘッダ（skill `cloudflare-workers-passkey-auth` の single-user 変種）
 
