@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import { deleteCookie } from "hono/cookie";
 import type { Env } from "../types";
 
 export function isHttpsOrigin(origin: string): boolean {
@@ -26,4 +27,14 @@ export function cookieBase(c: Context<Env>) {
     sameSite: "Lax" as const,
     path: "/",
   };
+}
+
+// The ONLY way to delete our cookies. hono's serializer enforces the `__Host-`
+// contract on every write — the deletion write included — and THROWS when such
+// a cookie is set without `secure`. A bare deleteCookie(c, name, { path: "/" })
+// therefore 500s every https request that clears a cookie, while http (bare
+// names, local dev / unit tests / e2e) sails through — which is how it reached
+// production unseen (2026-08-24).
+export function clearCookie(c: Context<Env>, name: string): void {
+  deleteCookie(c, name, { path: "/", secure: isHttpsOrigin(c.env.ORIGIN) });
 }
