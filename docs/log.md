@@ -3,6 +3,7 @@
 1 行 = 1 節目（PR の merge・ADR・人手作業の完了・本番の状態変化）。`- YYYY-MM-DD 何を（#PR / ADR / skill）`。
 自動ロードはされない。必要なら `head -20 docs/log.md`。作業中の試行錯誤は書かない（git log と PR にある）。
 
+- 2026-08-29 merge を `gh pr merge --auto --squash` の opt-in へ（例外あり、CLAUDE.md）、ci.yml を安定シェル化（`.node-version` / root `ci` script / Dependabot、#16）。matatabetai（ADR-001 改訂 2026-08-24）と okayus-skills token skill 0.2.4 に追随。5 日間 merge 待ちだった #15 は 2026-08-29 にホストで merge
 - 2026-08-24 Workers Builds の deploy command が本番マイグレを当てることを実証（#11 merge 直後、ホストの `wrangler d1 migrations list --remote` = 未適用 0 件）。以後マイグレを含む PR は merge するだけでよい（#12、dev-environment.md §3 に恒久記録）
 - 2026-08-24 縦切り PR1 merge: 6 テーブル（user/credential/session/post/tag/post_tags）の実スキーマ + Drizzle 配線（ルート無し）、additive 検査 migrations.test.ts を CI に。0000_init との連番衝突は 0001 へずらして解決（#11、skill cloudflare-d1-drizzle-migration）
 - 2026-08-23 push 起動の Workers Builds を実証（`main` の #7 / #8 / #9 の各 commit に check-run `Workers Builds: kokemusu` が success）。Phase 0 の残件が消えた

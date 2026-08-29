@@ -46,7 +46,7 @@
   - 致命（解決失敗でコンテナ起動失敗）: `registry.npmjs.org`・`api.anthropic.com`・Cloudflare API・`developers.cloudflare.com`・`docs.mcp.cloudflare.com`・GitHub（IP レンジは動的取得）。
   - **OPTIONAL**（解決失敗でも起動継続）: Statsig・本番ホスト `kokemusu.shiraoka.workers.dev`・docs ホスト（`mcp.context7.com` `developer.mozilla.org` `react.dev` `hono.dev` `orm.drizzle.team` `vite.dev` `vitest.dev` `zod.dev` `developer.chrome.com` `web.dev`）。IP ベースなので同じ anycast 上の兄弟サイトも通る＝読み取り用途として許容。`mcp.context7.com` は AWS ELB で IP が変わり得る → Context7 が応答しなくなったらコンテナ再起動で再解決。
 - **ポート**: ホスト `5273` → コンテナ `5173`（5173 は汎用 Vite、5373 は mazuoboeru）。ブラウザからは `http://localhost:5273`。
-- **Claude Code のツール**（共有設定、`cloudflare-mcp-claude-tooling`）: `.mcp.json` に `cloudflare-docs`（公式・認証不要）と `context7`（MDN 含むライブラリ docs）。`.claude/settings.json` の deny = force push・`main` への push（refspec 形含む）・リモートブランチ削除・`gh pr merge`・`gh auth`・`gh api`（bypass 下でも deny だけは効く）。`modern-web-guidance`（Google Chrome・Apache-2.0）を `.claude/skills/` に同梱、`grill-with-docs` も同梱。okayus-skills は gitignore の `docker-compose.override.yml` で `~/.claude/skills:ro` に read-only mount（コピーしない＝drift なし）。
+- **Claude Code のツール**（共有設定、`cloudflare-mcp-claude-tooling`）: `.mcp.json` に `cloudflare-docs`（公式・認証不要）と `context7`（MDN 含むライブラリ docs）。`.claude/settings.json` の deny = force push・`main` への push（refspec 形含む）・リモートブランチ削除・`gh auth`・`gh api`（bypass 下でも deny だけは効く。`gh pr merge` は 2026-08-29 に deny から外し `--auto --squash` 形のみ allow）。`modern-web-guidance`（Google Chrome・Apache-2.0）を `.claude/skills/` に同梱、`grill-with-docs` も同梱。okayus-skills は gitignore の `docker-compose.override.yml` で `~/.claude/skills:ro` に read-only mount（コピーしない＝drift なし）。
 - **限界**: 許可ドメイン経由の流出やカーネル攻撃は防げない。許可リストは狭く保つ。
 
 ### 日常運用
@@ -60,7 +60,7 @@
 旧「commit / push はホスト側」は廃止。コンテナ内の Claude が自分で push と PR まで行う（`sandboxed-agent-github-token-via-1password`）。
 
 - **token**: 自分の GitHub **fine-grained PAT**、Repository access = `okayus/kokemusu` のみ、**Contents + Pull requests**（Metadata 自動）、**Workflows なし**、**90 日**。1Password にだけ保存し、`.docker/sandbox.env`（gitignore・`op://` 参照のみ）経由で **`./shell.sh` が開くシェルの env にだけ** 注入する（コンテナ設定には載せない）。ディスクには書かない（`~/.git-credentials` も `~/.config/gh/hosts.yml` も無い）。
-- **流れ**: `claude/<topic>` ブランチで commit → `git push -u origin claude/<topic>` → `gh pr create --fill` → PR URL を報告。**merge は人間がホストで**（`gh pr merge` は deny）。状態確認は `gh pr view` / `gh pr checks`（fine-grained PAT は Checks REST API を呼べないので `gh api …/check-runs` は使えない＝deny でもある）。merge 後は `git fetch --prune`。
+- **流れ**: `claude/<topic>` ブランチで commit → `git push -u origin claude/<topic>` → `gh pr create --fill` → PR URL を報告。**merge は `gh pr merge --auto --squash` を arm**（required check `ci` 通過時に GitHub が squash merge。例外 = migration / `.github/**` / `.claude/**` / `docs/adr/**` は人間、CLAUDE.md）。状態確認は `gh pr view` / `gh pr checks`（fine-grained PAT は Checks REST API を呼べないので `gh api …/check-runs` は使えない＝deny でもある）。merge 後は `git fetch --prune`。
 - **`.github/workflows/**` は人間がホストから push**（token に `workflows` 権限が無く、remote が `without \`workflow\` scope` で拒否する。これは意図的＝エージェントが自分の CI ゲートを書き換えられない）。
 - **禁止**: token の印字（`echo $GH_TOKEN`）・`gh auth login`（ディスクに書く）・URL への埋め込み。
 - **境界は ruleset と token scope**。Claude Code の allow / deny は「行儀の良いエージェント」向けの利便で、セキュリティ境界ではない。侵害されたサンドボックスが出来ること = この 1 リポの非保護ブランチへの push と PR 操作（CI 緑の PR の merge 含む）、token 失効まで。

@@ -36,6 +36,7 @@
       "Bash(gh pr list:*)",
       "Bash(gh pr diff:*)",
       "Bash(gh pr checks:*)",
+      "Bash(gh pr merge --auto --squash *)",
       "Bash(gh pr comment:*)",
       "Bash(gh run list:*)",
       "Bash(gh run view:*)",
@@ -65,7 +66,6 @@
       "Bash(git push *main *)",
       "Bash(git push * --delete *)",
       "Bash(git push * :*)",
-      "Bash(gh pr merge *)",
       "Bash(gh auth *)",
       "Bash(gh api *)"
     ]
