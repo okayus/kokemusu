@@ -6,6 +6,7 @@
     "build": "pnpm --filter @kokemusu/web build",
     "check": "pnpm --filter @kokemusu/web check",
     "test": "pnpm --filter @kokemusu/web test",
+    "ci": "pnpm -r run check && pnpm -r run build && pnpm -r run test",
     "deploy": "pnpm --filter @kokemusu/web run deploy",
     "db:generate": "pnpm --filter @kokemusu/web db:generate",
     "db:migrate": "pnpm --filter @kokemusu/web db:migrate",

@@ -1,0 +1,14 @@
+# GitHub Actions の @vN 更新は Dependabot が PR を出す（workflow yaml はサンドボックスの
+# token で push できないため、action のバージョン管理を人手から外す）。npm は対象外 —
+# 依存更新はコンテナ内エージェントが行う。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+    groups:
+      actions:
+        patterns: ["*"]

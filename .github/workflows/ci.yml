@@ -1,6 +1,9 @@
 # test/typecheck/build only. Deploys are done by Workers Builds (Cloudflare side) =
 # no Cloudflare secret exists in this repo's Actions (cloudflare-workers-builds-keyless-deploy).
 # The main ruleset requires this workflow's job id `ci` as a status check — keep the name.
+# This yaml is a "stable shell": steps only call repo files (package.json `ci` script,
+# .claude/hooks, .node-version), so what CI does can change from the sandbox without touching
+# workflow yaml (the token has no `workflows` permission). Action @vN bumps come from Dependabot.
 name: CI
 
 on:
@@ -24,12 +27,8 @@ jobs:
       - uses: pnpm/action-setup@v6 # no `version:` — it reads packageManager from package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 24 # same major as the sandbox image and Workers Builds' default
+          node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Typecheck (wrangler types + tsc)
-        run: pnpm -r run check
-      - name: Build
-        run: pnpm -r run build
-      - name: Test
-        run: pnpm -r run test
+      - name: Typecheck, build, test
+        run: pnpm run ci
