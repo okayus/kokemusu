@@ -5,6 +5,8 @@ import { csrfOriginCheck } from "./middleware/csrf";
 import { securityHeaders } from "./middleware/security-headers";
 import { sessionMiddleware } from "./middleware/session";
 import { authRoutes } from "./routes/auth";
+import { postRoutes } from "./routes/posts";
+import { tagRoutes } from "./routes/tags";
 import type { Bindings, Env } from "./types";
 
 export const app = new Hono<Env>();
@@ -24,16 +26,25 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 const api = new Hono<Env>();
 api.use("*", csrfOriginCheck);
 
+// Every /api response is dynamic and private — decrypted bodies ride on the
+// timeline — so heuristic browser/proxy caching must never keep a copy.
+api.use("*", async (c, next) => {
+  await next();
+  c.header("Cache-Control", "no-store");
+});
+
 // Mount order matters (skill cloudflare-workers-passkey-auth): the public
 // /auth routes must be registered BEFORE the session-guarded catch-all below —
 // its `use("*")` also matches /api/auth/*, and the public handlers only win
 // because they answered first. Swap the two and login/begin returns 401.
 api.route("/auth", authRoutes);
 
-// Everything else under /api requires a session. PR4+ domain routes register
-// on `protectedApi` ABOVE the 404 catch-all.
+// Everything else under /api requires a session: domain routes register on
+// `protectedApi` ABOVE the 404 catch-all.
 const protectedApi = new Hono<Env>();
 protectedApi.use("*", sessionMiddleware());
+protectedApi.route("/posts", postRoutes);
+protectedApi.route("/tags", tagRoutes);
 protectedApi.all("*", (c) => fail(c, "not_found"));
 api.route("/", protectedApi);
 

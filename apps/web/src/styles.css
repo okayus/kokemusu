@@ -1,5 +1,5 @@
-/* 苔むす — PR2 の最小限。トーンの本体（苔の配色トークン・空状態のコピー）は
-   縦切り PR4 で入る。ここでは light/dark 両対応の器だけを用意する。 */
+/* 苔むす — ミニマル + 苔の言葉と色（plans/vertical-slice.md の UI トーン決定）。
+   light/dark は light-dark() トークンで一元化。ヒートマップの濃淡 5 段は PR5 で。 */
 
 :root {
   /* Native UI (scrollbars, form controls) follows the user's scheme.
@@ -94,7 +94,8 @@ button:disabled {
   cursor: default;
 }
 
-input {
+input,
+textarea {
   font: inherit;
   width: 100%;
   box-sizing: border-box;
@@ -106,12 +107,20 @@ input {
   color: inherit;
 }
 
+/* 書くほどに伸びる（field-sizing 非対応ブラウザは固定サイズ + スクロールに退行）。
+   width は 100% 固定のまま縦だけ伸ばす。 */
+textarea {
+  field-sizing: content;
+  min-block-size: 3lh;
+  max-block-size: 14lh;
+}
+
 /* 触り終えたフィールドだけを警告する（打っている最中に騒がない）。 */
-input:user-invalid {
+:is(input, textarea):user-invalid {
   border-color: var(--error);
 }
 
-:is(button, input, summary):focus-visible {
+:is(button, input, textarea, summary):focus-visible {
   outline: 3px solid var(--moss);
   outline-offset: 2px;
 }
@@ -140,6 +149,62 @@ input:user-invalid {
 
 .panel form {
   margin-block-start: 1.25rem;
+}
+
+/* ---- コンポーザ（苔片を積む） ---- */
+
+.composer {
+  margin-block: 1.5rem 2rem;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* ---- タイムライン ---- */
+
+.posts {
+  list-style: none;
+  padding: 0;
+  margin-block: 1.5rem 1rem;
+}
+
+.post {
+  display: grid;
+  gap: 0.35rem;
+  padding-block: 1rem;
+  border-block-start: 1px solid var(--line);
+}
+
+.post-title {
+  display: block;
+}
+
+/* 本文はプレーンテキスト描画: 改行を保ち、長い語も枠内で折る。 */
+.post-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.post-tags {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0;
+  margin: 0;
+}
+
+.tag {
+  font-size: 0.75rem;
+  color: var(--moss);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  white-space: nowrap;
 }
 
 .devices {

@@ -11,6 +11,7 @@ import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
 } from "@simplewebauthn/browser";
+import { describeApiError, isApiError, postJson, request } from "./api";
 
 export type AuthUser = { id: string; displayName: string };
 
@@ -21,28 +22,6 @@ export type CredentialSummary = {
   createdAt: number;
   lastUsedAt: number | null;
 };
-
-type ApiErrorShape = { error?: { type?: string; message?: string } };
-
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init);
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as ApiErrorShape;
-    throw Object.assign(new Error(body.error?.message ?? `HTTP ${res.status}`), {
-      status: res.status,
-      type: body.error?.type,
-    });
-  }
-  return (await res.json()) as T;
-}
-
-const post = <T>(path: string, body?: unknown): Promise<T> =>
-  request<T>(path, {
-    method: "POST",
-    ...(body === undefined
-      ? {}
-      : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
-  });
 
 export const supportsPasskeys = (): boolean => browserSupportsWebAuthn();
 
@@ -59,36 +38,36 @@ export async function register(input: {
   initialRegistrationToken: string;
   deviceName?: string;
 }): Promise<AuthUser> {
-  const { options } = await post<{ options: PublicKeyCredentialCreationOptionsJSON }>(
+  const { options } = await postJson<{ options: PublicKeyCredentialCreationOptionsJSON }>(
     "/api/auth/register/begin",
     { displayName: input.displayName, initialRegistrationToken: input.initialRegistrationToken },
   );
   const response = await startRegistration({ optionsJSON: options });
-  return post<AuthUser>("/api/auth/register/verify", {
+  return postJson<AuthUser>("/api/auth/register/verify", {
     response,
     ...(input.deviceName ? { deviceName: input.deviceName } : {}),
   });
 }
 
 export async function login(): Promise<AuthUser> {
-  const { options } = await post<{ options: PublicKeyCredentialRequestOptionsJSON }>(
+  const { options } = await postJson<{ options: PublicKeyCredentialRequestOptionsJSON }>(
     "/api/auth/login/begin",
   );
   const response = await startAuthentication({ optionsJSON: options });
-  return post<AuthUser>("/api/auth/login/verify", { response });
+  return postJson<AuthUser>("/api/auth/login/verify", { response });
 }
 
-export const logout = (): Promise<Record<string, never>> => post("/api/auth/logout");
+export const logout = (): Promise<Record<string, never>> => postJson("/api/auth/logout");
 
 export const listCredentials = (): Promise<CredentialSummary[]> =>
   request("/api/auth/credentials");
 
 export async function addDevice(deviceName: string): Promise<{ id: string }> {
-  const { options } = await post<{ options: PublicKeyCredentialCreationOptionsJSON }>(
+  const { options } = await postJson<{ options: PublicKeyCredentialCreationOptionsJSON }>(
     "/api/auth/credentials/add/begin",
   );
   const response = await startRegistration({ optionsJSON: options });
-  return post<{ id: string }>("/api/auth/credentials/add/verify", {
+  return postJson<{ id: string }>("/api/auth/credentials/add/verify", {
     response,
     ...(deviceName ? { deviceName } : {}),
   });
@@ -113,26 +92,21 @@ export function describeAuthError(e: unknown): string {
         return `${e.code}: ${e.message}`;
     }
   }
-  if (e instanceof Error && "status" in e) {
-    const { status, type, message } = e as Error & { status: number; type?: string };
-    switch (type) {
+  if (isApiError(e)) {
+    // Auth-specific readings first; everything else (rate_limited,
+    // session_expired, ...) shares the generic sentences in api.ts.
+    switch (e.type) {
       case "registration_closed":
         return "登録は閉じられています（登録トークンが違うか、未設定です）。";
       case "auth_not_configured":
         return "サーバの認証設定が未完了です（SESSION_SECRET 未設定）。";
-      case "rate_limited":
-        return "試行が多すぎます。1 分ほど待ってください。";
       case "not_found":
         return "この端末のパスキーは登録されていません。";
       case "challenge_mismatch":
         return "検証に失敗しました。最初からやり直してください。";
       case "last_credential":
         return "最後の 1 本のパスキーは削除できません。";
-      case "session_expired":
-        return "セッションが切れました。もう一度ログインしてください。";
-      default:
-        return `${message}（HTTP ${status}）`;
     }
   }
-  return String(e);
+  return describeApiError(e);
 }
