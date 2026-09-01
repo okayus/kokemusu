@@ -68,10 +68,11 @@ Phase 1 MVP の最初の縦切り。**完了したらこのファイルは削除
   ローカル D1 で cascade（`DELETE FROM user` → 子行全滅）・`tag.norm` の NOT NULL・`(user_id, norm)` UNIQUE・
   `body_format` の既定値 `markdown` も実挙動を確認。
 
-### PR2 — パスキー認証 + セキュリティヘッダ（skill `cloudflare-workers-passkey-auth` の single-user 変種）
+### PR2 — パスキー認証 + セキュリティヘッダ（skill `cloudflare-workers-passkey-auth` の single-user 変種） ✅ merged (#14 + hotfix #15、本番検証 2026-09-01)
 
 > ⚠️ **この PR で初回登録をした瞬間、`RP_ID = kokemusu.shiraoka.workers.dev` が永久に確定する。**
 > 独自ドメインに移る可能性が少しでもあるなら、**登録より前に**移すこと（後からでは全パスキーが無効）。
+> → ✅ 2026-09-01、初回登録により **RP_ID 確定済み**。
 
 - `@simplewebauthn/server` v13。route: `POST /api/auth/register/begin|verify`（public + レート制限。
   `INITIAL_REGISTRATION_TOKEN` 不一致 / 未設定は `403 registration_closed`）、`POST /api/auth/login/begin|verify`（public）、
@@ -89,9 +90,8 @@ Phase 1 MVP の最初の縦切り。**完了したらこのファイルは削除
   （`INITIAL_REGISTRATION_TOKEN` が一致する場合のみ）。skill の既定は「初期トークンの再発行 = 新しい owner user」だが、
   苔むすは 1 人 1 インスタンスで `post` が `user_id` に紐づくため、新 user を作ると**過去の苔片が全部孤児になる**。
   この 1 行が「全パスキー紛失からの復帰」と「将来 RP_ID を変えたくなったときの再登録」の両方を安くする。
-- 人手（ホスト）: `SESSION_SECRET` と `INITIAL_REGISTRATION_TOKEN` を `wrangler secret put` →
-  **端末 2 台**登録 → `wrangler secret delete INITIAL_REGISTRATION_TOKEN` で閉じる。
-- 検証: 本番でログイン / ログアウト、未認証で `GET /api/auth/me` が 401、`register/begin` が 403。
+- ✅ 人手（ホスト）完了: secret 2 つ → 端末 2 台登録 → `wrangler secret delete INITIAL_REGISTRATION_TOKEN` で閉鎖（2026-09-01）。
+- ✅ 検証済み: ログイン往復、未認証 `me` 401、`register/begin` 403。本番だけ verify が 500 になる `__Host-` cookie 削除罠（hono は削除にも secure を要求して throw）は hotfix #15 で解消 — 経緯と書き戻しメモは #15 本文。
 
 ### PR3 — 本文暗号化コア（[ADR-0001](../adr/0001-body-encrypted-at-app-layer.md)。**最初の実データより前**）
 
