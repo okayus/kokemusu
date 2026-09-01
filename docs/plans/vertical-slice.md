@@ -93,7 +93,7 @@ Phase 1 MVP の最初の縦切り。**完了したらこのファイルは削除
 - ✅ 人手（ホスト）完了: secret 2 つ → 端末 2 台登録 → `wrangler secret delete INITIAL_REGISTRATION_TOKEN` で閉鎖（2026-09-01）。
 - ✅ 検証済み: ログイン往復、未認証 `me` 401、`register/begin` 403。本番だけ verify が 500 になる `__Host-` cookie 削除罠（hono は削除にも secure を要求して throw）は hotfix #15 で解消 — 経緯と書き戻しメモは #15 本文。
 
-### PR3 — 本文暗号化コア（[ADR-0001](../adr/0001-body-encrypted-at-app-layer.md)。**最初の実データより前**）
+### PR3 — 本文暗号化コア（[ADR-0001](../adr/0001-body-encrypted-at-app-layer.md)。**最初の実データより前**） ✅ merged (#19, 2026-09-01)
 
 - `apps/web/worker/core/crypto.ts`: AES-GCM 256、iv 12 バイト乱数、封筒 `k1.<iv(base64url)>.<暗号文(base64url)>`。
   `encryptBody(plain, key)` / `decryptBody(envelope, key)` の純粋関数（鍵は引数で受ける＝ I/O は境界に押し出す）。
@@ -102,7 +102,7 @@ Phase 1 MVP の最初の縦切り。**完了したらこのファイルは削除
 - テスト: 往復・毎回 iv が変わる・別鍵では失敗・封筒の形・鍵 ID の取り出し。
 - ログに平文・鍵・封筒を出さない。
 
-### PR4 — 投稿 API + 最小タイムライン
+### PR4 — 投稿 API + 最小タイムライン ✅ merged (#20, 2026-09-01。BODY_KEY 設定・本番投稿の動作確認済み = DoD 1〜3)
 
 - `POST /api/posts`（セッション必須）: Zod で `{ body: 1..N 文字, tags?: string[], title?: string }`。
   タグは `normalizeTagName`（`apps/web/worker/core/tag.ts`、`trim + NFKC + toLowerCase`）→ `(user_id, norm)` で引き、
