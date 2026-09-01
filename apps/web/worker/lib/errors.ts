@@ -16,6 +16,7 @@ const STATUS = {
   rate_limited: 429,
   internal: 500,
   auth_not_configured: 503,
+  encryption_not_configured: 503,
 } as const;
 
 export type ErrorType = keyof typeof STATUS;
