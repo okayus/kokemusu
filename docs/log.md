@@ -3,6 +3,8 @@
 1 行 = 1 節目（PR の merge・ADR・人手作業の完了・本番の状態変化）。`- YYYY-MM-DD 何を（#PR / ADR / skill）`。
 自動ロードはされない。必要なら `head -20 docs/log.md`。作業中の試行錯誤は書かない（git log と PR にある）。
 
+- 2026-09-01 縦切り PR4 merge: 投稿 API + 最小タイムライン（#20。post + 新規 tag + post_tags を原子的 db.batch・タグは norm で dedupe・keyset カーソル・`/api/*` に no-store・⌘/Ctrl+Enter と localStorage 退避の 1 欄コンポーザ）。人手の BODY_KEY 設定と本番投稿の動作確認まで完了 = **DoD 1〜3 通過**、D1 に平文ゼロはローカル実証（本番の封筒目視 = DoD 5 は次の 3 手）
+- 2026-09-01 縦切り PR3 merge: 本文暗号化コア（#19、ADR-0001）— AES-256-GCM・封筒 `k1.<iv>.<暗号文>`・鍵は引数で受ける純粋関数のみ・BODY_KEY 未設定/不正は fail closed
 - 2026-09-01 PR2 の本番検証完了: 端末 2 台のパスキー登録・ログイン往復・`INITIAL_REGISTRATION_TOKEN` 削除で登録の扉を閉じた（外形も実測: 未認証 `me` 401 / `register/begin` 403 / `login/begin` 200）。**RP_ID = kokemusu.shiraoka.workers.dev はこれで確定**。secret put のパイプ形は値が画面に出ない罠 → 2 段形に訂正（#14 コメント）
 - 2026-08-29 merge を `gh pr merge --auto --squash` の opt-in へ（例外あり、CLAUDE.md）、ci.yml を安定シェル化（`.node-version` / root `ci` script / Dependabot、#16）。matatabetai（ADR-001 改訂 2026-08-24）と okayus-skills token skill 0.2.4 に追随。5 日間 merge 待ちだった #15 は 2026-08-29 にホストで merge
 - 2026-08-29 本番だけ verify 系が全部 500 → hotfix #15: hono は `__Host-` cookie の**削除**にも secure を要求して throw する（`consumeChallenge` の deleteCookie が漏れ。http のローカル / 単体テストは素の cookie 名で発火しない）。削除を `clearCookie()` に一元化し、https ORIGIN の回帰テスト 3 件を追加。skill passkey-auth の参照コードにも同罠 = 書き戻し対象
