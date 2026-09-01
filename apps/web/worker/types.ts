@@ -21,6 +21,12 @@ export type Bindings = {
   // Worker Secret, present only while bootstrapping passkeys. Unset =
   // `403 registration_closed` — the registration door is shut by default.
   INITIAL_REGISTRATION_TOKEN?: string;
+  // Worker Secret: AES-256-GCM key for body/title encryption at rest
+  // (ADR-0001, worker/core/crypto.ts). Standard base64, exactly 32 bytes;
+  // the same value lives in 1Password — losing it makes every stored body
+  // unrecoverable. Not read until PR4 wires the posts routes; those will
+  // fail closed when it is unset or malformed.
+  BODY_KEY?: string;
   // .dev.vars only ("1" during `vite dev`): relaxes the CSP so Vite's inline
   // HMR preamble can run. Never set in production or for e2e.
   DEV_CSP?: string;

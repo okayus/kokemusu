@@ -23,4 +23,13 @@ INITIAL_REGISTRATION_TOKEN=
 # leave unset for e2e against the build artifact so e2e asserts the real CSP.
 DEV_CSP=1
 
-# Later phases add: BODY_KEY (PR3), PAT_PEPPER (API tokens, Phase 2).
+# AES-256-GCM key for body/title encryption at rest (ADR-0001). Standard base64,
+# exactly 32 bytes — generate: openssl rand -base64 32. Anything else counts as
+# unset (posts routes fail closed once PR4 wires them). Use a value DIFFERENT
+# from production. Production (host): run openssl, save the value to 1Password
+# FIRST, then paste it into the `wrangler secret put BODY_KEY` prompt — never
+# pipe it in (the value would scroll past unseen; losing it = every stored body
+# is unrecoverable).
+BODY_KEY=
+
+# Later phases add: PAT_PEPPER (API tokens, Phase 2).
