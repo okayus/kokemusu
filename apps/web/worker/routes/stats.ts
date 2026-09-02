@@ -11,14 +11,10 @@ import {
   isDayKey,
   type DayKey,
 } from "../core/day";
-import { normalizeTagName } from "../core/tag";
 import { createDb } from "../db";
-import { post, postTags, tag } from "../db/schema";
+import { post } from "../db/schema";
 import { fail } from "../lib/errors";
 import type { Env } from "../types";
-
-// Mirrors the cap in routes/posts.ts — a name longer than this can't exist.
-const MAX_TAG_CHARS = 100;
 
 /** Widest window the route serves: 53 Sunday-start columns, GitHub-style. */
 export const MAX_WINDOW_DAYS = 53 * 7;
@@ -32,9 +28,10 @@ export const MAX_WINDOW_DAYS = 53 * 7;
 const MAX_LEVEL = 4;
 
 // Exported for direct unit tests (the D1-free harness cannot get past
-// sessionMiddleware, same arrangement as routes/posts.ts).
+// sessionMiddleware, same arrangement as routes/posts.ts). No ?tag= on
+// purpose: the heatmap is the 総草 and never splits by tag (visualization.md
+// §1, 2026-09-02) — per-tag devotion is the graph's and the tag timeline's job.
 export const heatmapQuerySchema = z.object({
-  tag: z.string().min(1).max(MAX_TAG_CHARS).optional(),
   from: z.string().refine(isDayKey, "must be a YYYY-MM-DD calendar day").optional(),
   to: z.string().refine(isDayKey, "must be a YYYY-MM-DD calendar day").optional(),
 });
@@ -80,10 +77,9 @@ export function buildHeatmap(
 }
 
 export const statsRoutes = new Hono<Env>()
-  // ------------------------------------------------------- heatmap (苔の濃淡)
+  // ------------------------------------------------------- heatmap (総草)
   .get("/heatmap", async (c) => {
     const parsed = heatmapQuerySchema.safeParse({
-      tag: c.req.query("tag"),
       from: c.req.query("from"),
       to: c.req.query("to"),
     });
@@ -92,46 +88,22 @@ export const statsRoutes = new Hono<Env>()
     if (window === null) return fail(c, "validation_error");
     const { from, to } = window;
 
-    const userId = c.get("userId");
-    const db = createDb(c.env.DB);
-
-    // ?tag= filters by the normalized name, like the timeline. An unknown tag
-    // is a garden no moss has grown on — dense zeros, not a 400.
-    let tagFilterId: string | null = null;
-    if (parsed.data.tag !== undefined) {
-      const norm = normalizeTagName(parsed.data.tag);
-      if (norm === "") return fail(c, "validation_error");
-      const hit = (
-        await db
-          .select({ id: tag.id })
-          .from(tag)
-          .where(and(eq(tag.userId, userId), eq(tag.norm, norm)))
-      )[0];
-      if (!hit) return c.json({ from, to, days: buildHeatmap([], from, to) });
-      tagFilterId = hit.id;
-    }
-
     // Only the plaintext axis leaves D1: `created_at` inside the half-open
-    // window [dayStartMs(from), dayStartMs(addDays(to, 1))). Bodies stay
-    // encrypted and untouched — which is why this route has no BODY_KEY gate
-    // (ADR-0001): the moss is drawable even while the key is missing.
-    let query = db.select({ createdAt: post.createdAt }).from(post).$dynamic();
-    if (tagFilterId !== null) {
-      // A post carries a tag at most once (PK), so the join cannot fan out.
-      // No join at all without ?tag= — untagged 苔片 belong to the 総草.
-      query = query.innerJoin(
-        postTags,
-        and(eq(postTags.postId, post.id), eq(postTags.tagId, tagFilterId)),
+    // window [dayStartMs(from), dayStartMs(addDays(to, 1))). No JOIN — every
+    // 苔片 counts, tagged or not. Bodies stay encrypted and untouched — which
+    // is why this route has no BODY_KEY gate (ADR-0001): the moss is drawable
+    // even while the key is missing.
+    const rows = await createDb(c.env.DB)
+      .select({ createdAt: post.createdAt })
+      .from(post)
+      .where(
+        and(
+          eq(post.userId, c.get("userId")),
+          isNull(post.deletedAt),
+          gte(post.createdAt, dayStartMs(from)),
+          lt(post.createdAt, dayStartMs(addDays(to, 1))),
+        ),
       );
-    }
-    const rows = await query.where(
-      and(
-        eq(post.userId, userId),
-        isNull(post.deletedAt),
-        gte(post.createdAt, dayStartMs(from)),
-        lt(post.createdAt, dayStartMs(addDays(to, 1))),
-      ),
-    );
 
     return c.json({
       from,

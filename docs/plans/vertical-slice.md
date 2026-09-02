@@ -11,7 +11,8 @@ Phase 1 MVP の最初の縦切り。**完了したらこのファイルは削除
 1. 自分のパスキーでログインできる。ログアウト状態では API が `401`、登録は `403 registration_closed`。
 2. 1 欄のフォームに書き、`typescript` タグを付けて投稿できる（`⌘/Ctrl+Enter`）。
 3. タイムラインに、いま書いた苔片が出る。
-4. `typescript の苔` のヒートマップで **今日のマスが 1 段濃くなる**。
+4. 総草ヒートマップで **今日のマスが 1 段濃くなる**（2026-09-02 決定でヒートマップは総草 1 枚のみ。
+   タグ別はグラフ / タグのタイムラインで代替 — [visualization.md](../visualization.md) §1）。
 5. `wrangler d1 execute kokemusu-db --remote --command "SELECT body FROM post LIMIT 1"` が
    封筒（`k1.<iv>.<暗号文>`）を返す＝**平文の本文が D1 に 1 行も無い**（[ADR-0001](../adr/0001-body-encrypted-at-app-layer.md)）。
 
@@ -117,11 +118,11 @@ Phase 1 MVP の最初の縦切り。**完了したらこのファイルは削除
 
 - `apps/web/worker/core/day.ts`: `APP_TZ = "Asia/Tokyo"`、`dayKey(epochMs, tz = APP_TZ): "YYYY-MM-DD"`（`Intl` 使用）、
   `bucketByDay(rows, tz)`。全部純粋関数＝ Node の vitest でテスト（境界: 00:00 / 08:59 / 23:59、うるう年、月跨ぎ）。
-- `GET /api/stats/heatmap?tag=&from=&to=`: `post ⋈ post_tags` を期間で絞って `created_at, tag_id` だけ取り、
+- `GET /api/stats/heatmap?from=&to=`: `post` を期間で絞って `created_at` だけ取り、
   `bucketByDay` で日別件数に畳む（**本文に触らない** = 暗号化と両立）。
   規模が問題になったら日次集計テーブルを足す、と決めておく（個人日記の規模では素朴な集計で十分）。
 - SVG: 週 = 列 / 曜日 = 行の格子、濃淡 5 段（深緑〜黄緑の苔グラデ、ライト/ダーク両対応の CSS カスタムプロパティ）。
-  タグごとに 1 枚 + 総草。マスに `<title>` で「8/23 · 2 件」。週の開始は日曜固定（設定は後）。
+  **総草 1 枚のみ**（当初の「タグごとに 1 枚」は 2026-09-02 に取り消し）。マスに `<title>` で「8/23 · 2 件」。週の開始は日曜固定（設定は後）。
 - 検証: 本番で投稿 → **今日のマスが 1 段濃くなる**（DoD 4）。
 
 ### PR6 — e2e（skill `cloudflare-workers-e2e-playwright` + `playwright-e2e-in-docker-sandbox`）
