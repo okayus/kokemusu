@@ -6,12 +6,12 @@
 
 ## フェーズ
 
-**Phase 1 MVP — 縦切り「投稿 → タグ → ヒートマップに 1 マス点く」完了（2026-09-02、DoD 1〜5）+ e2e 3 spec（#26）。** 本番 = ログイン → 投稿 → タイムライン + 総草で今日のマスが濃くなる。可視化の方向: **ヒートマップは総草 1 枚だけ**、タグの打ち込みは「量 = グラフのノード成長 / 期間 = タグのタイムライン」（visualization.md §1/§6/§8）。merge 前の回帰検知はコンテナ内 `pnpm e2e`（`apps/web/e2e/README.md`。CI は spec の型検査のみ）。
+**Phase 1 MVP — 縦切り + e2e（#26）完了、スキルシート方向の設計確定（#28、2026-09-03）。** 案件はタグで表す（見出しは軸にしない）。§8 タグのタイムラインは「行 = タグ集合 AND の単棒 + フォーカス」（visualization.md §8 / features.md §2 / security.md のぼかし規律）。縦切りの並びは **§8 → PAT → §6** に確定。仕事の苔片（案件タグ 1 + 技術タグ）は今日から積める。merge 前の回帰検知はコンテナ内 `pnpm e2e`（`apps/web/e2e/README.md`。CI は spec の型検査のみ）。
 
 ## 次の 3 手
 
-1. **次の縦切りを 1 本選ぶ（並びはユーザに確認してから着手）**: タグ関係グラフ（§6、石が投稿数で育つ）/ タグのタイムライン（§8、最初〜最後の苔片の期間）/ PAT（Phase 2 先頭、mazuoboeru が待つ）。集計クエリは data-model.md 集計節に既記。選んだら `docs/plans/<topic>.md` に DoD を切り、ゴールデンパス spec に 1 手足すところまでを DoD に含める。
-2. Phase 1 の取りこぼしをどこかで拾う: 投稿の編集・ソフトデリート UI / Markdown + サニタイズ / タグ絞り込み・期間の UI（roadmap.md Phase 1）。
+1. **縦切り「タグのタイムライン」を実装する**: ブランチ `claude/tag-timeline`、DoD は docs/plans/tag-timeline.md（`GET /api/stats/timeline` の 3 形 → SVG 横棒年表 → フォーカス UI → 本番目視 → e2e ゴールデンパスに 1 手）。BODY_KEY をこの経路に入れない・日付バケットは core の純粋関数（SQL の `date()` 禁止）。
+2. その後 PAT（Phase 2 先頭、mazuoboeru が待つ）→ §6 タグ関係グラフ。Phase 1 の取りこぼし（編集・ソフトデリート UI / Markdown + サニタイズ / タグ・期間絞り込み UI）はどこかで拾う。
 3. okayus-skills#41 の merge 後、ホストの okayus-skills を `main` に戻す（`git switch main && git pull`。コンテナの skills mount はホストの working tree なので、いまは PR ブランチの内容が見えている）。
 
 ## 詰まり・人手待ち
