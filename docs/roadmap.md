@@ -10,7 +10,7 @@
 ## Phase 1 — MVP（毎日使える最小形）
 
 ゴール: **自分が毎日投稿して、最低限の苔（ヒートマップ）を眺められる。**
-最初の縦切り「投稿 → タグ → ヒートマップに 1 マス点く」は **完了（2026-09-02、DoD 1〜5 全通過。[log.md](log.md)。plans/vertical-slice.md は削除済み＝ git 履歴）**。残り: e2e（PR6）、投稿の編集・ソフトデリート UI、Markdown + サニタイズ、タグ絞り込み・期間の UI。
+最初の縦切り「投稿 → タグ → ヒートマップに 1 マス点く」は **完了（2026-09-02、DoD 1〜5 全通過。[log.md](log.md)。plans/vertical-slice.md は削除済み＝ git 履歴）**。e2e（PR6、#26）も 2026-09-02 に完了。残り: 投稿の編集・ソフトデリート UI、Markdown + サニタイズ、タグ絞り込み・期間の UI。
 
 - DB スキーマとマイグレーション（[data-model.md](data-model.md)）。実スキーマ投入前に `cloudflare-d1-drizzle-migration` 必読。
 - 投稿 CRUD（作成・編集・ソフトデリート、Markdown ＋ サニタイズ、任意の `title`）。
@@ -18,7 +18,7 @@
 - タイムライン（新着順、タグ絞り込み、期間）。
 - **総草ヒートマップ**（可視化1種。タグ別ヒートマップは作らない — [visualization.md](visualization.md) §1、2026-09-02）。
 - **パスキー認証（single-user）**: `INITIAL_REGISTRATION_TOKEN` で一度だけ登録を開けて閉じる、端末 2 台登録、リカバリ runbook。安全な Cookie/セッション、HTTPS/HSTS、CSP、認証 route のレート制限（`cloudflare-workers-bot-scan-defense`）。
-- WebAuthn 仮想 authenticator の e2e（コンテナ内）。
+- ✅ WebAuthn 仮想 authenticator の e2e（コンテナ内、#26）。
 - **本文のアプリ層暗号化 (B)**: 最初の実データより前に。`BODY_KEY`（Worker Secret、1Password にも控える）、メタデータは平文、検索は復号して走査（[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。
 
 ## Phase 2 — 振り返りを豊かに

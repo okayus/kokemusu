@@ -19,7 +19,7 @@
 | `cloudflare-workers-passkey-auth` | パスキー認証（single-user 変種 = spaces / invite なし） | **Phase 1** 認証 |
 | `cloudflare-workers-pat-bearer-auth` | API 自動投稿用 PAT（受け側） | **Phase 2** `POST /api/posts` を `post:write` で開ける |
 | `cloudflare-workers-bot-scan-defense` | 公開直後の bot スキャン耐性・認証 / PAT route のレート制限 | **Phase 1〜** |
-| `cloudflare-workers-e2e-playwright` / `playwright-e2e-in-docker-sandbox` | WebAuthn 仮想 authenticator の e2e をコンテナ内で | **Phase 1** |
+| `cloudflare-workers-e2e-playwright` / `playwright-e2e-in-docker-sandbox` | WebAuthn 仮想 authenticator の e2e をコンテナ内で | **Phase 1 — 構築済み（#26、2026-09-02）**。`apps/web/e2e/README.md` |
 | `cloudflare-d1-weekly-backup-via-pr` | D1 の定期バックアップ | **Phase 3**。public リポなので「git に commit」変種は不可 → keyless 変種（ホスト timer か Worker→R2）を skill 側で追加してから |
 | `cloudflare-api-token-permissions` | CI 用 API トークンの権限診断 | **原則不要**（GitHub に CF トークンを置かない）。Workers Builds のビルドトークンの権限不足を引くときの参照 |
 | `cloudflare-cron-to-discord` / `cloudflare-workflows-for-long-tasks` | Cron 通知 / 30 秒超の処理 | 当面不要 |
