@@ -3,6 +3,9 @@
 1 行 = 1 節目（PR の merge・ADR・人手作業の完了・本番の状態変化）。`- YYYY-MM-DD 何を（#PR / ADR / skill）`。
 自動ロードはされない。必要なら `head -20 docs/log.md`。作業中の試行錯誤は書かない（git log と PR にある）。
 
+- 2026-09-02 **縦切り「投稿 → タグ → ヒートマップに 1 マス点く」完了 = DoD 1〜5 全通過**（DoD 4 = 総草で今日のマスが 1 段濃くなるのを本番目視、DoD 5 = 本番 D1 の `substr(body,1,20)` が `k1.XRHdTggcBi-M5-a6.` — 封筒の `k1.` + IV16 文字 + `.` でちょうど 20 文字 = 平文ゼロ）。plans/vertical-slice.md を削除、PR6（e2e）は status の次の 3 手へ
+- 2026-09-02 方向転換 merge #25: **ヒートマップは総草 1 枚だけ**（タグ別を廃止、API の `?tag=` も削除）。タグへの打ち込みは「量 = タグ関係グラフのノード成長（visualization.md §6）」「期間 = タグのタイムライン（§8 新設、最初〜最後の苔片の横棒年表）」で見る。用語「総草」を CONTEXT.md へ。ADR 変更なし — 0001 の「平文メタデータで集計」はグラフ/タイムラインでも同じ根拠で成立
+- 2026-09-02 縦切り PR5 後半 merge #24: `GET /api/stats/heatmap`（半開き窓・既定「今日を含む 53 週」= to の週の日曜から 52 週遡る 53 列・**濃淡は固定閾値 `level = min(count,4)` をサーバが返す** — タグ間で同じ濃さ = 同じ件数・過去のマスが他の日の増減で動かない・1 投稿で確実に 1 段。本文に触らないので BODY_KEY ゲート無し）+ 自作 SVG（週=列/曜日=行・日曜始まり・`--moss-0..4` light-dark() トークン、dark は「多いほど明るい」へ別途選段し OKLCH 単調性を機械検証・右端 = 今日の横スクロール・格子は renderToStaticMarkup の markup テストで固定）。day.ts に `dayOfWeek`（0=日曜）追加
 - 2026-09-02 縦切り PR5 前半 merge: 日の軸 `worker/core/day.ts`（#22）— 苔片がどのマスに落ちるかを Intl でゾーンから決める純粋関数（SQLite の `date()` は UTC 基準なので朝 9 時前が前日にずれる）。`dayKey` / `bucketByDay` に加えて逆関数 `dayStartMs` と暦の `addDays` / `enumerateDays`、境界テスト 28 件。**Temporal は workerd 2026-08-20 にも TS 7.0.2 にも無い**ことを実測（来たら `dayKey` / `dayStartMs` の 2 本体だけで置き換わる）。代わりに Temporal をオラクルにした差分検証 13 ゾーン 53k 値で不一致ゼロ
 - 2026-09-01 縦切り PR4 merge: 投稿 API + 最小タイムライン（#20。post + 新規 tag + post_tags を原子的 db.batch・タグは norm で dedupe・keyset カーソル・`/api/*` に no-store・⌘/Ctrl+Enter と localStorage 退避の 1 欄コンポーザ）。人手の BODY_KEY 設定と本番投稿の動作確認まで完了 = **DoD 1〜3 通過**、D1 に平文ゼロはローカル実証（本番の封筒目視 = DoD 5 は次の 3 手）
 - 2026-09-01 縦切り PR3 merge: 本文暗号化コア（#19、ADR-0001）— AES-256-GCM・封筒 `k1.<iv>.<暗号文>`・鍵は引数で受ける純粋関数のみ・BODY_KEY 未設定/不正は fail closed

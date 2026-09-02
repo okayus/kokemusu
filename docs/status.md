@@ -6,21 +6,19 @@
 
 ## フェーズ
 
-**Phase 1 MVP・縦切り「投稿 → タグ → ヒートマップに 1 マス点く」— PR4 まで本番稼働、PR5（ヒートマップ）に着手中。** 並び・DoD・リスクは [plans/vertical-slice.md](plans/vertical-slice.md)。本番 = パスキーでログインして投稿でき、タイムラインに出る（DoD 1〜3 通過）。ヒートマップはまだ無い。
+**Phase 1 MVP — 縦切り「投稿 → タグ → ヒートマップに 1 マス点く」完了（2026-09-02、DoD 1〜5 全通過）。** 本番 = ログイン → 投稿 → タイムライン + 総草で今日のマスが濃くなる。可視化の方向は転換済み: **ヒートマップは総草 1 枚だけ**、タグの打ち込みは「量 = グラフのノード成長 / 期間 = タグのタイムライン」（visualization.md §1/§6/§8）。
 
 ## 次の 3 手
 
-日の軸 `worker/core/day.ts` は merge 済み（#22。`APP_TZ` / `dayKey` / `bucketByDay` / `dayStartMs` / `addDays` / `enumerateDays`、境界テスト 28 件）。PR5 の残りは 1 と 2。
-
-1. **`GET /api/stats/heatmap?tag=&from=&to=`**（`claude/heatmap-api` を切る）: 窓は半開き `[dayStartMs(from), dayStartMs(addDays(to,1)))`、`post ⋈ post_tags` から `created_at` と `tag_id` だけ取る（本文に触らない）。`bucketByDay` + `enumerateDays` で密な日次系列にして返す。`tag` は norm 引き・未知タグは空。**窓の上限（53 週など）は route が 400 で返す** — `enumerateDays` の throw は呼び出し側のバグ止めであって仕様ではない。
-2. **自作 SVG**（書く前に skill `modern-web-guidance`）: 週=列 / 曜日=行、苔の濃淡 5 段（light/dark トークン）、マスに `<title>`「8/23 · 2 件」、週の開始は日曜固定。格子のレイアウトに要るなら day.ts に曜日/週の関数を 1 つ足す。ここまでで PR5 = **DoD 4「今日のマスが 1 段濃くなる」**。
-3. DoD 5 の目視（ホスト、1 回）: `wrangler d1 execute kokemusu-db --remote --command "SELECT substr(body,1,20) FROM post LIMIT 1"` が `k1.` 封筒を返す = 本番 D1 に平文が無いことの確定。
+1. **PR6（e2e、縦切りの仕上げ）**: 下欄の Chromium 焼き込み（人手）が通ったら着手。3 spec だけ — ゴールデンパス（登録 → 投稿 → 総草に 1 マス）/ 認証境界 401 / セキュリティヘッダ。skill `cloudflare-workers-e2e-playwright` + `playwright-e2e-in-docker-sandbox` の罠（ビルド成果物に `wrangler dev --persist-to .wrangler/state --ip 127.0.0.1`、e2e config から ratelimits を外す）どおりに。
+2. **次の縦切りを 1 本選ぶ**: タグ関係グラフ（§6、石が投稿数で育つ）か タグのタイムライン（§8、最初〜最後の苔片の期間）か PAT（Phase 2 先頭、mazuoboeru が待つ）。集計クエリは data-model.md 集計節に既記。並びはユーザに確認してから。
+3. Phase 1 の取りこぼしをどこかで拾う: 投稿の編集・ソフトデリート UI / Markdown + サニタイズ / タグ絞り込み・期間の UI（roadmap.md Phase 1）。
 
 ## 詰まり・人手待ち
 
+- PR6 の先行人手: Chromium をイメージに焼く `.docker/Dockerfile` 変更 → ホストで `docker compose down && docker compose build && ./up.sh`。
 - スキル書き戻し（ホスト。コンテナの okayus-skills は ro mount）: `cloudflare-workers-passkey-auth` = UNVERIFIED 3 件解消・`__Host-` 削除罠・secret put パイプ罠（詳細は #14 / #15）、`playwright-e2e-in-docker-sandbox` = Trap 1 は現行版 vite dev では再現せず（ratelimits ローカル実動）。
-- PR6（e2e）の先行人手: Chromium をイメージに焼く `.docker/Dockerfile` 変更 → ホストで `docker compose down && docker compose build && ./up.sh`。
 
 ## 進行中 PR
 
-- なし。`claude/heatmap` は endpoint と SVG が載ってから PR（1 PR = merge して困らない状態）。
+- なし。
