@@ -4,6 +4,9 @@ dist/
 build/
 .wrangler/
 *.log
+# Playwright artifacts (traces / screenshots of failed e2e runs)
+test-results/
+playwright-report/
 
 # env / secrets (never commit)
 .dev.vars

@@ -1,0 +1,12 @@
+{
+  // Type-checks the e2e suite (`pnpm check`, hence CI) separately from the app:
+  // the specs and helpers are Node + Playwright code, not Worker code, so they
+  // get Node's types instead of worker-configuration.d.ts and are allowed the
+  // explicit ".ts" import that plain `node e2e/prepare-config.ts` needs.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["e2e/**/*", "playwright.config.ts"]
+}

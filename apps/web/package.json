@@ -9,8 +9,10 @@
     "preview": "vite preview",
     "deploy": "pnpm build && wrangler deploy",
     "types": "wrangler types",
-    "check": "pnpm run types && tsc --noEmit",
+    "check": "pnpm run types && tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json",
     "test": "vitest run",
+    "e2e": "playwright test",
+    "e2e:server": "pnpm build && node e2e/prepare-config.ts && wrangler dev --config dist/kokemusu/wrangler.json --persist-to .wrangler/e2e --ip 127.0.0.1 --port 5183",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply kokemusu-db --local",
     "db:migrate:prod": "wrangler d1 migrations apply kokemusu-db --remote"
@@ -26,6 +28,8 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.53.1",
+    "@playwright/test": "1.62.1",
+    "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",
