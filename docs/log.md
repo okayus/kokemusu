@@ -3,6 +3,7 @@
 1 行 = 1 節目（PR の merge・ADR・人手作業の完了・本番の状態変化）。`- YYYY-MM-DD 何を（#PR / ADR / skill）`。
 自動ロードはされない。必要なら `head -20 docs/log.md`。作業中の試行錯誤は書かない（git log と PR にある）。
 
+- 2026-09-02 縦切り PR5 前半 merge: 日の軸 `worker/core/day.ts`（#22）— 苔片がどのマスに落ちるかを Intl でゾーンから決める純粋関数（SQLite の `date()` は UTC 基準なので朝 9 時前が前日にずれる）。`dayKey` / `bucketByDay` に加えて逆関数 `dayStartMs` と暦の `addDays` / `enumerateDays`、境界テスト 28 件。**Temporal は workerd 2026-08-20 にも TS 7.0.2 にも無い**ことを実測（来たら `dayKey` / `dayStartMs` の 2 本体だけで置き換わる）。代わりに Temporal をオラクルにした差分検証 13 ゾーン 53k 値で不一致ゼロ
 - 2026-09-01 縦切り PR4 merge: 投稿 API + 最小タイムライン（#20。post + 新規 tag + post_tags を原子的 db.batch・タグは norm で dedupe・keyset カーソル・`/api/*` に no-store・⌘/Ctrl+Enter と localStorage 退避の 1 欄コンポーザ）。人手の BODY_KEY 設定と本番投稿の動作確認まで完了 = **DoD 1〜3 通過**、D1 に平文ゼロはローカル実証（本番の封筒目視 = DoD 5 は次の 3 手）
 - 2026-09-01 縦切り PR3 merge: 本文暗号化コア（#19、ADR-0001）— AES-256-GCM・封筒 `k1.<iv>.<暗号文>`・鍵は引数で受ける純粋関数のみ・BODY_KEY 未設定/不正は fail closed
 - 2026-09-01 PR2 の本番検証完了: 端末 2 台のパスキー登録・ログイン往復・`INITIAL_REGISTRATION_TOKEN` 削除で登録の扉を閉じた（外形も実測: 未認証 `me` 401 / `register/begin` 403 / `login/begin` 200）。**RP_ID = kokemusu.shiraoka.workers.dev はこれで確定**。secret put のパイプ形は値が画面に出ない罠 → 2 段形に訂正（#14 コメント）
