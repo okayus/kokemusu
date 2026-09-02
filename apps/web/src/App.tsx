@@ -19,6 +19,7 @@ import {
   type PostItem,
   type TagSummary,
 } from "./posts-api";
+import { TagTimelineSection } from "./TagTimeline";
 import { useAuth } from "./useAuth";
 
 const dateFmt = new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" });
@@ -258,6 +259,7 @@ function Garden(props: { onSessionLost: () => void }) {
         </p>
       )}
       <HeatmapSection refreshKey={mossVersion} onFault={fault} />
+      <TagTimelineSection refreshKey={mossVersion} tagOptions={tagOptions} onFault={fault} />
       <Timeline posts={posts} />
       {nextCursor !== null && (
         <button type="button" disabled={loadingMore} onClick={() => void loadMore()}>

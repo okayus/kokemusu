@@ -56,6 +56,33 @@ test("register → post → today's moss darkens → reload → logout → login
   expect(heatmap.days.at(-1)).toEqual({ day: heatmap.to, count: 1, level: 1 });
   expect(heatmap.days.reduce((n, d) => n + d.count, 0)).toBe(1);
 
+  // 石の年表 (visualization.md §8): the two stones appear as one row each, and
+  // tapping a stone opens its 内訳年表 — the stone alone plus stone × 共起タグ.
+  const yearChart = page.locator("section.tag-timeline");
+  await expect(yearChart.locator("li.tl-row")).toHaveCount(2);
+  await expect(yearChart.locator(".tl-note").first()).toHaveText("1 片 · 1.0日/片");
+  await yearChart.getByRole("button", { name: "e2e", exact: true }).click();
+  await expect(yearChart.getByText("「e2e」の内訳")).toBeVisible();
+  const focusRows = yearChart.locator("li.tl-row");
+  await expect(focusRows).toHaveCount(2);
+  await expect(focusRows.nth(1).getByRole("button", { name: "苔", exact: true })).toBeVisible();
+  await yearChart.getByRole("button", { name: "すべての石へ" }).click();
+  await expect(yearChart.locator("li.tl-row")).toHaveCount(2);
+
+  // The third form on the wire — `?tags=` (タグ集合 AND) has no UI shortcut with
+  // only two stones, so prove the SQL against the real sqlite here: both stones
+  // together = exactly the one 苔片, echoed in request order.
+  type TimelineWire = { today: string; rows: { tags: { id: string }[]; count: number }[] };
+  const all = (await (await page.request.get("/api/stats/timeline")).json()) as TimelineWire;
+  const stoneIds = all.rows.map((r) => r.tags[0]?.id ?? "");
+  expect(stoneIds).toHaveLength(2);
+  const combined = (await (
+    await page.request.get(`/api/stats/timeline?tags=${stoneIds.join(",")}`)
+  ).json()) as TimelineWire;
+  expect(combined.rows).toHaveLength(1);
+  expect(combined.rows[0]?.count).toBe(1);
+  expect(combined.rows[0]?.tags.map((t) => t.id)).toEqual(stoneIds);
+
   // At rest it is a `k1.<iv>.<ciphertext>` envelope (ADR-0001), never the text —
   // the DoD 5 check, read from the sqlite itself rather than through the API.
   const stored = queryRows<{ body: string; title: string | null }>("SELECT body, title FROM post");

@@ -2,7 +2,16 @@ import { describe, expect, it } from "vitest";
 import { addDays } from "../core/day";
 import { app } from "../index";
 import { testEnv } from "../test-support";
-import { MAX_WINDOW_DAYS, buildHeatmap, heatmapQuerySchema, resolveWindow } from "./stats";
+import {
+  MAX_WINDOW_DAYS,
+  TIMELINE_MAX_TAGS,
+  buildHeatmap,
+  buildTagSpans,
+  heatmapQuerySchema,
+  parseTagsParam,
+  resolveWindow,
+  timelineQuerySchema,
+} from "./stats";
 
 // Same arrangement as posts.test.ts: the Node harness has no D1, so the route
 // test stops at the session guard (mount proof) and validation + folding are
@@ -21,6 +30,12 @@ const TODAY_MS = jst(2026, 9, 2, 12, 34);
 describe("stats route sits behind the session guard", () => {
   it("GET /api/stats/heatmap without a session is 401 (not 404 — the route is mounted)", async () => {
     const res = await app.request("/api/stats/heatmap", {}, testEnv());
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: { type: string } }).error.type).toBe("unauthorized");
+  });
+
+  it("GET /api/stats/timeline without a session is 401 (not 404 — the route is mounted)", async () => {
+    const res = await app.request("/api/stats/timeline", {}, testEnv());
     expect(res.status).toBe(401);
     expect(((await res.json()) as { error: { type: string } }).error.type).toBe("unauthorized");
   });
@@ -150,5 +165,86 @@ describe("buildHeatmap", () => {
         { day: "2026-09-02", count, level },
       ]);
     }
+  });
+});
+
+describe("timelineQuerySchema — the three forms and nothing between", () => {
+  it("accepts each form alone", () => {
+    expect(timelineQuerySchema.safeParse({}).success).toBe(true);
+    expect(timelineQuerySchema.safeParse({ focus: "some-tag-id" }).success).toBe(true);
+    expect(timelineQuerySchema.safeParse({ tags: "a,b" }).success).toBe(true);
+  });
+
+  it("rejects focus and tags together — a mixed request has no meaning", () => {
+    expect(timelineQuerySchema.safeParse({ focus: "a", tags: "a,b" }).success).toBe(false);
+  });
+
+  it("rejects empty and absurdly long values before any parsing", () => {
+    expect(timelineQuerySchema.safeParse({ focus: "" }).success).toBe(false);
+    expect(timelineQuerySchema.safeParse({ focus: "x".repeat(65) }).success).toBe(false);
+    expect(timelineQuerySchema.safeParse({ tags: "" }).success).toBe(false);
+    expect(timelineQuerySchema.safeParse({ tags: "a,".repeat(700) + "b" }).success).toBe(false);
+  });
+});
+
+describe("parseTagsParam", () => {
+  it("keeps request order and trims around commas", () => {
+    expect(parseTagsParam("b,a")).toEqual(["b", "a"]);
+    expect(parseTagsParam(" b , a ")).toEqual(["b", "a"]);
+  });
+
+  it("needs a combination: fewer than 2 unique ids is not this form", () => {
+    expect(parseTagsParam("a")).toBeNull();
+    expect(parseTagsParam("a,a")).toBeNull();
+    expect(parseTagsParam("a,a,b")).toEqual(["a", "b"]);
+  });
+
+  it("rejects empty segments and overlong ids", () => {
+    expect(parseTagsParam("a,,b")).toBeNull();
+    expect(parseTagsParam("a,b,")).toBeNull();
+    expect(parseTagsParam(`a,${"x".repeat(65)}`)).toBeNull();
+  });
+
+  it("caps the set at TIMELINE_MAX_TAGS (= what one 苔片 can carry)", () => {
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`).join(",");
+    expect(parseTagsParam(ids(TIMELINE_MAX_TAGS))).toHaveLength(TIMELINE_MAX_TAGS);
+    expect(parseTagsParam(ids(TIMELINE_MAX_TAGS + 1))).toBeNull();
+  });
+});
+
+describe("buildTagSpans", () => {
+  const raw = (
+    id: string,
+    norm: string,
+    first: number | null,
+    last: number | null,
+    count = 1,
+  ) => ({ id, name: id.toUpperCase(), norm, first, last, count });
+
+  it("folds instants into JST days — a JST morning stays on its JST day", () => {
+    // 08:00 JST is still the previous day on the UTC calendar.
+    const spans = buildTagSpans([raw("ts", "ts", jst(2026, 9, 2, 8, 0), jst(2026, 9, 3, 23, 59), 4)]);
+    expect(spans).toEqual([
+      { tag: { id: "ts", name: "TS" }, firstDay: "2026-09-02", lastDay: "2026-09-03", count: 4 },
+    ]);
+  });
+
+  it("orders as a 年表: first day ascending, same-day ties by norm", () => {
+    const spans = buildTagSpans([
+      raw("b", "beta", jst(2026, 9, 2, 20), jst(2026, 9, 2, 20)),
+      raw("c", "gamma", jst(2026, 9, 3), jst(2026, 9, 3)),
+      // Later instant than "b" but the same JST day — norm decides, so the
+      // order can't jitter with the time of day a stone was first used.
+      raw("a", "alpha", jst(2026, 9, 2, 23), jst(2026, 9, 2, 23)),
+    ]);
+    expect(spans.map((s) => s.tag.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("skips a null aggregate row instead of crashing the whole 年表", () => {
+    const spans = buildTagSpans([
+      raw("dead", "dead", null, null, 0),
+      raw("ok", "ok", jst(2026, 9, 2), jst(2026, 9, 2)),
+    ]);
+    expect(spans.map((s) => s.tag.id)).toEqual(["ok"]);
   });
 });

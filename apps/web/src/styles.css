@@ -260,6 +260,158 @@ textarea {
 .heatmap-legend .l3 { background: var(--moss-3); }
 .heatmap-legend .l4 { background: var(--moss-4); }
 
+/* ---- 石の年表（タグのタイムライン、visualization.md §8） ---- */
+
+.tag-timeline {
+  margin-block: 1.5rem 2rem;
+}
+
+.tl-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.tl-focus {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--quiet);
+  margin: 0;
+}
+
+.tl-focus button {
+  min-height: 32px;
+  padding: 0.15rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+/* 行 = [石チップ | 棒 | 注記]。subgrid で全行の列を揃える。 */
+.tl-grid {
+  display: grid;
+  grid-template-columns: fit-content(11rem) 1fr max-content;
+  column-gap: 0.75rem;
+  row-gap: 0.5rem;
+  align-items: center;
+  margin-block-start: 0.5rem;
+}
+
+.tl-axis {
+  grid-column: 2;
+  inline-size: 100%;
+  block-size: 14px;
+  display: block;
+  overflow: visible;
+}
+
+.tl-axis text {
+  fill: var(--quiet);
+  font-size: 9px;
+}
+
+.tl-rows {
+  display: contents;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.tl-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+}
+
+.tl-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* 石チップ = タップでフォーカス。.tag（表示専用）と同じ見た目の button 版。 */
+.tag-chip {
+  min-height: 28px;
+  padding: 0.1rem 0.6rem;
+  font-size: 0.75rem;
+  color: var(--moss);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.tag-chip:hover {
+  border-color: var(--moss);
+}
+
+.tl-add,
+.tl-remove {
+  min-height: 28px;
+  min-width: 28px;
+  padding: 0 0.4rem;
+  font-size: 0.8rem;
+  color: var(--quiet);
+  border-radius: 999px;
+}
+
+.tl-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.tl-picker input {
+  min-height: 28px;
+  inline-size: 9rem;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.tl-picker button {
+  min-height: 28px;
+  padding: 0 0.6rem;
+  font-size: 0.8rem;
+}
+
+.tl-pick-error {
+  font-size: 0.75rem;
+  color: var(--error);
+}
+
+.tl-bar {
+  inline-size: 100%;
+  block-size: 16px;
+  display: block;
+}
+
+/* 全行に通る下敷きの糸 = 軸の範囲（hairline・recessive）。 */
+.tl-track {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.tl-span {
+  fill: var(--moss);
+}
+
+.tl-span:hover {
+  stroke: var(--ink);
+}
+
+.tl-empty {
+  font-size: 0.8rem;
+}
+
+.tl-note {
+  font-size: 0.75rem;
+  color: var(--quiet);
+  text-align: end;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- タイムライン ---- */
 
 .posts {

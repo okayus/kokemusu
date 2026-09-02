@@ -11,3 +11,27 @@ export type Heatmap = { from: string; to: string; days: HeatmapDay[] };
 // No tag parameter on purpose: the heatmap is the 総草 alone (visualization.md
 // §1). Per-tag devotion belongs to the graph and the tag timeline (Phase 2).
 export const getHeatmap = (): Promise<Heatmap> => request("/api/stats/heatmap");
+
+/** One row of the 年表: a tag set, its first/last JST day, and the 苔片 count. */
+export type TimelineRow = {
+  tags: { id: string; name: string }[];
+  firstDay: string;
+  lastDay: string;
+  count: number;
+};
+
+/** `today` is server-decided (JST) — it is the axis's right edge in every view. */
+export type TagTimeline = { today: string; rows: TimelineRow[] };
+
+/**
+ * The three forms of visualization.md §8: no option = one row per tag,
+ * `focus` = that stone + stone×co-occurring-tag rows, `tags` = the one
+ * AND row for a 2+ tag set. Metadata only — bodies never ride here.
+ */
+export function getTimeline(opts: { focus?: string; tags?: string[] } = {}): Promise<TagTimeline> {
+  const q = new URLSearchParams();
+  if (opts.focus !== undefined) q.set("focus", opts.focus);
+  if (opts.tags !== undefined) q.set("tags", opts.tags.join(","));
+  const qs = q.toString();
+  return request(`/api/stats/timeline${qs ? `?${qs}` : ""}`);
+}
