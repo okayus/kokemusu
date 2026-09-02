@@ -148,6 +148,10 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
   朝 9 時前の苔片が前日にずれる。オフセット加算での回避は TZ を変えたときに壊れる）。
 - **タグのタイムライン（打ち込み期間）**: `post_tags` JOIN `post` を `tag_id` で GROUP BY し
   `MIN(created_at)` / `MAX(created_at)` / `COUNT(*)`（[visualization.md](visualization.md) §8）。
+  - **組み合わせ行（タグ集合 AND、n ≧ 2）**: `pt.tag_id IN (:t1 … :tn)` で引き、post ごとに
+    `HAVING COUNT(DISTINCT pt.tag_id) = n` で「全部付いた苔片」に絞り、外側で MIN/MAX/COUNT。
+  - **フォーカス（1 タグで絞った共起タグ別の内訳）**: 共起クエリと同じ自己 JOIN を
+    `a.tag_id = :focus` で絞って `b.tag_id` で GROUP BY し、各共起タグの MIN/MAX/COUNT を一括で取る。
 - **累積（積み上げ）**: 上記を日付昇順で累積和。
 - **ストリーク**: タグ別に投稿のある日付集合を取り、連続日数を計算（純粋関数でやる）。
 - **内訳**: 期間内のタグ別件数。
