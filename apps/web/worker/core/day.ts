@@ -232,6 +232,18 @@ export function addDays(day: DayKey, delta: number): DayKey {
 }
 
 /**
+ * Day of the week of a day key, 0 = Sunday … 6 = Saturday. A civil date's
+ * weekday is a calendar fact with no zone in it, so this rides the same UTC
+ * carrier as `addDays`. It is the heatmap's row axis (weeks start on Sunday —
+ * plans/vertical-slice.md) and how the default window snaps to a week start.
+ *
+ * @throws RangeError on a malformed day key.
+ */
+export function dayOfWeek(day: DayKey): number {
+  return new Date(civilToUtcMs(requireCivil(day))).getUTCDay();
+}
+
+/**
  * Every day from `from` to `to`, inclusive and ascending — the heatmap's grid
  * before any counts are laid on it. An inverted range is an empty span rather
  * than a throw; the route rejects that with a 400 before it gets here.

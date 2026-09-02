@@ -1,5 +1,5 @@
 /* 苔むす — ミニマル + 苔の言葉と色（plans/vertical-slice.md の UI トーン決定）。
-   light/dark は light-dark() トークンで一元化。ヒートマップの濃淡 5 段は PR5 で。 */
+   light/dark は light-dark() トークンで一元化。 */
 
 :root {
   /* Native UI (scrollbars, form controls) follows the user's scheme.
@@ -13,6 +13,15 @@
   --moss-ink: light-dark(#f7f6f1, #141813);
   --line: light-dark(#d8dcd2, #2c332b);
   --error: light-dark(#a03d2e, #e08a76);
+
+  /* ヒートマップの濃淡 5 段（= サーバの level 0..4）。単一色相・明度単調の
+     sequential ランプで、dark は「多いほど明るい」に反転 — 自動反転ではなく
+     dark 用に別途選んだ段（OKLCH で単調性・段差を機械検証済み）。 */
+  --moss-0: light-dark(#e6eadd, #1f261e);
+  --moss-1: light-dark(#b9d2b4, #2e4732);
+  --moss-2: light-dark(#8bb694, #41684a);
+  --moss-3: light-dark(#598c68, #5f9370);
+  --moss-4: light-dark(#2f5c42, #8fc7a0);
 
   accent-color: var(--moss);
 }
@@ -162,6 +171,94 @@ textarea {
   align-items: center;
   gap: 1rem;
 }
+
+/* ---- 苔（ヒートマップ） ---- */
+
+.heatmaps {
+  display: grid;
+  gap: 1.5rem;
+  margin-block: 1.5rem 2rem;
+}
+
+.heatmap {
+  margin: 0;
+}
+
+.heatmap-caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.85rem;
+  margin-block-end: 0.35rem;
+}
+
+.heatmap-total {
+  color: var(--quiet);
+}
+
+/* 53 週は .shell より広い: 中身は固定サイズのまま横スクロール（右端 = 今日）。 */
+.heatmap-scroll {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.heatmap-scroll svg {
+  display: block;
+}
+
+.heatmap-axis {
+  fill: var(--quiet);
+  font-size: 9px;
+}
+
+.heatmap-cell {
+  /* 投稿直後に「マスが濃くなる」のを見せる、UI で唯一の動き。 */
+  transition: fill 0.4s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heatmap-cell {
+    transition: none;
+  }
+}
+
+.heatmap-cell.l0 { fill: var(--moss-0); }
+.heatmap-cell.l1 { fill: var(--moss-1); }
+.heatmap-cell.l2 { fill: var(--moss-2); }
+.heatmap-cell.l3 { fill: var(--moss-3); }
+.heatmap-cell.l4 { fill: var(--moss-4); }
+
+/* 今日のマスは常に見つけられるように縁取る。hover の応答が後勝ち。 */
+.heatmap-cell.today {
+  stroke: var(--quiet);
+}
+
+.heatmap-cell:hover {
+  stroke: var(--ink);
+}
+
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  font-size: 0.7rem;
+  color: var(--quiet);
+  margin-block-start: 0.35rem;
+}
+
+.heatmap-legend i {
+  inline-size: 10px;
+  block-size: 10px;
+  border-radius: 2px;
+}
+
+.heatmap-legend .l0 { background: var(--moss-0); }
+.heatmap-legend .l1 { background: var(--moss-1); }
+.heatmap-legend .l2 { background: var(--moss-2); }
+.heatmap-legend .l3 { background: var(--moss-3); }
+.heatmap-legend .l4 { background: var(--moss-4); }
 
 /* ---- タイムライン ---- */
 

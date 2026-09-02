@@ -10,6 +10,7 @@ import {
   type CredentialSummary,
 } from "./auth-api";
 import { clearDraft, loadDraft, saveDraft } from "./draft";
+import { HeatmapSection } from "./Heatmap";
 import {
   createPost,
   listPosts,
@@ -191,6 +192,9 @@ function Garden(props: { onSessionLost: () => void }) {
   const [tagOptions, setTagOptions] = useState<TagSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  // Bumped after each post: the moss must darken right away (DoD 4 — the one
+  // deliberate motion in the UI, plans/vertical-slice.md の UI トーン決定).
+  const [mossVersion, setMossVersion] = useState(0);
 
   const { onSessionLost } = props;
   const fault = useCallback(
@@ -218,7 +222,9 @@ function Garden(props: { onSessionLost: () => void }) {
   const handleCreated = (created: PostItem) => {
     setError(null);
     setPosts((current) => [created, ...(current ?? [])]);
-    // The post may have minted new stones — refresh the completion list.
+    setMossVersion((v) => v + 1);
+    // The post may have minted new stones — refresh the completion list (which
+    // also grows the new stone its own heatmap).
     if (created.tags.length > 0) {
       void listTags()
         .then(setTagOptions)
@@ -252,6 +258,7 @@ function Garden(props: { onSessionLost: () => void }) {
           {error}
         </p>
       )}
+      <HeatmapSection tags={tagOptions} refreshKey={mossVersion} onFault={fault} />
       <Timeline posts={posts} />
       {nextCursor !== null && (
         <button type="button" disabled={loadingMore} onClick={() => void loadMore()}>
