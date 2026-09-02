@@ -4,6 +4,7 @@ import {
   addDays,
   bucketByDay,
   dayKey,
+  dayOfWeek,
   dayStartMs,
   enumerateDays,
   isDayKey,
@@ -169,6 +170,26 @@ describe("addDays walks the calendar", () => {
   it("rejects fractional deltas and malformed keys", () => {
     expect(() => addDays("2026-08-23", 0.5)).toThrow(RangeError);
     expect(() => addDays("2026-08-32", 1)).toThrow(RangeError);
+  });
+});
+
+describe("dayOfWeek numbers the heatmap rows, Sunday = 0", () => {
+  it("knows anchor dates across eras", () => {
+    expect(dayOfWeek("2026-09-02")).toBe(3); // Wednesday
+    expect(dayOfWeek("2026-08-30")).toBe(0); // Sunday
+    expect(dayOfWeek("2026-09-05")).toBe(6); // Saturday
+    expect(dayOfWeek("1970-01-01")).toBe(4); // the epoch was a Thursday
+    expect(dayOfWeek("2000-02-29")).toBe(2); // leap century Tuesday
+  });
+
+  it("is consistent with addDays: one day forward is the next weekday", () => {
+    expect(dayOfWeek(addDays("2026-08-30", 1))).toBe(1);
+    expect(dayOfWeek(addDays("2026-09-05", 1))).toBe(0); // wraps to Sunday
+    expect(dayOfWeek(addDays("2026-09-02", 7))).toBe(3); // a week is a no-op
+  });
+
+  it("rejects a malformed key", () => {
+    expect(() => dayOfWeek("2026-9-2")).toThrow(RangeError);
   });
 });
 

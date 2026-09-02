@@ -6,6 +6,7 @@ import { securityHeaders } from "./middleware/security-headers";
 import { sessionMiddleware } from "./middleware/session";
 import { authRoutes } from "./routes/auth";
 import { postRoutes } from "./routes/posts";
+import { statsRoutes } from "./routes/stats";
 import { tagRoutes } from "./routes/tags";
 import type { Bindings, Env } from "./types";
 
@@ -44,6 +45,7 @@ api.route("/auth", authRoutes);
 const protectedApi = new Hono<Env>();
 protectedApi.use("*", sessionMiddleware());
 protectedApi.route("/posts", postRoutes);
+protectedApi.route("/stats", statsRoutes);
 protectedApi.route("/tags", tagRoutes);
 protectedApi.all("*", (c) => fail(c, "not_found"));
 api.route("/", protectedApi);
