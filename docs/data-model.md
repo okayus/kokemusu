@@ -142,9 +142,12 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 
 これらは **メタデータ（created_at, tag）だけ** で計算でき、本文暗号化と両立する。
 
-- **タグ別 日次ヒートマップ**: `post_tags` JOIN `post` を期間で絞って `created_at` と `tag_id` だけ取り、
+- **総草 日次ヒートマップ**（ヒートマップはタグで分けない、[visualization.md](visualization.md) §1）:
+  `post` を期間で絞って `created_at` だけ取り（JOIN 不要＝タグ無しの苔片も入る）、
   **`Asia/Tokyo` の「日」へのバケット化はコアの純粋関数 `dayKey()`** で行う（SQLite の `date()` は UTC 基準なので
   朝 9 時前の苔片が前日にずれる。オフセット加算での回避は TZ を変えたときに壊れる）。
+- **タグのタイムライン（打ち込み期間）**: `post_tags` JOIN `post` を `tag_id` で GROUP BY し
+  `MIN(created_at)` / `MAX(created_at)` / `COUNT(*)`（[visualization.md](visualization.md) §8）。
 - **累積（積み上げ）**: 上記を日付昇順で累積和。
 - **ストリーク**: タグ別に投稿のある日付集合を取り、連続日数を計算（純粋関数でやる）。
 - **内訳**: 期間内のタグ別件数。

@@ -29,9 +29,9 @@ describe("stats route sits behind the session guard", () => {
 describe("heatmapQuerySchema", () => {
   it("accepts an empty query and the full shape", () => {
     expect(heatmapQuerySchema.safeParse({}).success).toBe(true);
-    expect(
-      heatmapQuerySchema.safeParse({ tag: "苔", from: "2026-01-01", to: "2026-02-01" }).success,
-    ).toBe(true);
+    expect(heatmapQuerySchema.safeParse({ from: "2026-01-01", to: "2026-02-01" }).success).toBe(
+      true,
+    );
   });
 
   it("rejects anything that is not a calendar day", () => {
@@ -42,10 +42,12 @@ describe("heatmapQuerySchema", () => {
     expect(heatmapQuerySchema.safeParse({ to: "2026-09-02T00:00" }).success).toBe(false);
   });
 
-  it("bounds the tag string like the timeline does", () => {
-    expect(heatmapQuerySchema.safeParse({ tag: "" }).success).toBe(false);
-    expect(heatmapQuerySchema.safeParse({ tag: "x".repeat(101) }).success).toBe(false);
-    expect(heatmapQuerySchema.safeParse({ tag: "x".repeat(100) }).success).toBe(true);
+  it("has no tag field — the heatmap never splits by tag (visualization.md §1)", () => {
+    // zod strips unknown keys rather than erroring; what matters is that a
+    // stray ?tag= can't reach the query, so the parsed shape must not carry it.
+    const parsed = heatmapQuerySchema.safeParse({ tag: "typescript" });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).toEqual({});
   });
 });
 

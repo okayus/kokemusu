@@ -16,7 +16,7 @@
 - 投稿 CRUD（作成・編集・ソフトデリート、Markdown ＋ サニタイズ、任意の `title`）。
 - タグ付与・補完、多対多。
 - タイムライン（新着順、タグ絞り込み、期間）。
-- **タグ別ヒートマップ**（可視化1種）。
+- **総草ヒートマップ**（可視化1種。タグ別ヒートマップは作らない — [visualization.md](visualization.md) §1、2026-09-02）。
 - **パスキー認証（single-user）**: `INITIAL_REGISTRATION_TOKEN` で一度だけ登録を開けて閉じる、端末 2 台登録、リカバリ runbook。安全な Cookie/セッション、HTTPS/HSTS、CSP、認証 route のレート制限（`cloudflare-workers-bot-scan-defense`）。
 - WebAuthn 仮想 authenticator の e2e（コンテナ内）。
 - **本文のアプリ層暗号化 (B)**: 最初の実データより前に。`BODY_KEY`（Worker Secret、1Password にも控える）、メタデータは平文、検索は復号して走査（[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。
@@ -25,8 +25,9 @@
 
 - **API 自動投稿（PAT）**: `POST /api/posts` を `post:write` で開け、設定画面でトークン発行・失効（[features.md](features.md) §7、`cloudflare-workers-pat-bearer-auth`）。最初の送り側 = mazuoboeru の日次結果投稿。Phase 1 の直後に着手可。連携の形 (i)/(ii) は「決めること」8。
 - 全文検索。
+- **タグ関係グラフ**（共起ネットワーク。石＝タグが投稿数で育つ、[visualization.md](visualization.md) §6）。
+- **タグのタイムライン**（最初〜最後の苔片の期間、[visualization.md](visualization.md) §8）。
 - 累積（積み上げ）グラフ、ストリーク、内訳・時間帯分布。
-- **タグ関係グラフ**（共起ネットワーク、[visualization.md](visualization.md) §6）。
 - タグ運用（リネーム・統合・別名・アーカイブ・色/絵文字）。
 - 振り返りサマリー（週/月）。
 - エクスポート（JSON / Markdown）。

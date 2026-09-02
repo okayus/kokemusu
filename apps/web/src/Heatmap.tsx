@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { getHeatmap, type Heatmap } from "./stats-api";
-import type { TagSummary } from "./posts-api";
 
-// 苔のヒートマップ（docs/visualization.md §1): weeks as columns, weekdays as
-// rows (Sunday first, plans/vertical-slice.md), five moss shades. Hand-written
-// SVG on a fixed grid; the wrapper scrolls horizontally and starts at the
-// right edge, where today is.
+// 総草 (docs/visualization.md §1): the one heatmap — the day's total activity,
+// weeks as columns, weekdays as rows (Sunday first, plans/vertical-slice.md),
+// five moss shades. It never splits by tag (2026-09-02 決定): per-tag devotion
+// is the graph's and the tag timeline's job, not another garden of grids.
+// Hand-written SVG on a fixed grid; the wrapper scrolls horizontally and
+// starts at the right edge, where today is.
 
 const CELL = 11;
 const GAP = 2; // dataviz: a 2px surface gap between fills
@@ -111,53 +112,31 @@ export function HeatmapChart(props: { label: string; data: Heatmap }) {
   );
 }
 
-/** 総草 + タグごとに 1 枚。`refreshKey` bumps after a post so today darkens. */
-export function HeatmapSection(props: {
-  tags: TagSummary[];
-  refreshKey: number;
-  onFault: (e: unknown) => void;
-}) {
-  // Keyed by tag id ("" = 総草). Stale entries simply stop being rendered, and
-  // a refetch replaces entries in place — no flicker back to a loading state.
-  const [gardens, setGardens] = useState<ReadonlyMap<string, Heatmap>>(new Map());
+/** The one 総草. `refreshKey` bumps after a post so today darkens (DoD 4). */
+export function HeatmapSection(props: { refreshKey: number; onFault: (e: unknown) => void }) {
+  // Refetches replace the data in place — no flicker back to a loading state.
+  const [garden, setGarden] = useState<Heatmap | null>(null);
 
-  const { tags, refreshKey, onFault } = props;
+  const { refreshKey, onFault } = props;
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      try {
-        const [all, ...perTag] = await Promise.all([
-          getHeatmap(),
-          ...tags.map((t) => getHeatmap({ tag: t.name })),
-        ]);
-        if (cancelled) return;
-        const next = new Map([["", all]]);
-        tags.forEach((t, i) => {
-          const garden = perTag[i];
-          if (garden !== undefined) next.set(t.id, garden);
-        });
-        setGardens(next);
-      } catch (e) {
+    getHeatmap()
+      .then((g) => {
+        if (!cancelled) setGarden(g);
+      })
+      .catch((e) => {
         if (!cancelled) onFault(e);
-      }
-    })();
+      });
     return () => {
       cancelled = true;
     };
-  }, [tags, refreshKey, onFault]);
+  }, [refreshKey, onFault]);
 
-  const allGarden = gardens.get("");
-  if (allGarden === undefined) return null; // first load: appear when grown
+  if (garden === null) return null; // first load: appear when grown
   return (
     <section className="heatmaps">
       <h2>苔</h2>
-      <HeatmapChart label="総草" data={allGarden} />
-      {tags.flatMap((t) => {
-        const data = gardens.get(t.id);
-        return data === undefined ? [] : [
-          <HeatmapChart key={t.id} label={`${t.name} の苔`} data={data} />,
-        ];
-      })}
+      <HeatmapChart label="総草" data={garden} />
     </section>
   );
 }

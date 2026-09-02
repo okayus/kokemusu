@@ -223,8 +223,7 @@ function Garden(props: { onSessionLost: () => void }) {
     setError(null);
     setPosts((current) => [created, ...(current ?? [])]);
     setMossVersion((v) => v + 1);
-    // The post may have minted new stones — refresh the completion list (which
-    // also grows the new stone its own heatmap).
+    // The post may have minted new stones — refresh the completion list.
     if (created.tags.length > 0) {
       void listTags()
         .then(setTagOptions)
@@ -258,7 +257,7 @@ function Garden(props: { onSessionLost: () => void }) {
           {error}
         </p>
       )}
-      <HeatmapSection tags={tagOptions} refreshKey={mossVersion} onFault={fault} />
+      <HeatmapSection refreshKey={mossVersion} onFault={fault} />
       <Timeline posts={posts} />
       {nextCursor !== null && (
         <button type="button" disabled={loadingMore} onClick={() => void loadMore()}>

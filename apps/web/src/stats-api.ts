@@ -8,9 +8,6 @@ export type HeatmapDay = { day: string; count: number; level: number };
 /** Dense ascending series over the resolved window (default: 53 weeks to today). */
 export type Heatmap = { from: string; to: string; days: HeatmapDay[] };
 
-export function getHeatmap(opts: { tag?: string } = {}): Promise<Heatmap> {
-  const q = new URLSearchParams();
-  if (opts.tag !== undefined) q.set("tag", opts.tag);
-  const qs = q.toString();
-  return request(`/api/stats/heatmap${qs ? `?${qs}` : ""}`);
-}
+// No tag parameter on purpose: the heatmap is the 総草 alone (visualization.md
+// §1). Per-tag devotion belongs to the graph and the tag timeline (Phase 2).
+export const getHeatmap = (): Promise<Heatmap> => request("/api/stats/heatmap");
