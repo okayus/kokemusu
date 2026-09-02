@@ -16,6 +16,13 @@ services:
         INSTALL_RUST: "false"
         INSTALL_HASKELL: "false"
         INSTALL_GO: "false"
+        # Chromium (system libs + browser) for in-container Playwright e2e, baked at
+        # build time — zero runtime egress, no init-firewall.sh change (skill
+        # playwright-e2e-in-docker-sandbox). Adds ~0.4 GB to the image.
+        INSTALL_PLAYWRIGHT: "true"
+        # MUST equal @playwright/test in apps/web/package.json. Bump both, then
+        # `docker compose down && docker compose build && ./up.sh`.
+        PLAYWRIGHT_VERSION: "1.62.1"
     container_name: kokemusu-dev
     # Required so init-firewall.sh can program iptables/ipset.
     cap_add:
@@ -28,6 +35,8 @@ services:
       # Project bind mount: edit on the host, runs in the container.
       - ./:/workspace:delegated
       # Named volumes: Claude auth + shell history survive `docker compose down`.
+      # NOTE: no volume on ~/.cache/ms-playwright — Chromium is baked into the image
+      # (.docker/Dockerfile PLAYWRIGHT_VERSION); a volume there would shadow it.
       - claude-config:/home/node/.claude
       - bash-history:/commandhistory
     environment:

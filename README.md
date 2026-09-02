@@ -50,7 +50,7 @@ kokemusu/
 └── .github/workflows/   # ci.yml = typecheck / build / test（デプロイは Workers Builds、GitHub に秘密なし）
 ```
 
-pnpm workspace。`pnpm dev`（コンテナ内 5173 → ホスト 5273）/ `pnpm check` / `pnpm test` / `pnpm build` はルートから。
+pnpm workspace。`pnpm dev`（コンテナ内 5173 → ホスト 5273）/ `pnpm check` / `pnpm test` / `pnpm build` はルートから。 e2e はコンテナ内で `pnpm e2e`（`apps/web/e2e/README.md`）。
 
 ## ステータス
 

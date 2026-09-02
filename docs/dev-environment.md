@@ -28,7 +28,7 @@
 
 **狙い**: npm の postinstall 等のサプライチェーン攻撃と、エージェントの実行を、デフォルト拒否の egress ファイアウォール付きコンテナに封じ込める。ホストの `~/.ssh` や認証情報には触れない。
 
-- 構成: `.docker/Dockerfile`（Anthropic 公式 devcontainer 由来、**node:24**、非 root `node`）、`.docker/init-firewall.sh`（egress 許可リスト）、`docker-compose.yml`（VS Code 非依存、`/workspace` に bind mount、**秘密を一切持たない**）、`up.sh`（= `docker compose up -d`）、`shell.sh`（token 付きのシェル。後述）。
+- 構成: `.docker/Dockerfile`（Anthropic 公式 devcontainer 由来、**node:24**、非 root `node`。**Playwright の Chromium をビルド時に焼き込む**: `docker-compose.yml` の build args `INSTALL_PLAYWRIGHT: "true"` / `PLAYWRIGHT_VERSION`（= `apps/web/package.json` の `@playwright/test` と同じ版。片方を上げたら両方上げて rebuild。ランタイムは CDN 不達なので版ずれは自己修復しない）。ビルド時にネットワークが開いているのでファイアウォールの許可リストは変えない）、`.docker/init-firewall.sh`（egress 許可リスト）、`docker-compose.yml`（VS Code 非依存、`/workspace` に bind mount、**秘密を一切持たない**）、`up.sh`（= `docker compose up -d`）、`shell.sh`（token 付きのシェル。後述）。
 - **起動は `./up.sh`**（= `docker compose up -d`。**資格情報なし・冪等**）。**GitHub token は exec 時にシェル単位で注入**: `./shell.sh`（= `op read` で `.docker/sandbox.env` の `op://` 参照を解決 → `docker exec -it -e GH_TOKEN kokemusu-dev zsh`）。
   token を持つのはこのスクリプトで開いたシェル（とその子 = Claude / git / gh）だけ。コンテナの設定（`docker inspect`）にも PID 1 にも載らない。
   `./shell.sh claude --continue` のように引数でコマンドも渡せる。
@@ -110,7 +110,7 @@ main へ merge（ruleset: PR 必須・required check `ci`・force push 禁止・
 - ✅ **2026-08-23 決定: custom domain を待たずロックしてよい**（[roadmap.md](roadmap.md) 決めること 1）。独自ドメインを取っても**ログインの origin は `workers.dev` のまま**にする。移行が必要になったら `RP_ID`/`ORIGIN` 変更 → 既存パスキー無効 → `INITIAL_REGISTRATION_TOKEN` 再発行 → 端末 2 台を再登録。その際 **既存の `user` 行に `credential` を足す**（新 user を作ると `post` が孤児になる）。single-user なので費用は「2 台の再登録」だけ。
 - ローカルは `.dev.vars`（gitignore）で `RP_ID=localhost` / `ORIGIN=http://localhost:5273` に上書き（`.dev.vars` は `vars` より優先、本番には届かない）。⚠️ **5173 ではなく 5273**: ORIGIN は「ブラウザが開く URL」＝ホスト側ポート。5173 のままだと CSRF の Origin 検査が全 POST を 403 にし、WebAuthn の verify も `challenge_mismatch` で落ちる。
 - **API 自動投稿 = PAT（Bearer）**（`cloudflare-workers-pat-bearer-auth`）: 苔むすが発行し（設定画面・セッション必須・一度だけ表示）、送り側（まず mazuoboeru）が保持して `Authorization: Bearer kokemusu_pat_…` で `POST /api/posts`。苔むすは送り側を知らない。DB には `sha256(token + PAT_PEPPER)` だけ（pepper は Worker Secret）。→ [features.md](features.md) §7。
-- e2e: `cloudflare-workers-e2e-playwright` の **WebAuthn 仮想 authenticator** で register / login の配線まで実テスト（`DEV_BYPASS_USER_ID` で逃げない）。コンテナ内で走らせる手順は `playwright-e2e-in-docker-sandbox`（Chromium をイメージに焼く・`127.0.0.1` bind・rate limit binding を外す）。
+- e2e（**PR6 で構築済み、2026-09-02**）: `apps/web/e2e/`（3 spec: ゴールデンパス / 認証境界 401 / セキュリティヘッダ）+ `playwright.config.ts`。**コンテナ内で `pnpm e2e`**（= `pnpm build` → `e2e/prepare-config.ts` → `wrangler dev --config dist/kokemusu/wrangler.json --persist-to .wrangler/e2e --ip 127.0.0.1 --port 5183` → 3 spec）。`cloudflare-workers-e2e-playwright` の **WebAuthn 仮想 authenticator** で register / login の配線まで実テスト（`DEV_BYPASS_USER_ID` は作らない）。対象はビルド成果物（`vite dev` は HMR の inline script が本番 CSP と衝突）。`playwright-e2e-in-docker-sandbox` の罠は `prepare-config.ts` が塞ぐ（`ratelimits` を派生 config から外す・`127.0.0.1` bind・ビルドが `dist/` にコピーする `.dev.vars` を消して e2e 用 vars に差し替え）。D1 は e2e 専用の `.wrangler/e2e`（`pnpm dev` の state は触らない）。CI では回さない（理由は `playwright.config.ts` 冒頭）— merge 前にコンテナ内で流す。詳細と詰まりどころは `apps/web/e2e/README.md`。
 
 ## 4. デプロイ骨格（cloudflare-workers-deploy-skeleton）
 

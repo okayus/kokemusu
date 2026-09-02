@@ -30,6 +30,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   vim \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Playwright (Chromium) system libraries for in-container e2e, baked at BUILD
+# time because runtime apt is blocked by the egress firewall (skill
+# playwright-e2e-in-docker-sandbox). fonts-noto-cjk: the UI is Japanese, and
+# without it failure screenshots render tofu boxes. Opt-in from
+# docker-compose.yml (INSTALL_PLAYWRIGHT: "true"); the browser binary itself is
+# installed further down, as `node`, once npm is set up.
+ARG INSTALL_PLAYWRIGHT=false
+RUN if [ "$INSTALL_PLAYWRIGHT" = "true" ]; then \
+  apt-get update && apt-get install -y --no-install-recommends \
+  libnss3 \
+  libnspr4 \
+  libatk1.0-0 \
+  libatk-bridge2.0-0 \
+  libcups2 \
+  libdrm2 \
+  libxkbcommon0 \
+  libatspi2.0-0 \
+  libxcomposite1 \
+  libxdamage1 \
+  libxfixes3 \
+  libxrandr2 \
+  libgbm1 \
+  libasound2 \
+  libpango-1.0-0 \
+  libcairo2 \
+  fonts-liberation \
+  fonts-noto-color-emoji \
+  fonts-noto-cjk \
+  && apt-get clean && rm -rf /var/lib/apt/lists/* ; \
+  fi
+
 # Ensure default node user has access to /usr/local/share
 RUN mkdir -p /usr/local/share/npm-global && \
   chown -R node:node /usr/local/share
@@ -83,6 +114,24 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
 
 # Install Claude
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+
+# Playwright Chromium, baked at BUILD time (no firewall during build). At
+# runtime the CDN is blocked (cdn.playwright.dev sits behind Azure Front Door
+# whose IPs rotate, so an IP-pinned allowlist entry would not even be reliable),
+# which means a version drift CANNOT self-heal: PLAYWRIGHT_VERSION MUST equal
+# @playwright/test in apps/web/package.json. A mismatch surfaces as
+# "Executable doesn't exist at .../chromium-XXXX" when e2e runs — bump both,
+# then `docker compose down && docker compose build && ./up.sh`. Runs as `node`,
+# so the browser lands in /home/node/.cache/ms-playwright (an image layer; never
+# put a volume there, it would shadow the bake). 1.59.1 is known-bad on node:24
+# (`install chromium` hangs after the download, 2026-08-22); 1.62.1 works.
+ARG PLAYWRIGHT_VERSION=1.62.1
+RUN if [ "$INSTALL_PLAYWRIGHT" = "true" ]; then \
+      npx -y playwright@${PLAYWRIGHT_VERSION} install chromium ; \
+    fi
+# A runtime `playwright install` (or a package postinstall) must never try the
+# blocked CDN: the browser is already on disk.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 # ── Optional language toolchains (opt-in via build args) ─────────────────────
 # node:24 is the base because Claude Code itself is an npm package and needs a

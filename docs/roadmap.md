@@ -10,7 +10,7 @@
 ## Phase 1 — MVP（毎日使える最小形）
 
 ゴール: **自分が毎日投稿して、最低限の苔（ヒートマップ）を眺められる。**
-最初の縦切り「投稿 → タグ → ヒートマップに 1 マス点く」の PR 分割・DoD・リスクは [plans/vertical-slice.md](plans/vertical-slice.md)。
+最初の縦切り「投稿 → タグ → ヒートマップに 1 マス点く」は **完了（2026-09-02、DoD 1〜5 全通過。[log.md](log.md)。plans/vertical-slice.md は削除済み＝ git 履歴）**。残り: e2e（PR6）、投稿の編集・ソフトデリート UI、Markdown + サニタイズ、タグ絞り込み・期間の UI。
 
 - DB スキーマとマイグレーション（[data-model.md](data-model.md)）。実スキーマ投入前に `cloudflare-d1-drizzle-migration` 必読。
 - 投稿 CRUD（作成・編集・ソフトデリート、Markdown ＋ サニタイズ、任意の `title`）。
