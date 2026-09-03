@@ -34,6 +34,7 @@ export function resetDb(): void {
       "DELETE FROM post_tags",
       "DELETE FROM post",
       "DELETE FROM tag",
+      "DELETE FROM api_token",
       "DELETE FROM session",
       "DELETE FROM credential",
       "DELETE FROM user",

@@ -14,7 +14,8 @@
 //     numbers, and the wire format stays JSON-native.
 //
 // Deliberately NOT here — all leaf tables, addable later without a rebuild:
-// `api_token` / `tag_alias` (Phase 2), `attachment` (Phase 4).
+// `tag_alias` (Phase 2), `attachment` (Phase 4). `api_token` joined in 0002
+// exactly that way (additive: one CREATE TABLE + two indexes).
 
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
@@ -69,6 +70,42 @@ export const session = sqliteTable(
     index("session_user_id_idx").on(t.userId),
     // Cron sweep of expired rows.
     index("session_expires_at_idx").on(t.expiresAt),
+  ],
+);
+
+/**
+ * Personal access token for API 自動投稿 (features.md §7, ADR-0002). The raw
+ * token — `kokemusu_pat_` + base64url(32 random bytes) — is shown once at mint
+ * time and never stored: `token_hash` is sha256(token + PAT_PEPPER) hex, so a
+ * D1 dump holds no live credential. `revoked_at` is a soft flag; the row stays
+ * as the audit trail (name / created / last used / when it died).
+ */
+export const apiToken = sqliteTable(
+  "api_token",
+  {
+    // Public id (the settings list and DELETE /api/tokens/:id) — NOT the token.
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // User-chosen label, e.g. "mazuoboeru".
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    // JSON array of Scope (core/pat.ts). Unknown entries are dropped on parse.
+    scopes: text("scopes").notNull(),
+    createdAt: integer("created_at").notNull(),
+    // Throttled to ≤ 1 write per hour per token (core/pat.ts shouldTouchLastUsed).
+    lastUsedAt: integer("last_used_at"),
+    // null = no expiry (the senders are long-running Workers; revocation is the control).
+    expiresAt: integer("expires_at"),
+    // null = live. Set instead of DELETE so "いつ死んだか" stays visible.
+    revokedAt: integer("revoked_at"),
+  },
+  (t) => [
+    // The auth hot path: one indexed point read per Bearer request.
+    uniqueIndex("api_token_token_hash_unq").on(t.tokenHash),
+    // The settings list.
+    index("api_token_user_id_revoked_at_idx").on(t.userId, t.revokedAt),
   ],
 );
 

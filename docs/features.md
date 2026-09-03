@@ -76,6 +76,9 @@
 
 ## 7. API 自動投稿（PAT）
 
+✅ **実装済み（2026-09-03）** — 以下の設計のとおり。`PAT_PEPPER` は fail closed（未設定 = 発行 503・検証は全不一致）なので、
+本番で使い始める前に `wrangler secret put PAT_PEPPER` が必要（[data-model.md](data-model.md) `api_token`）。
+
 人間が UI から書くのと同じ「苔片」を、**別アプリ・CLI・エージェントが自分として投稿できる**入口。
 最初の送り側は **mazuoboeru**（クイズアプリ）の「今日の結果」日次投稿。
 設計は `cloudflare-workers-pat-bearer-auth`（mazuoboeru で本番稼働中の発行側パターンを、苔むすが**受け側**として使う）。
@@ -83,6 +86,8 @@
 - 認証は **PAT（personal access token、Bearer）**: 苔むすの設定画面で発行 → 送り側が保持 → `Authorization: Bearer kokemusu_pat_…`。
   苔むすは **送り側が誰かを知らない**（分かるのは「どのユーザ・どのスコープ」だけ）。
 - ルート: `POST /api/posts`（スコープ `post:write`）。body は UI の投稿と同じ形（`body`・`tags`・任意の `title`）。送り側固有のフィールドは持たない。
+  スモークテスト用に `GET /api/auth/me` も PAT で読める（whoami。返るのは id と表示名だけ）。**それ以外の route に PAT は届かない**
+  （タイムライン閲覧・stats・tags は `403 session_required` —— post:write のトークンが漏れても日記は読めない）。
 - セッション（Cookie）でも PAT でも同じ route が通る。認証ミドルウェアは PAT を Cookie より先に判定し、Bearer 付きリクエストは CSRF の Origin チェックを免除（Cookie という ambient credential が無いので偽造できない）。
 - 送り側がリトライするなら `Idempotency-Key` ヘッダを 24 時間記憶して二重投稿を防ぐ（受け側の責務。必要になってから）。
 - トークン管理（設定画面・**セッション必須**＝PAT で PAT は作れない）: 名前を付けて発行 → **一度だけ表示** → 一覧（名前 / 作成 / 最終使用 / 状態）→ 失効（行は残す）。1 本の失効はセッションにも他の token にも影響しない。

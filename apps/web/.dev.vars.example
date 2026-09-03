@@ -23,6 +23,14 @@ INITIAL_REGISTRATION_TOKEN=
 # leave unset for e2e against the build artifact so e2e asserts the real CSP.
 DEV_CSP=1
 
+# Pepper for API tokens: api_token.token_hash = sha256(token + PAT_PEPPER).
+# 32+ chars required (shorter/unset = minting answers 503 and Bearer auth matches
+# nothing — fail closed, so no token can ever be minted against a missing pepper).
+# Generate: openssl rand -hex 32. Use a value DIFFERENT from production.
+# Production: `wrangler secret put PAT_PEPPER` BEFORE the first token is minted,
+# then never change it — a new value kills every existing PAT at once.
+PAT_PEPPER=
+
 # AES-256-GCM key for body/title encryption at rest (ADR-0001). Standard base64,
 # exactly 32 bytes — generate: openssl rand -base64 32. Anything else counts as
 # unset (posts routes fail closed once PR4 wires them). Use a value DIFFERENT
@@ -31,5 +39,3 @@ DEV_CSP=1
 # pipe it in (the value would scroll past unseen; losing it = every stored body
 # is unrecoverable).
 BODY_KEY=
-
-# Later phases add: PAT_PEPPER (API tokens, Phase 2).

@@ -65,58 +65,87 @@ export async function revokeSession(c: Context<Env>): Promise<void> {
   clearCookie(c, name);
 }
 
+/**
+ * Cookie-lookup outcome, split so callers can keep the historical error shapes:
+ * "none" (no usable cookie) stays 401 unauthorized, "expired" (a cookie whose
+ * row is gone or stale — cleared here as a side effect) stays 401
+ * session_expired.
+ */
+export type SessionResolution =
+  | { kind: "session"; userId: string; displayName: string }
+  | { kind: "expired" }
+  | { kind: "none" };
+
+/**
+ * The cookie-session half of authentication, extracted so the PAT middleware
+ * (middleware/auth.ts) can fall back to it without duplicating the JWT → row
+ * dance. Writes no error response; it does keep the two cookie side effects
+ * (clearing a dead cookie, sliding refresh) because they belong to every
+ * successful/failed presentation, whichever middleware drove it.
+ */
+export async function resolveSession(c: Context<Env>): Promise<SessionResolution> {
+  // No secret = no session can be valid. Fail closed before touching D1.
+  const secret = getSessionSecret(c.env);
+  if (!secret) return { kind: "none" };
+
+  const name = sessionCookieName(c);
+  const token = getCookie(c, name);
+  if (!token) return { kind: "none" };
+
+  let payload: SessionPayload;
+  try {
+    payload = (await verify(token, secret, "HS256")) as SessionPayload;
+  } catch {
+    return { kind: "none" };
+  }
+  if (payload.aud !== AUD) return { kind: "none" };
+
+  const db = createDb(c.env.DB);
+  const rows = await db
+    .select({
+      sid: session.id,
+      expiresAt: session.expiresAt,
+      userId: session.userId,
+      displayName: user.displayName,
+    })
+    .from(session)
+    .innerJoin(user, eq(session.userId, user.id))
+    .where(eq(session.id, payload.sid));
+  const row = rows[0];
+  if (!row) {
+    // Revoked elsewhere, or rows were cleared after a secret rotation.
+    clearCookie(c, name);
+    return { kind: "expired" };
+  }
+  if (row.expiresAt < Date.now()) {
+    // Lazy cleanup of the expired row on presentation.
+    await db.delete(session).where(eq(session.id, row.sid));
+    clearCookie(c, name);
+    return { kind: "expired" };
+  }
+
+  // Sliding expiry: refresh when less than half the TTL remains — one D1
+  // write per ~15 days per active session, not one per request.
+  if (row.expiresAt - Date.now() < SESSION_TTL_MS / 2) {
+    const newExpiresAt = Date.now() + SESSION_TTL_MS;
+    await db.update(session).set({ expiresAt: newExpiresAt }).where(eq(session.id, row.sid));
+    await writeSessionCookie(c, secret, row.sid, newExpiresAt);
+  }
+
+  return { kind: "session", userId: row.userId, displayName: row.displayName };
+}
+
+/** Cookie-session-only gate — auth routes that manage the session itself (logout, credentials). */
 export function sessionMiddleware() {
   return createMiddleware<Env>(async (c, next) => {
-    // No secret = no session can be valid. Fail closed before touching D1.
-    const secret = getSessionSecret(c.env);
-    if (!secret) return fail(c, "unauthorized");
+    const resolved = await resolveSession(c);
+    if (resolved.kind === "none") return fail(c, "unauthorized");
+    if (resolved.kind === "expired") return fail(c, "session_expired");
 
-    const name = sessionCookieName(c);
-    const token = getCookie(c, name);
-    if (!token) return fail(c, "unauthorized");
-
-    let payload: SessionPayload;
-    try {
-      payload = (await verify(token, secret, "HS256")) as SessionPayload;
-    } catch {
-      return fail(c, "unauthorized");
-    }
-    if (payload.aud !== AUD) return fail(c, "unauthorized");
-
-    const db = createDb(c.env.DB);
-    const rows = await db
-      .select({
-        sid: session.id,
-        expiresAt: session.expiresAt,
-        userId: session.userId,
-        displayName: user.displayName,
-      })
-      .from(session)
-      .innerJoin(user, eq(session.userId, user.id))
-      .where(eq(session.id, payload.sid));
-    const row = rows[0];
-    if (!row) {
-      // Revoked elsewhere, or rows were cleared after a secret rotation.
-      clearCookie(c, name);
-      return fail(c, "session_expired");
-    }
-    if (row.expiresAt < Date.now()) {
-      // Lazy cleanup of the expired row on presentation.
-      await db.delete(session).where(eq(session.id, row.sid));
-      clearCookie(c, name);
-      return fail(c, "session_expired");
-    }
-
-    c.set("userId", row.userId);
-    c.set("displayName", row.displayName);
-
-    // Sliding expiry: refresh when less than half the TTL remains — one D1
-    // write per ~15 days per active session, not one per request.
-    if (row.expiresAt - Date.now() < SESSION_TTL_MS / 2) {
-      const newExpiresAt = Date.now() + SESSION_TTL_MS;
-      await db.update(session).set({ expiresAt: newExpiresAt }).where(eq(session.id, row.sid));
-      await writeSessionCookie(c, secret, row.sid, newExpiresAt);
-    }
+    c.set("userId", resolved.userId);
+    c.set("displayName", resolved.displayName);
+    c.set("authMethod", "session");
+    c.set("scopes", []);
 
     await next();
   });

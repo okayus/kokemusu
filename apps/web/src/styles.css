@@ -456,15 +456,46 @@ textarea {
   white-space: nowrap;
 }
 
-.devices {
+.devices,
+.tokens {
   list-style: none;
   padding: 0;
   margin-block: 1rem;
 }
 
-.devices li {
+.devices li,
+.tokens li {
   padding-block: 0.75rem;
   border-block-start: 1px solid var(--line);
+}
+
+/* ---- PAT の一度きり表示カード ---- */
+
+.token-once {
+  border: 1px solid var(--moss);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-block: 1.25rem;
+}
+
+/* user-select: all — タップ 1 回で全選択（コピーの取りこぼし防止）。 */
+.token-once code {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+  background: var(--moss-0);
+  border-radius: 0.35rem;
+  padding: 0.5rem 0.75rem;
+  margin-block: 0.6rem;
+}
+
+.token-once-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .badge {

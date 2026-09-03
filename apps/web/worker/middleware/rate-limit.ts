@@ -20,3 +20,20 @@ export const authRateLimit = createMiddleware<Env>(async (c, next) => {
   }
   await next();
 });
+
+// Per-IP limit for the PAT-reachable surface (features.md §7): with Bearer
+// auth those routes are reachable without a session, and while junk tokens are
+// rejected on a string compare, every WELL-FORMED guess costs a sha256 + one
+// D1 point read. 120/60s (wrangler.jsonc) is far above the SPA's chattiness
+// and any sane sender's burst, so a human never sees it. Deliberately a
+// separate binding from AUTH_RATE_LIMITER — one busy sender must not lock the
+// user out of login. Fails OPEN like authRateLimit, for the same reasons.
+export const apiRateLimit = createMiddleware<Env>(async (c, next) => {
+  const limiter = c.env.API_RATE_LIMITER;
+  if (limiter) {
+    const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
+    const { success } = await limiter.limit({ key: ip });
+    if (!success) return fail(c, "rate_limited");
+  }
+  await next();
+});
