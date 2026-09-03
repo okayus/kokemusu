@@ -33,4 +33,5 @@ pnpm e2e:server     # サーバーだけ立てておく。以後の pnpm e2e は
 | 接続はできるが応答が来ない | `--ip 127.0.0.1` が外れている（localhost bind はコンテナで止まる）か、`ratelimits` が config に残っている |
 | `Executable doesn't exist at .../chromium-XXXX` | image の Chromium と `@playwright/test` の版ずれ。`docker-compose.yml` の `PLAYWRIGHT_VERSION` と揃えて rebuild |
 | あるリクエストの **次** が 500 `Network connection lost` になり、直後に `wrangler dev` が `✘ [ERROR]` で exit する | 直前のリクエストが **body 付きなのに Worker が body を読まずに応答した**（例: セッション門で 401、CSRF で 403）。wrangler dev の proxy（ProxyWorker → user worker の keep-alive）が壊れる。4.125.0 / 4.128.0 で実測（2026-09-02）、本番の runtime では起きない。**spec の規約: body を読む前に拒否されるリクエストには body を付けない**（Worker は変えない） |
+| 新しく足した UI / spec **だけ**が「要素が見つからない」で落ちる（他は green） | 前のセッションの `pnpm e2e:server` が生き残り、`reuseExistingServer: true` が**古いビルド**を掴んでいる。`ss -tlnp \| grep 5183` で workerd を見つけて親の `wrangler dev` ごと kill → 次の `pnpm e2e` が作り直す（2026-09-03 実測） |
 | Chromium が起動しない（sandbox） | `DEVCONTAINER` が無い環境。コンテナ内で流すか、ホストなら Playwright の Chromium を `playwright install` |
