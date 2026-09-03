@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Ref } from "react";
 import type { TagSummary } from "./posts-api";
 import { getTimeline, type TagTimeline, type TimelineRow } from "./stats-api";
 
@@ -309,21 +309,39 @@ function TimelineBar(props: { span: Span; domain: Domain }) {
 
 /**
  * Data + view state around the chart. `refreshKey` bumps after a post so a
- * fresh 苔片 stretches its stones' bars right away, same as the 総草.
+ * fresh 苔片 stretches its stones' bars right away, same as the 総草. The
+ * focused stone is the page's state, not this section's — the graph's stone
+ * taps land here too (§6 → §8) — so it arrives as a controlled prop.
  */
 export function TagTimelineSection(props: {
   refreshKey: number;
   tagOptions: TagSummary[];
+  focusTag: TagSummary | null;
+  onFocusChange: (tag: TagSummary | null) => void;
   onFault: (e: unknown) => void;
+  /** Lets the page scroll the 年表 into view when a stone is tapped elsewhere. */
+  ref?: Ref<HTMLElement>;
 }) {
   const [data, setData] = useState<TagTimeline | null>(null);
-  const [focusTag, setFocusTag] = useState<TagSummary | null>(null);
   const [adhoc, setAdhoc] = useState<AdhocEntry[]>([]);
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
 
-  const { refreshKey, onFault } = props;
+  const { refreshKey, onFault, focusTag } = props;
   const focusId = focusTag === null ? null : focusTag.id;
+
+  // The focus moved (a chip here, a stone in the graph, すべての石へ): drop the
+  // view-local state before this render's output, so the old view's rows never
+  // sit under the new heading (the adjust-state-while-rendering pattern).
+  const [shownFocusId, setShownFocusId] = useState(focusId);
+  if (shownFocusId !== focusId) {
+    setShownFocusId(focusId);
+    setData(null);
+    setAdhoc([]);
+    setPickerFor(null);
+    setPickError(null);
+  }
+
   useEffect(() => {
     let cancelled = false;
     getTimeline(focusId === null ? {} : { focus: focusId })
@@ -338,17 +356,8 @@ export function TagTimelineSection(props: {
     };
   }, [refreshKey, focusId, onFault]);
 
-  // View switches clear the view-local state; `data: null` blanks the chart so
-  // the old view's rows never render under the new view's heading.
-  const switchTo = (next: TagSummary | null) => {
-    setFocusTag(next);
-    setData(null);
-    setAdhoc([]);
-    setPickerFor(null);
-    setPickError(null);
-  };
   const focusOn = (t: TagSummary) => {
-    if (focusId !== t.id) switchTo(t);
+    if (focusId !== t.id) props.onFocusChange(t);
   };
 
   const addChip = async (row: ChartRow, raw: string) => {
@@ -421,13 +430,13 @@ export function TagTimelineSection(props: {
 
   const rows = data === null ? [] : assembleRows(data.rows, adhoc);
   return (
-    <section className="tag-timeline">
+    <section className="tag-timeline" ref={props.ref}>
       <div className="tl-head">
         <h2>年表</h2>
         {focusTag !== null && (
           <p className="tl-focus">
             <span>「{focusTag.name}」の内訳</span>
-            <button type="button" onClick={() => switchTo(null)}>
+            <button type="button" onClick={() => props.onFocusChange(null)}>
               すべての石へ
             </button>
           </p>

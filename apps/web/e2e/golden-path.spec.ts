@@ -69,6 +69,38 @@ test("register → post → today's moss darkens → reload → logout → login
   await yearChart.getByRole("button", { name: "すべての石へ" }).click();
   await expect(yearChart.locator("li.tl-row")).toHaveCount(2);
 
+  // 石のつながり (visualization.md §6): two stones on one 苔片 = one bridge, and
+  // tapping a stone lands on the §8 focus 年表 (2026-09-03 決定 — the graph's
+  // node tap is wired to the timeline's focus, not a page of its own).
+  const graphChart = page.locator("section.tag-graph");
+  await expect(graphChart.locator(".tg-node")).toHaveCount(2);
+  await expect(graphChart.locator(".tg-edge")).toHaveCount(1);
+  await graphChart.getByRole("button", { name: "苔 · 1 片" }).click();
+  await expect(yearChart.getByText("「苔」の内訳")).toBeVisible();
+  await expect(yearChart.locator("li.tl-row")).toHaveCount(2);
+  await yearChart.getByRole("button", { name: "すべての石へ" }).click();
+  await expect(yearChart.locator("li.tl-row")).toHaveCount(2);
+
+  // §6 on the wire, against the real sqlite: the self-join sees the one pair
+  // (with `a` < `b`), and the JST period filter keeps a 苔片 posted "today"
+  // inside 今月.
+  type GraphWire = {
+    nodes: { id: string; name: string; count: number }[];
+    edges: { a: string; b: string; count: number }[];
+  };
+  const graph = (await (await page.request.get("/api/stats/graph")).json()) as GraphWire;
+  expect(graph.nodes.map((n) => [n.name, n.count]).sort()).toEqual([
+    ["e2e", 1],
+    ["苔", 1],
+  ]);
+  const pair = graph.nodes.map((n) => n.id).sort();
+  expect(graph.edges).toEqual([{ a: pair[0], b: pair[1], count: 1 }]);
+  const monthGraph = (await (
+    await page.request.get("/api/stats/graph?period=month")
+  ).json()) as GraphWire;
+  expect(monthGraph.nodes).toHaveLength(2);
+  expect(monthGraph.edges).toHaveLength(1);
+
   // The third form on the wire — `?tags=` (タグ集合 AND) has no UI shortcut with
   // only two stones, so prove the SQL against the real sqlite here: both stones
   // together = exactly the one 苔片, echoed in request order.
