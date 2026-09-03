@@ -25,7 +25,7 @@
 
 - ✅ **API 自動投稿（PAT）**（#31、2026-09-03）: `POST /api/posts` を `post:write` で開け、設定画面でトークン発行・失効（[features.md](features.md) §7、`cloudflare-workers-pat-bearer-auth`）。最初の送り側 = mazuoboeru の日次結果投稿。連携の形 (i)/(ii) は「決めること」8。
 - 全文検索。
-- **タグ関係グラフ**（共起ネットワーク。石＝タグが投稿数で育つ、[visualization.md](visualization.md) §6）。
+- ✅ **タグ関係グラフ**（#32、2026-09-03。共起ネットワーク。石＝タグが投稿数で育つ、[visualization.md](visualization.md) §6）。
 - ✅ **タグのタイムライン**（#30、2026-09-03。最初〜最後の苔片の期間、[visualization.md](visualization.md) §8）。
 - 累積（積み上げ）グラフ、ストリーク、内訳・時間帯分布。
 - タグ運用（リネーム・統合・別名・アーカイブ・色/絵文字）。
