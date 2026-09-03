@@ -98,8 +98,8 @@ export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[]): LaidNode[] 
         let uy = a.y - b.y;
         let d = Math.hypot(ux, uy);
         if (d < 0.01) {
-          // Coincident stones (cannot arise from the ring, but never divide by
-          // ~0): part them along a fixed axis.
+          // Coincident stones (cannot arise from the spiral, but never divide
+          // by ~0): part them along a fixed axis.
           ux = 1;
           uy = 0;
           d = 1;
