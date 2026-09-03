@@ -39,6 +39,10 @@ test("without a session, writes are refused by the session gate itself", async (
   const post = await request.post("/api/posts", { headers });
   expect(post.status()).toBe(401);
   expect(await post.json()).toEqual(UNAUTHORIZED);
+  const patch = await request.patch("/api/posts/some-id", { headers });
+  expect(patch.status()).toBe(401);
+  const del = await request.delete("/api/posts/some-id", { headers });
+  expect(del.status()).toBe(401);
   const logout = await request.post("/api/auth/logout", { headers });
   expect(logout.status()).toBe(401);
   const addDevice = await request.post("/api/auth/credentials/add/begin", { headers });

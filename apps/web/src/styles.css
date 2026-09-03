@@ -604,6 +604,73 @@ textarea {
   margin: 0;
 }
 
+/* ---- 苔片の編集・削除（ADR-0003: 削除は物理削除、確認は native <dialog>） ---- */
+
+.post-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.post-actions button {
+  min-height: 32px;
+  padding: 0.15rem 0.9rem;
+  font-size: 0.8rem;
+  color: var(--quiet);
+}
+
+.post-actions button:hover {
+  color: var(--ink);
+}
+
+.post-edit {
+  margin: 0;
+}
+
+dialog.confirm {
+  max-inline-size: min(26rem, calc(100vw - 2rem));
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+dialog.confirm::backdrop {
+  background: rgb(0 0 0 / 0.45);
+}
+
+dialog.confirm p {
+  margin-block: 0;
+}
+
+/* 何が消えるかを見せてから消す（本文プレビュー）。 */
+.confirm-preview {
+  margin: 0.75rem 0 1rem;
+  padding-inline-start: 0.75rem;
+  border-inline-start: 3px solid var(--line);
+  color: var(--quiet);
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.confirm-preview strong {
+  display: block;
+  color: var(--ink);
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+button.danger {
+  border-color: var(--error);
+  color: var(--error);
+}
+
 .devices,
 .tokens {
   list-style: none;

@@ -68,6 +68,49 @@ describe("posts/tags routes sit behind the session guard", () => {
     expect(res.status).toBe(401);
     expect(((await res.json()) as { error: { type: string } }).error.type).toBe("unauthorized");
   });
+
+  // Edit/delete (ADR-0003): mounted, and dead without a cookie session before
+  // any of the handler runs. The session-only wall against a live PAT needs a
+  // DB and lives in e2e (pat.spec.ts).
+  it("PATCH /api/posts/:id without a session is 401 (not 404 — the route is mounted)", async () => {
+    const res = await app.request(
+      "/api/posts/some-id",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Origin: TEST_ORIGIN },
+        body: JSON.stringify({ body: "苔" }),
+      },
+      testEnv(),
+    );
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: { type: string } }).error.type).toBe("unauthorized");
+  });
+
+  it("DELETE /api/posts/:id without a session is 401", async () => {
+    const res = await app.request(
+      "/api/posts/some-id",
+      { method: "DELETE", headers: { Origin: TEST_ORIGIN } },
+      testEnv(),
+    );
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: { type: string } }).error.type).toBe("unauthorized");
+  });
+
+  it("a cross-origin PATCH /api/posts/:id is rejected by CSRF before anything else", async () => {
+    const res = await app.request(
+      "/api/posts/some-id",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Origin: "https://evil.example" },
+        body: JSON.stringify({ body: "苔" }),
+      },
+      testEnv(),
+    );
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: { type: string } }).error.type).toBe(
+      "csrf_origin_mismatch",
+    );
+  });
 });
 
 describe("API responses are marked no-store (decrypted bodies must not be cached)", () => {

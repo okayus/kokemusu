@@ -13,9 +13,11 @@ import { clearDraft, loadDraft, saveDraft } from "./draft";
 import { HeatmapSection } from "./Heatmap";
 import {
   createPost,
+  deletePost,
   listPosts,
   listTags,
   splitTagField,
+  updatePost,
   type PostItem,
   type TagSummary,
 } from "./posts-api";
@@ -32,6 +34,14 @@ import { useAuth } from "./useAuth";
 
 const dateFmt = new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" });
 const fmtDate = (ms: number | null) => (ms === null ? "—" : dateFmt.format(new Date(ms)));
+
+/** ⌘/Ctrl+Enter submits the surrounding form (composer と編集フォームで共用). */
+const submitOnCmdEnter = (e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    e.preventDefault();
+    e.currentTarget.form?.requestSubmit();
+  }
+};
 
 export function App() {
   const auth = useAuth();
@@ -284,6 +294,34 @@ function Garden(props: { onSessionLost: () => void }) {
     }
   };
 
+  const handleUpdated = (updated: PostItem) => {
+    setError(null);
+    // Same rule as create: a 苔片 whose new stones no longer carry every
+    // filtered one drops out of the filtered view instead of lingering stale.
+    const matches = postFilter.every((f) => updated.tags.some((t) => t.id === f.id));
+    setPosts((current) =>
+      current === null
+        ? current
+        : matches
+          ? current.map((p) => (p.id === updated.id ? updated : p))
+          : current.filter((p) => p.id !== updated.id),
+    );
+    // Tags may have moved between stones — the 年表 and つながり follow.
+    setMossVersion((v) => v + 1);
+    if (updated.tags.length > 0) {
+      void listTags()
+        .then(setTagOptions)
+        .catch(() => {});
+    }
+  };
+
+  const handleDeleted = (id: string) => {
+    setError(null);
+    setPosts((current) => (current === null ? current : current.filter((p) => p.id !== id)));
+    // The moss lightens — the visible receipt that the 苔片 is gone (ADR-0003).
+    setMossVersion((v) => v + 1);
+  };
+
   const loadMore = async () => {
     if (nextCursor === null || loadingMore) return;
     const epoch = feedEpoch.current;
@@ -371,7 +409,14 @@ function Garden(props: { onSessionLost: () => void }) {
             </button>
           </div>
         )}
-        <Timeline posts={posts} filtered={postFilter.length > 0} onTagTap={(t) => showPosts([t])} />
+        <Timeline
+          posts={posts}
+          filtered={postFilter.length > 0}
+          onTagTap={(t) => showPosts([t])}
+          onUpdated={handleUpdated}
+          onDeleted={handleDeleted}
+          onSessionLost={props.onSessionLost}
+        />
         {nextCursor !== null && (
           <button type="button" disabled={loadingMore} onClick={() => void loadMore()}>
             もっと遡る
@@ -419,13 +464,6 @@ function Composer(props: {
       else setError(describeApiError(e));
     } finally {
       setBusy(false);
-    }
-  };
-
-  const submitOnCmdEnter = (e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-      e.preventDefault();
-      e.currentTarget.form?.requestSubmit();
     }
   };
 
@@ -489,6 +527,9 @@ function Timeline(props: {
   posts: PostItem[] | null;
   filtered: boolean;
   onTagTap: (tag: TagSummary) => void;
+  onUpdated: (updated: PostItem) => void;
+  onDeleted: (id: string) => void;
+  onSessionLost: () => void;
 }) {
   if (props.posts === null) {
     return <p className="quiet">…</p>;
@@ -505,33 +546,233 @@ function Timeline(props: {
     // it (same note as .tl-rows).
     <ol className="posts" role="list">
       {props.posts.map((p) => (
-        <li key={p.id} className="post">
-          <time className="hint" dateTime={new Date(p.createdAt).toISOString()}>
-            {fmtDate(p.createdAt)}
-          </time>
-          {p.title !== null && <strong className="post-title">{p.title}</strong>}
-          {/* Plaintext on purpose — React's default escaping is the whole
-              renderer until Markdown + sanitising lands (outside PR4). */}
-          <p className="post-body">{p.body}</p>
-          {p.tags.length > 0 && (
-            <ul className="post-tags" role="list">
-              {p.tags.map((t) => (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    className="tag-chip"
-                    aria-label={`「${t.name}」で絞り込む`}
-                    onClick={() => props.onTagTap(t)}
-                  >
-                    {t.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </li>
+        <PostEntry
+          key={p.id}
+          post={p}
+          onTagTap={props.onTagTap}
+          onUpdated={props.onUpdated}
+          onDeleted={props.onDeleted}
+          onSessionLost={props.onSessionLost}
+        />
       ))}
     </ol>
+  );
+}
+
+/**
+ * One 苔片: the read view with 編集/削除, or the inline edit form (the
+ * composer's mirror — same fields plus the optional heading, uncontrolled so
+ * やめる simply discards). Delete confirms through a native <dialog> showing
+ * what dies; the deletion is physical and unrecoverable from the UI (ADR-0003).
+ */
+function PostEntry(props: {
+  post: PostItem;
+  onTagTap: (tag: TagSummary) => void;
+  onUpdated: (updated: PostItem) => void;
+  onDeleted: (id: string) => void;
+  onSessionLost: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const confirmRef = useRef<HTMLDialogElement | null>(null);
+  const p = props.post;
+
+  // The confirm dialog is mounted only while confirming — a permanently
+  // mounted (closed) one would keep a hidden copy of the 苔片's text in the
+  // DOM. showModal is imperative on purpose: the `open` attribute would show
+  // it non-modal, without backdrop or focus trap.
+  useEffect(() => {
+    if (confirming) confirmRef.current?.showModal();
+  }, [confirming]);
+
+  const fault = (e: unknown) => {
+    if (isApiError(e) && e.status === 401) props.onSessionLost();
+    else setError(describeApiError(e));
+  };
+
+  const save = async (input: { title: string; body: string; tags: string[] }) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await updatePost(p.id, {
+        body: input.body,
+        ...(input.title ? { title: input.title } : {}),
+        tags: input.tags,
+      });
+      setEditing(false);
+      props.onUpdated(updated);
+    } catch (e) {
+      fault(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const destroy = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deletePost(p.id);
+      props.onDeleted(p.id);
+      // Success unmounts this entry via onDeleted — nothing left to un-busy.
+    } catch (e) {
+      fault(e);
+      setBusy(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <li className="post">
+        <form
+          className="post-edit"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const fd = new FormData(e.currentTarget);
+            void save({
+              title: String(fd.get("title") ?? "").trim(),
+              body: String(fd.get("body") ?? ""),
+              tags: splitTagField(String(fd.get("tags") ?? "")),
+            });
+          }}
+        >
+          <div className="field">
+            <label htmlFor={`edit-title-${p.id}`}>見出し（任意）</label>
+            <input
+              id={`edit-title-${p.id}`}
+              name="title"
+              maxLength={200}
+              autoComplete="off"
+              defaultValue={p.title ?? ""}
+              onKeyDown={submitOnCmdEnter}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor={`edit-body-${p.id}`}>本文</label>
+            <textarea
+              id={`edit-body-${p.id}`}
+              name="body"
+              required
+              maxLength={20000}
+              rows={3}
+              defaultValue={p.body}
+              onKeyDown={submitOnCmdEnter}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor={`edit-tags-${p.id}`}>タグ（コンマ区切り・任意）</label>
+            {/* list: the composer's datalist — one source of completion. */}
+            <input
+              id={`edit-tags-${p.id}`}
+              name="tags"
+              list="tag-options"
+              autoComplete="off"
+              maxLength={500}
+              defaultValue={p.tags.map((t) => t.name).join(", ")}
+              onKeyDown={submitOnCmdEnter}
+            />
+          </div>
+          {error && (
+            <p role="alert" className="error">
+              {error}
+            </p>
+          )}
+          <div className="composer-actions">
+            <button type="submit" className="primary" disabled={busy}>
+              保存
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setError(null);
+                setEditing(false);
+              }}
+            >
+              やめる
+            </button>
+          </div>
+        </form>
+      </li>
+    );
+  }
+
+  return (
+    <li className="post">
+      <time className="hint" dateTime={new Date(p.createdAt).toISOString()}>
+        {fmtDate(p.createdAt)}
+      </time>
+      {p.title !== null && <strong className="post-title">{p.title}</strong>}
+      {/* Plaintext on purpose — React's default escaping is the whole
+          renderer until Markdown + sanitising lands (outside PR4). */}
+      <p className="post-body">{p.body}</p>
+      {p.tags.length > 0 && (
+        <ul className="post-tags" role="list">
+          {p.tags.map((t) => (
+            <li key={t.id}>
+              <button
+                type="button"
+                className="tag-chip"
+                aria-label={`「${t.name}」で絞り込む`}
+                onClick={() => props.onTagTap(t)}
+              >
+                {t.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+      <div className="post-actions">
+        <button type="button" disabled={busy} onClick={() => setEditing(true)}>
+          編集
+        </button>
+        <button type="button" disabled={busy} onClick={() => setConfirming(true)}>
+          削除
+        </button>
+      </div>
+      {/* Native modal: showModal traps focus and handles Esc; closedby="any"
+          adds backdrop light-dismiss where supported. Esc/backdrop/やめる all
+          close with an empty returnValue — only the explicit 削除する submit
+          carries "delete". */}
+      {confirming && (
+        <dialog
+          ref={confirmRef}
+          className="confirm"
+          closedby="any"
+          aria-labelledby={`confirm-delete-${p.id}`}
+          onClose={() => {
+            const decided = confirmRef.current?.returnValue === "delete";
+            setConfirming(false);
+            if (decided) void destroy();
+          }}
+        >
+          <p id={`confirm-delete-${p.id}`}>
+            <strong>この苔片を削除します。</strong>元に戻せません。
+          </p>
+          <blockquote className="confirm-preview">
+            {p.title !== null && <strong>{p.title}</strong>}
+            {p.body.length > 120 ? `${p.body.slice(0, 120)}…` : p.body}
+          </blockquote>
+          <form method="dialog" className="confirm-actions">
+            <button type="submit" value="cancel">
+              やめる
+            </button>
+            <button type="submit" value="delete" className="danger">
+              削除する
+            </button>
+          </form>
+        </dialog>
+      )}
+    </li>
   );
 }
 

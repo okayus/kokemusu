@@ -5,7 +5,6 @@ import {
   eq,
   gte,
   inArray,
-  isNull,
   lt,
   max,
   min,
@@ -238,7 +237,6 @@ export const statsRoutes = new Hono<Env>()
       .where(
         and(
           eq(post.userId, c.get("userId")),
-          isNull(post.deletedAt),
           gte(post.createdAt, dayStartMs(from)),
           lt(post.createdAt, dayStartMs(addDays(to, 1))),
         ),
@@ -277,7 +275,7 @@ export const statsRoutes = new Hono<Env>()
       last: max(post.createdAt),
       count: count(),
     };
-    const liveOwnPosts = and(eq(post.userId, userId), isNull(post.deletedAt));
+    const ownPosts = eq(post.userId, userId);
 
     // ---- ?tags=t1,t2,…: the one AND row — posts carrying the whole set.
     if (parsed.data.tags !== undefined) {
@@ -297,7 +295,7 @@ export const statsRoutes = new Hono<Env>()
         await db
           .select({ first: min(post.createdAt), last: max(post.createdAt), count: count() })
           .from(post)
-          .where(and(liveOwnPosts, inArray(post.id, matched)))
+          .where(and(ownPosts, inArray(post.id, matched)))
       )[0];
       // No 苔片 carries the whole set (an unknown id lands here too — nothing
       // can carry it): an empty 年表, not an error, same as posts' unknown ?tag=.
@@ -336,7 +334,7 @@ export const statsRoutes = new Hono<Env>()
         .from(postTags)
         .innerJoin(post, eq(postTags.postId, post.id))
         .innerJoin(tag, eq(postTags.tagId, tag.id))
-        .where(and(eq(postTags.tagId, focusId), liveOwnPosts))
+        .where(and(eq(postTags.tagId, focusId), ownPosts))
         .groupBy(tag.id, tag.name, tag.norm);
       // The §6 co-occurrence self-join, pinned on one side: a = the focused
       // stone, b = every other tag on the same 苔片, grouped by b.
@@ -348,7 +346,7 @@ export const statsRoutes = new Hono<Env>()
         .innerJoin(b, and(eq(b.postId, a.postId), ne(b.tagId, focusId)))
         .innerJoin(post, eq(a.postId, post.id))
         .innerJoin(tag, eq(b.tagId, tag.id))
-        .where(and(eq(a.tagId, focusId), liveOwnPosts))
+        .where(and(eq(a.tagId, focusId), ownPosts))
         .groupBy(tag.id, tag.name, tag.norm);
       const [aloneRaw, coocRaw] = await db.batch([aloneQuery, coocQuery]);
 
@@ -376,7 +374,7 @@ export const statsRoutes = new Hono<Env>()
       .from(postTags)
       .innerJoin(post, eq(postTags.postId, post.id))
       .innerJoin(tag, eq(postTags.tagId, tag.id))
-      .where(liveOwnPosts)
+      .where(ownPosts)
       .groupBy(tag.id, tag.name, tag.norm);
     const rows: TimelineRow[] = buildTagSpans(raw).map((s) => ({
       tags: [s.tag],
@@ -394,11 +392,11 @@ export const statsRoutes = new Hono<Env>()
 
     const userId = c.get("userId");
     const db = createDb(c.env.DB);
-    const liveOwnPosts = and(eq(post.userId, userId), isNull(post.deletedAt));
+    const ownPosts = eq(post.userId, userId);
     const inPeriod =
       period === "all"
-        ? liveOwnPosts
-        : and(liveOwnPosts, gte(post.createdAt, dayStartMs(periodStartDay(period, Date.now()))));
+        ? ownPosts
+        : and(ownPosts, gte(post.createdAt, dayStartMs(periodStartDay(period, Date.now()))));
 
     // Per-stone counts, and the §6 self-join of data-model.md's 集計節:
     // `a.tag_id < b.tag_id` hands each pair exactly one row. Batched — two

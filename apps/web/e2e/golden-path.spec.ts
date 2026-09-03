@@ -176,4 +176,48 @@ test("register → post → today's moss darkens → reload → logout → login
 
   await page.locator(".feed-filter").getByRole("button", { name: "解除" }).click();
   await expect(timeline.locator("li.post")).toHaveCount(2);
+
+  // 編集 (ADR-0003 PR): the second 苔片 is rewritten in place — body and
+  // stones replaced, re-encrypted at rest — and the counts stay put: an edit
+  // is not a new 苔片. (exact: the tag chips' accessible names contain 編集
+  // and 削除 as substrings once the new stone exists.)
+  const second = timeline.locator("li.post", { hasText: "絞り込み用の苔片" });
+  await second.getByRole("button", { name: "編集", exact: true }).click();
+  await second.getByLabel("本文").fill("編集された苔片");
+  await second.getByLabel("タグ（コンマ区切り・任意）").fill("e2e, 編集");
+  await second.getByRole("button", { name: "保存" }).click();
+
+  const edited = timeline.locator("li.post", { hasText: "編集された苔片" });
+  await expect(edited).toBeVisible();
+  await expect(timeline.getByText("絞り込み用の苔片", { exact: true })).toHaveCount(0);
+  await expect(edited.locator(".post-tags .tag-chip")).toHaveText(["e2e", "編集"]);
+  await expect(timeline.locator("li.post")).toHaveCount(2);
+  await expect(total).toHaveText("計 2 片");
+  await expect(today).toHaveClass(/\bl2\b/);
+
+  // At rest both 苔片 are still k1. envelopes — the edit re-encrypted, and no
+  // plaintext of the new body ever reached D1.
+  const reEncrypted = queryRows<{ body: string }>("SELECT body FROM post");
+  expect(reEncrypted).toHaveLength(2);
+  for (const row of reEncrypted) {
+    expect(row.body).toMatch(/^k1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,}$/);
+  }
+
+  // 削除 (ADR-0003): the native dialog previews what dies, and confirming
+  // removes the 苔片 physically — from the list, from the 総草 (on screen and
+  // on the wire), and from the rows themselves, links cascaded.
+  await edited.getByRole("button", { name: "削除", exact: true }).click();
+  const confirm = page.getByRole("dialog");
+  await expect(confirm.getByText("編集された苔片")).toBeVisible();
+  await confirm.getByRole("button", { name: "削除する" }).click();
+
+  await expect(timeline.locator("li.post")).toHaveCount(1);
+  await expect(timeline.getByText(body, { exact: true })).toBeVisible();
+  await expect(total).toHaveText("計 1 片");
+  await expect(today).toHaveClass(/\bl1\b/);
+  const afterDelete = (await (await page.request.get("/api/stats/heatmap")).json()) as HeatmapWire;
+  expect(afterDelete.days.reduce((n, d) => n + d.count, 0)).toBe(1);
+  expect(queryRows<{ c: number }>("SELECT COUNT(*) AS c FROM post")[0]?.c).toBe(1);
+  // ON DELETE CASCADE took the dead 苔片's links; the survivor keeps its two.
+  expect(queryRows<{ c: number }>("SELECT COUNT(*) AS c FROM post_tags")[0]?.c).toBe(2);
 });
