@@ -26,6 +26,14 @@
   accent-color: var(--moss);
 }
 
+/* ページ内移動（石のつながり → 年表フォーカス）だけが使う。JS 側は
+   scrollIntoView() を素で呼び、動きの有無はここ（reduced-motion）が決める。 */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
 body {
   margin: 0;
   font-family: system-ui, sans-serif;
@@ -33,6 +41,20 @@ body {
   line-height: 1.7;
   background: var(--bg);
   color: var(--ink);
+}
+
+/* 見た目からは消してスクリーンリーダーにだけ読ませる
+   （modern-web-guidance/accessibility の標準ユーティリティ）。 */
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
 }
 
 .shell {
@@ -410,6 +432,95 @@ textarea {
   text-align: end;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+/* ---- 石のつながり（タグ関係グラフ、visualization.md §6） ---- */
+
+.tag-graph {
+  margin-block: 1.5rem 2rem;
+}
+
+.tg-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+/* 期間（今月 / 今年 / 全期間）はネイティブ radio のまま並べる。 */
+.tg-period {
+  display: flex;
+  gap: 0.9rem;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--quiet);
+}
+
+.tg-period label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+/* テキストフィールド向けの全域 input 指定（幅 100%・48px）を丸に戻す。 */
+.tg-period input {
+  width: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  margin: 0;
+}
+
+.tg-period label:has(input:checked) {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.tg-chart {
+  inline-size: 100%;
+  block-size: auto;
+  display: block;
+  margin-block-start: 0.5rem;
+  overflow: visible;
+}
+
+/* 橋 = 苔。太さがデータなので色は一様、hover で行き先の 2 石を title 表示。 */
+.tg-edge {
+  stroke: var(--moss);
+  opacity: 0.4;
+  stroke-linecap: round;
+}
+
+.tg-node {
+  cursor: pointer;
+}
+
+.tg-hit {
+  fill: transparent;
+}
+
+.tg-stone {
+  fill: var(--moss);
+}
+
+.tg-node:hover .tg-stone,
+.tg-node:focus-visible .tg-stone {
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+
+.tg-node:focus-visible {
+  outline: 3px solid var(--moss);
+  outline-offset: 2px;
+}
+
+.tg-label {
+  fill: var(--ink);
+  font-size: 11px;
 }
 
 /* ---- タイムライン ---- */

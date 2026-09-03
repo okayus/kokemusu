@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { describeApiError, isApiError } from "./api";
 import {
   addDevice,
@@ -19,6 +19,7 @@ import {
   type PostItem,
   type TagSummary,
 } from "./posts-api";
+import { TagGraphSection } from "./TagGraph";
 import { TagTimelineSection } from "./TagTimeline";
 import {
   createToken,
@@ -207,6 +208,10 @@ function Garden(props: { onSessionLost: () => void }) {
   // Bumped after each post: the moss must darken right away (DoD 4 — the one
   // deliberate motion in the UI, plans/vertical-slice.md の UI トーン決定).
   const [mossVersion, setMossVersion] = useState(0);
+  // The 年表's focused stone lives here because two sections write it: the
+  // 年表's own chips and the graph's stones (§6 のノードタップの着地 = §8 フォーカス).
+  const [timelineFocus, setTimelineFocus] = useState<TagSummary | null>(null);
+  const timelineRef = useRef<HTMLElement | null>(null);
 
   const { onSessionLost } = props;
   const fault = useCallback(
@@ -270,7 +275,25 @@ function Garden(props: { onSessionLost: () => void }) {
         </p>
       )}
       <HeatmapSection refreshKey={mossVersion} onFault={fault} />
-      <TagTimelineSection refreshKey={mossVersion} tagOptions={tagOptions} onFault={fault} />
+      <TagTimelineSection
+        ref={timelineRef}
+        refreshKey={mossVersion}
+        tagOptions={tagOptions}
+        focusTag={timelineFocus}
+        onFocusChange={setTimelineFocus}
+        onFault={fault}
+      />
+      <TagGraphSection
+        refreshKey={mossVersion}
+        onTagTap={(t) => {
+          // §6 → §8: focus the 年表 on the tapped stone and travel there so the
+          // answer is on screen. scrollIntoView reads scroll-behavior from CSS,
+          // which is where reduced motion is honoured.
+          setTimelineFocus(t);
+          timelineRef.current?.scrollIntoView({ block: "start" });
+        }}
+        onFault={fault}
+      />
       <Timeline posts={posts} />
       {nextCursor !== null && (
         <button type="button" disabled={loadingMore} onClick={() => void loadMore()}>

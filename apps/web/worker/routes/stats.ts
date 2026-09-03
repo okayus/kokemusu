@@ -1,4 +1,17 @@
-import { and, count, countDistinct, eq, gte, inArray, isNull, lt, max, min, ne } from "drizzle-orm";
+import {
+  and,
+  count,
+  countDistinct,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  max,
+  min,
+  ne,
+  sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -162,6 +175,59 @@ export function buildTagSpans(raws: RawTagSpan[]): TagSpan[] {
             : 0,
   );
   return spans.map(({ norm: _norm, ...span }) => span);
+}
+
+// ---------------------------------------------------------------------------
+// タグ関係グラフ (visualization.md §6): stones and the moss bridging them.
+// Node = tag, its count = 苔片 carrying it in the period (the stone's size —
+// §6's replacement for a per-tag heatmap); edge = two tags on the same 苔片,
+// its count = co-occurrence. Same plaintext-metadata-only diet as the rest of
+// this file: `post_tags` and `created_at`, never a body (ADR-0001).
+
+/** 今月 / 今年 / 全期間 — the three windows §6 offers. Absent = 全期間. */
+export const graphQuerySchema = z.object({
+  period: z.enum(["month", "year", "all"]).optional(),
+});
+
+/**
+ * First day of the running month/year — in APP_TZ, because the server decides
+ * "today" for every stats view (same rule as the timeline's `today`), and a
+ * period boundary cut in the client's zone would move the map by travel.
+ */
+export function periodStartDay(period: "month" | "year", todayMs: number): DayKey {
+  const today = dayKey(todayMs);
+  return period === "month" ? `${today.slice(0, 7)}-01` : `${today.slice(0, 4)}-01-01`;
+}
+
+/** A stone on the wire: display bits + how many 苔片 grew on it in the period. */
+export type GraphNode = { id: string; name: string; color: string | null; count: number };
+
+/** A bridge on the wire: the two stones' ids (`a` < `b`, one row per pair) + shared 苔片 count. */
+export type GraphEdge = { a: string; b: string; count: number };
+
+/** What the grouped node SQL hands back; `norm` rides along as the tiebreaker. */
+export type RawGraphNode = GraphNode & { norm: string };
+
+/**
+ * Order the grouped rows for the wire: nodes by count descending (ties by
+ * norm, so the order is stable day-in day-out), edges by count descending
+ * (ties by pair). An edge whose end is not among the nodes cannot happen —
+ * both queries walk the same posts — but is dropped rather than crashing the
+ * chart, mirroring buildTagSpans' defensiveness.
+ */
+export function buildGraph(
+  rawNodes: RawGraphNode[],
+  rawEdges: GraphEdge[],
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const byNorm = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+  const nodes = [...rawNodes]
+    .sort((x, y) => y.count - x.count || byNorm(x.norm, y.norm))
+    .map(({ norm: _norm, ...node }) => node);
+  const ids = new Set(nodes.map((node) => node.id));
+  const edges = rawEdges
+    .filter((e) => ids.has(e.a) && ids.has(e.b))
+    .sort((x, y) => y.count - x.count || byNorm(x.a, y.a) || byNorm(x.b, y.b));
+  return { nodes, edges };
 }
 
 export const statsRoutes = new Hono<Env>()
@@ -334,4 +400,47 @@ export const statsRoutes = new Hono<Env>()
       count: s.count,
     }));
     return c.json({ today, rows });
+  })
+  // ---------------------------------------- tag graph (石のつながり, §6)
+  .get("/graph", async (c) => {
+    const parsed = graphQuerySchema.safeParse({ period: c.req.query("period") });
+    if (!parsed.success) return fail(c, "validation_error");
+    const period = parsed.data.period ?? "all";
+
+    const userId = c.get("userId");
+    const db = createDb(c.env.DB);
+    const liveOwnPosts = and(eq(post.userId, userId), isNull(post.deletedAt));
+    const inPeriod =
+      period === "all"
+        ? liveOwnPosts
+        : and(liveOwnPosts, gte(post.createdAt, dayStartMs(periodStartDay(period, Date.now()))));
+
+    // Per-stone counts, and the §6 self-join of data-model.md's 集計節:
+    // `a.tag_id < b.tag_id` hands each pair exactly one row. Batched — two
+    // statements, one D1 round trip, like the timeline's focus form.
+    const nodesQuery = db
+      .select({ id: tag.id, name: tag.name, norm: tag.norm, color: tag.color, count: count() })
+      .from(postTags)
+      .innerJoin(post, eq(postTags.postId, post.id))
+      .innerJoin(tag, eq(postTags.tagId, tag.id))
+      .where(inPeriod)
+      .groupBy(tag.id, tag.name, tag.norm, tag.color);
+    const a = alias(postTags, "a");
+    const b = alias(postTags, "b");
+    const edgesQuery = db
+      .select({
+        // Both sides are `tag_id`, and D1's batch API hands rows back as
+        // objects (no raw mode), where duplicate column names clobber each
+        // other and derail drizzle's positional mapping — so alias them apart.
+        a: sql<string>`${a.tagId}`.as("a"),
+        b: sql<string>`${b.tagId}`.as("b"),
+        count: count(),
+      })
+      .from(a)
+      .innerJoin(b, and(eq(b.postId, a.postId), lt(a.tagId, b.tagId)))
+      .innerJoin(post, eq(a.postId, post.id))
+      .where(inPeriod)
+      .groupBy(a.tagId, b.tagId);
+    const [rawNodes, rawEdges] = await db.batch([nodesQuery, edgesQuery]);
+    return c.json(buildGraph(rawNodes, rawEdges));
   });

@@ -35,3 +35,19 @@ export function getTimeline(opts: { focus?: string; tags?: string[] } = {}): Pro
   const qs = q.toString();
   return request(`/api/stats/timeline${qs ? `?${qs}` : ""}`);
 }
+
+/** A stone in the relationship graph: display bits + 苔片 count in the period. */
+export type GraphNode = { id: string; name: string; color: string | null; count: number };
+
+/** A bridge: the two stones' ids (`a` < `b`) and how many 苔片 carry both tags. */
+export type GraphEdge = { a: string; b: string; count: number };
+
+/** The server owns the order: nodes and edges both come count-descending. */
+export type TagGraph = { nodes: GraphNode[]; edges: GraphEdge[] };
+
+/** 今月 / 今年 / 全期間 (visualization.md §6). The boundary is cut server-side in APP_TZ. */
+export type GraphPeriod = "month" | "year" | "all";
+
+export function getGraph(period: GraphPeriod): Promise<TagGraph> {
+  return request(period === "all" ? "/api/stats/graph" : `/api/stats/graph?period=${period}`);
+}

@@ -5,12 +5,16 @@ import { testEnv } from "../test-support";
 import {
   MAX_WINDOW_DAYS,
   TIMELINE_MAX_TAGS,
+  buildGraph,
   buildHeatmap,
   buildTagSpans,
+  graphQuerySchema,
   heatmapQuerySchema,
   parseTagsParam,
+  periodStartDay,
   resolveWindow,
   timelineQuerySchema,
+  type RawGraphNode,
 } from "./stats";
 
 // Same arrangement as posts.test.ts: the Node harness has no D1, so the route
@@ -36,6 +40,12 @@ describe("stats route sits behind the session guard", () => {
 
   it("GET /api/stats/timeline without a session is 401 (not 404 — the route is mounted)", async () => {
     const res = await app.request("/api/stats/timeline", {}, testEnv());
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: { type: string } }).error.type).toBe("unauthorized");
+  });
+
+  it("GET /api/stats/graph without a session is 401 (not 404 — the route is mounted)", async () => {
+    const res = await app.request("/api/stats/graph", {}, testEnv());
     expect(res.status).toBe(401);
     expect(((await res.json()) as { error: { type: string } }).error.type).toBe("unauthorized");
   });
@@ -246,5 +256,72 @@ describe("buildTagSpans", () => {
       raw("ok", "ok", jst(2026, 9, 2), jst(2026, 9, 2)),
     ]);
     expect(spans.map((s) => s.tag.id)).toEqual(["ok"]);
+  });
+});
+
+describe("graphQuerySchema — the three windows and nothing else", () => {
+  it("accepts an empty query and each period", () => {
+    expect(graphQuerySchema.safeParse({}).success).toBe(true);
+    for (const period of ["month", "year", "all"]) {
+      expect(graphQuerySchema.safeParse({ period }).success).toBe(true);
+    }
+  });
+
+  it("rejects a window the route does not offer", () => {
+    expect(graphQuerySchema.safeParse({ period: "week" }).success).toBe(false);
+    expect(graphQuerySchema.safeParse({ period: "" }).success).toBe(false);
+  });
+});
+
+describe("periodStartDay — 今月/今年 are cut in APP_TZ, like every other day", () => {
+  it("names the first day of the running month and year", () => {
+    expect(periodStartDay("month", TODAY_MS)).toBe("2026-09-01");
+    expect(periodStartDay("year", TODAY_MS)).toBe("2026-01-01");
+  });
+
+  it("crosses the boundary on JST time, not UTC", () => {
+    // 00:30 JST on Jan 1 is still Dec 31 in UTC — the new year has begun here.
+    const newYear = jst(2027, 1, 1, 0, 30);
+    expect(new Date(newYear).toISOString()).toBe("2026-12-31T15:30:00.000Z");
+    expect(periodStartDay("year", newYear)).toBe("2027-01-01");
+    expect(periodStartDay("month", newYear)).toBe("2027-01-01");
+  });
+});
+
+describe("buildGraph", () => {
+  const rawNode = (
+    id: string,
+    norm: string,
+    count: number,
+    color: string | null = null,
+  ): RawGraphNode => ({ id, name: id.toUpperCase(), norm, color, count });
+
+  it("orders stones 苔片数 desc with norm ties, and keeps norm off the wire", () => {
+    const { nodes } = buildGraph(
+      [rawNode("b", "beta", 2), rawNode("c", "gamma", 5, "#3d6b4f"), rawNode("a", "alpha", 2)],
+      [],
+    );
+    expect(nodes.map((n) => n.id)).toEqual(["c", "a", "b"]);
+    // The tag's own color rides along for the stone; nothing else is added.
+    expect(nodes[0]).toEqual({ id: "c", name: "C", color: "#3d6b4f", count: 5 });
+  });
+
+  it("orders bridges by co-occurrence desc, ties by pair", () => {
+    const nodes = [rawNode("a", "a", 9), rawNode("b", "b", 9), rawNode("c", "c", 9)];
+    const { edges } = buildGraph(nodes, [
+      { a: "a", b: "c", count: 1 },
+      { a: "b", b: "c", count: 4 },
+      { a: "a", b: "b", count: 1 },
+    ]);
+    expect(edges).toEqual([
+      { a: "b", b: "c", count: 4 },
+      { a: "a", b: "b", count: 1 },
+      { a: "a", b: "c", count: 1 },
+    ]);
+  });
+
+  it("drops a bridge to a missing stone instead of crashing the map", () => {
+    const { edges } = buildGraph([rawNode("a", "a", 1)], [{ a: "a", b: "ghost", count: 1 }]);
+    expect(edges).toEqual([]);
   });
 });
