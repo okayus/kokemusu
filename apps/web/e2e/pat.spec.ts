@@ -62,6 +62,10 @@ test("PAT: mint → Bearer post lands encrypted → write-only wall → revoke k
 
   // The write-only wall: post:write cannot read the decrypted timeline…
   expect((await sender.get("/api/posts", { headers: bearer })).status()).toBe(403);
+  // …nor rewrite or remove history — edit/delete are session-only (ADR-0003;
+  // rejected requests carry no body, per the unread-body rule above)…
+  expect((await sender.patch("/api/posts/any-id", { headers: bearer })).status()).toBe(403);
+  expect((await sender.delete("/api/posts/any-id", { headers: bearer })).status()).toBe(403);
   // …and a PAT can never mint another PAT.
   const mintAttempt = await sender.post("/api/tokens", { headers: bearer });
   expect(mintAttempt.status()).toBe(403);

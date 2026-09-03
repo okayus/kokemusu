@@ -128,7 +128,9 @@ export const post = sqliteTable(
     // never by SQLite's UTC-based `date()`.
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
-    // Soft delete; null = alive.
+    // ADR-0003: deletion is physical, so nothing ever writes this (always
+    // NULL). Kept only until a follow-up migration drops the index, then the
+    // column — dropping is a schema change and rides its own reviewed PR.
     deletedAt: integer("deleted_at"),
   },
   (t) => [
