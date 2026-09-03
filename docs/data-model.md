@@ -100,7 +100,7 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 | body_format | text | `markdown`（将来 `plain` 等）。平文メタデータ |
 | created_at | integer | epoch ms。**平文メタデータ**（可視化の軸） |
 | updated_at | integer | |
-| deleted_at | integer? | ソフトデリート（null=生存） |
+| deleted_at | integer? | **廃止**（[ADR-0003](adr/0003-post-delete-is-physical.md): 削除は物理削除）。どこからも書かれない。後続 migration で index → 列の順に drop |
 
 > ✅ **集計の「日」= `Asia/Tokyo` で切る**（2026-08-23）。`created_at` は epoch ms（UTC の一瞬）で保存し、
 > 「その日」はコアの定数 `APP_TZ = "Asia/Tokyo"` を使う純粋関数 `dayKey()` で決める。**`user` に TZ 列は持たない** ——
@@ -176,7 +176,7 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 ## インデックス（目安）
 
 - `post(user_id, created_at)` ── タイムライン・期間絞り込み。
-- `post(deleted_at)` ── 生存フィルタ。
+- `post(deleted_at)` ── **廃止**（ADR-0003。列と一緒に後続 migration で drop）。
 - `post_tags(tag_id)` ── 多対多の逆方向（共起クエリもこれで足りる）。
   **`post_tags(post_id)` は張らない** ── PK `(post_id, tag_id)` が作る暗黙の index
   `sqlite_autoindex_post_tags_1` が `WHERE post_id = ?` を covering index で捌く（`0001` 適用後の
