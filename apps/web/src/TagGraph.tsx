@@ -7,9 +7,8 @@ import { getGraph, type GraphEdge, type GraphNode, type GraphPeriod, type TagGra
 // edge is moss bridging two stones that share 苔片, thicker the more they
 // share. Hand-written SVG over a hand-rolled deterministic force layout: tens
 // of stones need no library (§6 実装方針). Tapping a stone lands on the §8
-// focus 年表 (its 内訳) — the page wires that up. Edges stay hover-informational
-// for now; their 投稿一覧 landing waits for the post list's tag filter (Phase 1
-// leftover), and their accessible reading already exists as §8's focus rows.
+// focus 年表 (its 内訳); tapping a bridge lands on the post list filtered to
+// both stones (両タグ AND) — the page wires both up.
 
 // ---------------------------------------------------------------- pure layout
 
@@ -168,45 +167,87 @@ export const edgeTitle = (a: GraphNode, b: GraphNode, count: number) =>
 
 // Exported for the markup test — geometry and structure are locked there, the
 // same arrangement as TimelineChart (no in-sandbox browser to eyeball it).
-export function TagGraphChart(props: { graph: TagGraph; onTagTap: (tag: TagSummary) => void }) {
+export function TagGraphChart(props: {
+  graph: TagGraph;
+  onTagTap: (tag: TagSummary) => void;
+  onEdgeTap: (a: TagSummary, b: TagSummary) => void;
+}) {
   const { nodes, edges } = props.graph;
   const laid = useMemo(() => layoutGraph(nodes, edges), [nodes, edges]);
   const at = new Map(laid.map((p) => [p.id, p] as const));
   const named = new Map(nodes.map((node) => [node.id, node] as const));
   return (
     <svg className="tg-chart" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>
-      {/* Bridges are hover-informational; a screen reader reads the same
-          co-occurrence facts as §8 focus rows, one stone-tap away. */}
-      <g aria-hidden="true">
-        {edges.map((e) => {
-          const pa = at.get(e.a);
-          const pb = at.get(e.b);
-          const na = named.get(e.a);
-          const nb = named.get(e.b);
-          if (pa === undefined || pb === undefined || na === undefined || nb === undefined) {
-            return null;
-          }
-          return (
-            <line
-              key={`${e.a}+${e.b}`}
-              className="tg-edge"
-              x1={pa.x}
-              y1={pa.y}
-              x2={pb.x}
-              y2={pb.y}
-              strokeWidth={edgeWidth(e.count)}
-            >
-              <title>{edgeTitle(na, nb, e.count)}</title>
-            </line>
-          );
-        })}
-      </g>
+      {/* Bridges first so stones paint over them (and take the later tab stops). */}
+      {edges.map((e) => {
+        const pa = at.get(e.a);
+        const pb = at.get(e.b);
+        const na = named.get(e.a);
+        const nb = named.get(e.b);
+        if (pa === undefined || pb === undefined || na === undefined || nb === undefined) {
+          return null;
+        }
+        return (
+          <Bridge
+            key={`${e.a}+${e.b}`}
+            a={na}
+            b={nb}
+            pa={pa}
+            pb={pb}
+            count={e.count}
+            onEdgeTap={props.onEdgeTap}
+          />
+        );
+      })}
       {nodes.map((node) => {
         const p = at.get(node.id);
         if (p === undefined) return null;
         return <Stone key={node.id} node={node} at={p} onTagTap={props.onTagTap} />;
       })}
     </svg>
+  );
+}
+
+function Bridge(props: {
+  a: GraphNode;
+  b: GraphNode;
+  pa: LaidNode;
+  pb: LaidNode;
+  count: number;
+  onEdgeTap: (a: TagSummary, b: TagSummary) => void;
+}) {
+  const { a, b, pa, pb } = props;
+  const tap = () => props.onEdgeTap({ id: a.id, name: a.name }, { id: b.id, name: b.name });
+  return (
+    // The same rebuilt-button contract as Stone (no native button inside SVG).
+    // Activating a bridge lands on the post list filtered to both stones
+    // (visualization.md §6: エッジをタップで両方のタグが付いた投稿一覧へ).
+    <g
+      className="tg-bridge"
+      role="button"
+      tabIndex={0}
+      aria-label={edgeTitle(a, b, props.count)}
+      onClick={tap}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") tap();
+        if (e.key === " ") e.preventDefault();
+      }}
+      onKeyUp={(e) => {
+        if (e.key === " ") tap();
+      }}
+    >
+      <title>{edgeTitle(a, b, props.count)}</title>
+      {/* An invisible fat stroke keeps a hairline bridge tappable. */}
+      <line className="tg-hit-line" x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} strokeWidth={14} />
+      <line
+        className="tg-edge"
+        x1={pa.x}
+        y1={pa.y}
+        x2={pb.x}
+        y2={pb.y}
+        strokeWidth={edgeWidth(props.count)}
+      />
+    </g>
   );
 }
 
@@ -258,6 +299,8 @@ const PERIODS: { value: GraphPeriod; label: string }[] = [
 export function TagGraphSection(props: {
   refreshKey: number;
   onTagTap: (tag: TagSummary) => void;
+  /** 橋タップの着地 (§6): the post list filtered to both stones. */
+  onEdgeTap: (a: TagSummary, b: TagSummary) => void;
   onFault: (e: unknown) => void;
 }) {
   // Answers are tagged with the period they answer, so a switch shows "…"
@@ -314,7 +357,7 @@ export function TagGraphSection(props: {
       ) : shown.nodes.length === 0 ? (
         <p className="quiet">この期間に積んだ苔片はありません。</p>
       ) : (
-        <TagGraphChart graph={shown} onTagTap={props.onTagTap} />
+        <TagGraphChart graph={shown} onTagTap={props.onTagTap} onEdgeTap={props.onEdgeTap} />
       )}
     </section>
   );

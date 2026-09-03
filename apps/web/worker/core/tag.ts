@@ -33,3 +33,25 @@ export function parseTagNames(raws: string[]): TagInput[] {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// タグ集合 AND の wire 規約 — `?tags=<id>,<id>,…` は stats の年表（§8 深掘り行）と
+// posts の絞り込みが共有する。1 つの苔片が持てるタグ数が上限で、それを超える
+// AND は構成上空集合。
+
+/** One 苔片 carries at most this many tags (createPost's cap and the `?tags=` set's). */
+export const MAX_TAGS_PER_POST = 20;
+
+/**
+ * `?tags=` parsed into 2..MAX_TAGS_PER_POST unique ids in request order, or
+ * null for a shape the routes answer 400 to: an empty segment, an overlong id,
+ * or a set that isn't a combination (fewer than 2 after dedupe — one tag is
+ * each route's single-tag form's job).
+ */
+export function parseTagsParam(raw: string): string[] | null {
+  const parts = raw.split(",").map((s) => s.trim());
+  if (parts.some((p) => p.length === 0 || p.length > 64)) return null;
+  const ids = [...new Set(parts)];
+  if (ids.length < 2 || ids.length > MAX_TAGS_PER_POST) return null;
+  return ids;
+}

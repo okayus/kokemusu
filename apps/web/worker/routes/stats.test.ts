@@ -4,13 +4,11 @@ import { app } from "../index";
 import { testEnv } from "../test-support";
 import {
   MAX_WINDOW_DAYS,
-  TIMELINE_MAX_TAGS,
   buildGraph,
   buildHeatmap,
   buildTagSpans,
   graphQuerySchema,
   heatmapQuerySchema,
-  parseTagsParam,
   periodStartDay,
   resolveWindow,
   timelineQuerySchema,
@@ -197,30 +195,8 @@ describe("timelineQuerySchema — the three forms and nothing between", () => {
   });
 });
 
-describe("parseTagsParam", () => {
-  it("keeps request order and trims around commas", () => {
-    expect(parseTagsParam("b,a")).toEqual(["b", "a"]);
-    expect(parseTagsParam(" b , a ")).toEqual(["b", "a"]);
-  });
-
-  it("needs a combination: fewer than 2 unique ids is not this form", () => {
-    expect(parseTagsParam("a")).toBeNull();
-    expect(parseTagsParam("a,a")).toBeNull();
-    expect(parseTagsParam("a,a,b")).toEqual(["a", "b"]);
-  });
-
-  it("rejects empty segments and overlong ids", () => {
-    expect(parseTagsParam("a,,b")).toBeNull();
-    expect(parseTagsParam("a,b,")).toBeNull();
-    expect(parseTagsParam(`a,${"x".repeat(65)}`)).toBeNull();
-  });
-
-  it("caps the set at TIMELINE_MAX_TAGS (= what one 苔片 can carry)", () => {
-    const ids = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`).join(",");
-    expect(parseTagsParam(ids(TIMELINE_MAX_TAGS))).toHaveLength(TIMELINE_MAX_TAGS);
-    expect(parseTagsParam(ids(TIMELINE_MAX_TAGS + 1))).toBeNull();
-  });
-});
+// parseTagsParam's tests live in core/tag.test.ts — the `?tags=` wire 規約
+// moved to core when posts' filter started sharing it (2026-09-03).
 
 describe("buildTagSpans", () => {
   const raw = (

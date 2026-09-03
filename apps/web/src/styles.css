@@ -354,7 +354,8 @@ textarea {
   gap: 0.25rem;
 }
 
-/* 石チップ = タップでフォーカス。.tag（表示専用）と同じ見た目の button 版。 */
+/* タグのチップ button。年表（.tl-tags）ではフォーカス、投稿一覧
+   （.post-tags / .feed-filter）では絞り込み・その解除。 */
 .tag-chip {
   min-height: 28px;
   padding: 0.1rem 0.6rem;
@@ -488,11 +489,30 @@ textarea {
   overflow: visible;
 }
 
-/* 橋 = 苔。太さがデータなので色は一様、hover で行き先の 2 石を title 表示。 */
+/* 橋 = 苔。太さがデータなので色は一様。タップで両タグの投稿一覧へ。 */
 .tg-edge {
   stroke: var(--moss);
   opacity: 0.4;
   stroke-linecap: round;
+}
+
+.tg-bridge {
+  cursor: pointer;
+}
+
+/* 細い橋でもタップできるよう、透明な太い当たり判定を重ねる。 */
+.tg-hit-line {
+  stroke: transparent;
+}
+
+.tg-bridge:hover .tg-edge,
+.tg-bridge:focus-visible .tg-edge {
+  opacity: 1;
+}
+
+.tg-bridge:focus-visible {
+  outline: 3px solid var(--moss);
+  outline-offset: 2px;
 }
 
 .tg-node {
@@ -523,12 +543,38 @@ textarea {
   font-size: 11px;
 }
 
-/* ---- タイムライン ---- */
+/* ---- タイムライン（投稿一覧） ---- */
+
+.post-feed {
+  margin-block: 1.5rem 2rem;
+}
+
+/* 絞り込みバー: チップ（タップで外す）と解除。導線 3 本の着地点。 */
+.feed-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-block-start: 0.5rem;
+}
+
+.feed-filter-label {
+  font-size: 0.85rem;
+  color: var(--quiet);
+}
+
+.feed-filter-clear {
+  min-height: 28px;
+  padding: 0 0.75rem;
+  font-size: 0.8rem;
+  color: var(--quiet);
+  border-radius: 999px;
+}
 
 .posts {
   list-style: none;
   padding: 0;
-  margin-block: 1.5rem 1rem;
+  margin-block: 0.5rem 1rem;
 }
 
 .post {
@@ -556,15 +602,6 @@ textarea {
   gap: 0.35rem;
   padding: 0;
   margin: 0;
-}
-
-.tag {
-  font-size: 0.75rem;
-  color: var(--moss);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0.1rem 0.6rem;
-  white-space: nowrap;
 }
 
 .devices,

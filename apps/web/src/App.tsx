@@ -20,7 +20,7 @@ import {
   type TagSummary,
 } from "./posts-api";
 import { TagGraphSection } from "./TagGraph";
-import { TagTimelineSection } from "./TagTimeline";
+import { rowKey, TagTimelineSection } from "./TagTimeline";
 import {
   createToken,
   listTokens,
@@ -198,6 +198,13 @@ function AuthedView(props: {
   );
 }
 
+/** The `?tag=`/`?tags=` split (posts-api): one tag goes by name, a set by id. */
+function filterQuery(filter: TagSummary[]): { tag?: string; tags?: string[] } {
+  const [first] = filter;
+  if (first === undefined) return {};
+  return filter.length === 1 ? { tag: first.name } : { tags: filter.map((t) => t.id) };
+}
+
 /** Composer + timeline: the daily surface. Owns the loaded page of 苔片. */
 function Garden(props: { onSessionLost: () => void }) {
   const [posts, setPosts] = useState<PostItem[] | null>(null);
@@ -212,6 +219,10 @@ function Garden(props: { onSessionLost: () => void }) {
   // 年表's own chips and the graph's stones (§6 のノードタップの着地 = §8 フォーカス).
   const [timelineFocus, setTimelineFocus] = useState<TagSummary | null>(null);
   const timelineRef = useRef<HTMLElement | null>(null);
+  // 投稿一覧のタグ絞り込み (features.md §3) — the landing of three 導線: a
+  // 苔片's own chip (1 石), §8 フォーカスの「投稿一覧へ」(1 石), §6 の橋 (2 石).
+  const [postFilter, setPostFilter] = useState<TagSummary[]>([]);
+  const feedRef = useRef<HTMLElement | null>(null);
 
   const { onSessionLost } = props;
   const fault = useCallback(
@@ -223,22 +234,47 @@ function Garden(props: { onSessionLost: () => void }) {
     [onSessionLost],
   );
 
+  // The filter moved: drop the shown page before this render's output so stale
+  // 苔片 never sit under the new chips (the adjust-state-while-rendering
+  // pattern, same as the 年表's focus). The epoch keeps a slow もっと遡る
+  // answer from appending the old filter's page under the new one.
+  const filterKey = rowKey(postFilter);
+  const [shownFilterKey, setShownFilterKey] = useState(filterKey);
+  const feedEpoch = useRef(0);
+  if (shownFilterKey !== filterKey) {
+    setShownFilterKey(filterKey);
+    feedEpoch.current += 1;
+    setPosts(null);
+    setNextCursor(null);
+  }
+
   useEffect(() => {
-    void (async () => {
-      try {
-        const [timeline, tags] = await Promise.all([listPosts(), listTags()]);
+    listTags().then(setTagOptions).catch(fault);
+  }, [fault]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listPosts(filterQuery(postFilter))
+      .then((timeline) => {
+        if (cancelled) return;
         setPosts(timeline.posts);
         setNextCursor(timeline.nextCursor);
-        setTagOptions(tags);
-      } catch (e) {
-        fault(e);
-      }
-    })();
-  }, [fault]);
+      })
+      .catch((e) => {
+        if (!cancelled) fault(e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [postFilter, fault]);
 
   const handleCreated = (created: PostItem) => {
     setError(null);
-    setPosts((current) => [created, ...(current ?? [])]);
+    // A 苔片 not carrying every filtered stone belongs off-screen — the moss
+    // still darkens below, which is the visible receipt that it landed.
+    if (postFilter.every((f) => created.tags.some((t) => t.id === f.id))) {
+      setPosts((current) => [created, ...(current ?? [])]);
+    }
     setMossVersion((v) => v + 1);
     // The post may have minted new stones — refresh the completion list.
     if (created.tags.length > 0) {
@@ -250,16 +286,27 @@ function Garden(props: { onSessionLost: () => void }) {
 
   const loadMore = async () => {
     if (nextCursor === null || loadingMore) return;
+    const epoch = feedEpoch.current;
     setLoadingMore(true);
     try {
-      const timeline = await listPosts({ cursor: nextCursor });
-      setPosts((current) => [...(current ?? []), ...timeline.posts]);
-      setNextCursor(timeline.nextCursor);
+      const timeline = await listPosts({ cursor: nextCursor, ...filterQuery(postFilter) });
+      if (epoch === feedEpoch.current) {
+        setPosts((current) => [...(current ?? []), ...timeline.posts]);
+        setNextCursor(timeline.nextCursor);
+      }
     } catch (e) {
-      fault(e);
+      if (epoch === feedEpoch.current) fault(e);
     } finally {
       setLoadingMore(false);
     }
+  };
+
+  // 導線の着地: filter, then travel (scroll-behavior in CSS honours reduced
+  // motion). A same-set tap keeps the identity so nothing refetches, but still
+  // travels — the intent is "show me those 苔片".
+  const showPosts = (tags: TagSummary[]) => {
+    setPostFilter((current) => (rowKey(current) === rowKey(tags) ? current : tags));
+    feedRef.current?.scrollIntoView({ block: "start" });
   };
 
   return (
@@ -281,6 +328,7 @@ function Garden(props: { onSessionLost: () => void }) {
         tagOptions={tagOptions}
         focusTag={timelineFocus}
         onFocusChange={setTimelineFocus}
+        onShowPosts={(t) => showPosts([t])}
         onFault={fault}
       />
       <TagGraphSection
@@ -292,14 +340,44 @@ function Garden(props: { onSessionLost: () => void }) {
           setTimelineFocus(t);
           timelineRef.current?.scrollIntoView({ block: "start" });
         }}
+        onEdgeTap={(a, b) => showPosts([a, b])}
         onFault={fault}
       />
-      <Timeline posts={posts} />
-      {nextCursor !== null && (
-        <button type="button" disabled={loadingMore} onClick={() => void loadMore()}>
-          もっと遡る
-        </button>
-      )}
+      <section className="post-feed" ref={feedRef}>
+        <h2>投稿一覧</h2>
+        {/* The one polite live seat of the feed. Rendered before any filter
+            exists — a region must already be in the tree when its text lands. */}
+        <p className="visually-hidden" role="status">
+          {postFilter.length > 0
+            ? `${postFilter.map((t) => `「${t.name}」`).join("と")}で絞り込み中`
+            : ""}
+        </p>
+        {postFilter.length > 0 && (
+          <div className="feed-filter">
+            <span className="feed-filter-label">絞り込み:</span>
+            {postFilter.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className="tag-chip"
+                aria-label={`「${t.name}」の絞り込みを外す`}
+                onClick={() => setPostFilter((current) => current.filter((x) => x.id !== t.id))}
+              >
+                {t.name} ×
+              </button>
+            ))}
+            <button type="button" className="feed-filter-clear" onClick={() => setPostFilter([])}>
+              解除
+            </button>
+          </div>
+        )}
+        <Timeline posts={posts} filtered={postFilter.length > 0} onTagTap={(t) => showPosts([t])} />
+        {nextCursor !== null && (
+          <button type="button" disabled={loadingMore} onClick={() => void loadMore()}>
+            もっと遡る
+          </button>
+        )}
+      </section>
     </>
   );
 }
@@ -407,17 +485,25 @@ function Composer(props: {
   );
 }
 
-function Timeline(props: { posts: PostItem[] | null }) {
+function Timeline(props: {
+  posts: PostItem[] | null;
+  filtered: boolean;
+  onTagTap: (tag: TagSummary) => void;
+}) {
   if (props.posts === null) {
     return <p className="quiet">…</p>;
   }
   if (props.posts.length === 0) {
-    return (
+    return props.filtered ? (
+      <p className="quiet">この絞り込みに合う苔片はありません。</p>
+    ) : (
       <p className="quiet">まだ苔片がありません。ひとつ積むと、ここから苔むしていきます。</p>
     );
   }
   return (
-    <ol className="posts">
+    // role="list": list-style is stripped, Safari drops list semantics without
+    // it (same note as .tl-rows).
+    <ol className="posts" role="list">
       {props.posts.map((p) => (
         <li key={p.id} className="post">
           <time className="hint" dateTime={new Date(p.createdAt).toISOString()}>
@@ -428,10 +514,17 @@ function Timeline(props: { posts: PostItem[] | null }) {
               renderer until Markdown + sanitising lands (outside PR4). */}
           <p className="post-body">{p.body}</p>
           {p.tags.length > 0 && (
-            <ul className="post-tags">
+            <ul className="post-tags" role="list">
               {p.tags.map((t) => (
-                <li key={t.id} className="tag">
-                  {t.name}
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    className="tag-chip"
+                    aria-label={`「${t.name}」で絞り込む`}
+                    onClick={() => props.onTagTap(t)}
+                  >
+                    {t.name}
+                  </button>
                 </li>
               ))}
             </ul>

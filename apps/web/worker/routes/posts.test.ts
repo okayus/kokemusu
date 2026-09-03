@@ -137,4 +137,15 @@ describe("listPostsQuerySchema", () => {
     expect(listPostsQuerySchema.safeParse({ tag: "" }).success).toBe(false);
     expect(listPostsQuerySchema.safeParse({ cursor: "abc", tag: "苔" }).success).toBe(true);
   });
+
+  it("accepts a ?tags= AND set, alone or with a cursor", () => {
+    expect(listPostsQuerySchema.safeParse({ tags: "id-a,id-b" }).success).toBe(true);
+    expect(listPostsQuerySchema.safeParse({ cursor: "abc", tags: "id-a,id-b" }).success).toBe(true);
+    expect(listPostsQuerySchema.safeParse({ tags: "" }).success).toBe(false);
+    expect(listPostsQuerySchema.safeParse({ tags: "a,".repeat(700) + "b" }).success).toBe(false);
+  });
+
+  it("rejects tag and tags together — a mixed request has no meaning", () => {
+    expect(listPostsQuerySchema.safeParse({ tag: "苔", tags: "id-a,id-b" }).success).toBe(false);
+  });
 });

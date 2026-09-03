@@ -1,9 +1,9 @@
-import { and, desc, eq, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, countDistinct, desc, eq, inArray, isNull, lt, or, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { decodeCursor, encodeCursor } from "../core/cursor";
 import { decryptBody, encryptBody, importBodyKey } from "../core/crypto";
-import { normalizeTagName, parseTagNames } from "../core/tag";
+import { MAX_TAGS_PER_POST, normalizeTagName, parseTagNames, parseTagsParam } from "../core/tag";
 import { createDb, type Db } from "../db";
 import { post, postTags, tag } from "../db/schema";
 import { fail } from "../lib/errors";
@@ -12,9 +12,9 @@ import type { Env } from "../types";
 
 // Size caps: UTF-16 units, mirrored by the composer's maxLength. Generous for
 // a diary, small enough that an encrypted body stays a modest TEXT value.
+// (MAX_TAGS_PER_POST lives in core/tag.ts — the `?tags=` set shares the cap.)
 const MAX_BODY_CHARS = 20_000;
 const MAX_TITLE_CHARS = 200;
-const MAX_TAGS_PER_POST = 20;
 const MAX_TAG_CHARS = 100;
 
 // Exported for direct unit tests: the D1-free test harness cannot get past
@@ -31,11 +31,18 @@ export const createPostSchema = z.object({
   tags: z.array(z.string().min(1).max(MAX_TAG_CHARS)).max(MAX_TAGS_PER_POST).optional(),
 });
 
-export const listPostsQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(50).default(20),
-  cursor: z.string().min(1).max(256).optional(),
-  tag: z.string().min(1).max(MAX_TAG_CHARS).optional(),
-});
+// The two filter forms: `?tag=` = one tag by (normalized) name — hand-writable;
+// `?tags=` = a 2+ tag AND set by id, the same wire 規約 as the 年表's deep-dive
+// rows (core/tag.ts) so §6's edge tap and a §8 row land here symmetrically.
+// They are exclusive — a request mixing them has no meaning.
+export const listPostsQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+    cursor: z.string().min(1).max(256).optional(),
+    tag: z.string().min(1).max(MAX_TAG_CHARS).optional(),
+    tags: z.string().min(1).max(1400).optional(),
+  })
+  .refine((q) => q.tag === undefined || q.tags === undefined, "tag and tags are exclusive");
 
 type TagSummary = { id: string; name: string };
 
@@ -169,6 +176,7 @@ export const postRoutes = new Hono<Env>()
       limit: c.req.query("limit"),
       cursor: c.req.query("cursor"),
       tag: c.req.query("tag"),
+      tags: c.req.query("tags"),
     });
     if (!parsed.success) return fail(c, "validation_error");
     const { limit } = parsed.data;
@@ -192,6 +200,24 @@ export const postRoutes = new Hono<Env>()
       )[0];
       if (!hit) return c.json({ posts: [], nextCursor: null });
       tagFilterId = hit.id;
+    }
+
+    // ?tags= keeps only posts carrying the WHOLE set (AND) — the same SQL as
+    // the 年表's ?tags= row (data-model.md 集計節): post ids where
+    // COUNT(DISTINCT tag_id ∈ set) = n. An unknown id makes the subquery match
+    // nothing — an empty timeline, not an error, like an unknown ?tag=. The
+    // outer user filter keeps a foreign id from ever selecting foreign posts.
+    let tagSetCond: SQL | undefined;
+    if (parsed.data.tags !== undefined) {
+      const ids = parseTagsParam(parsed.data.tags);
+      if (ids === null) return fail(c, "validation_error");
+      const matched = db
+        .select({ postId: postTags.postId })
+        .from(postTags)
+        .where(inArray(postTags.tagId, ids))
+        .groupBy(postTags.postId)
+        .having(eq(countDistinct(postTags.tagId), ids.length));
+      tagSetCond = inArray(post.id, matched);
     }
 
     // Keyset pagination on (created_at DESC, id DESC); `and()` drops the
@@ -222,7 +248,7 @@ export const postRoutes = new Hono<Env>()
       );
     }
     const rows = await query
-      .where(and(eq(post.userId, userId), isNull(post.deletedAt), cursorCond))
+      .where(and(eq(post.userId, userId), isNull(post.deletedAt), tagSetCond, cursorCond))
       .orderBy(desc(post.createdAt), desc(post.id))
       .limit(limit + 1);
 

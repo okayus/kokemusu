@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeTagName, parseTagNames } from "./tag";
+import { MAX_TAGS_PER_POST, normalizeTagName, parseTagNames, parseTagsParam } from "./tag";
 
 describe("normalizeTagName", () => {
   it("trims, NFKC-folds and lowercases", () => {
@@ -47,5 +47,32 @@ describe("parseTagNames", () => {
 
   it("empty input -> empty plan", () => {
     expect(parseTagNames([])).toEqual([]);
+  });
+});
+
+// Moved here from routes/stats.test.ts when posts' ?tags= filter started
+// sharing the parser (2026-09-03) — the wire 規約 is core, not one route's.
+describe("parseTagsParam", () => {
+  it("keeps request order and trims around commas", () => {
+    expect(parseTagsParam("b,a")).toEqual(["b", "a"]);
+    expect(parseTagsParam(" b , a ")).toEqual(["b", "a"]);
+  });
+
+  it("needs a combination: fewer than 2 unique ids is not this form", () => {
+    expect(parseTagsParam("a")).toBeNull();
+    expect(parseTagsParam("a,a")).toBeNull();
+    expect(parseTagsParam("a,a,b")).toEqual(["a", "b"]);
+  });
+
+  it("rejects empty segments and overlong ids", () => {
+    expect(parseTagsParam("a,,b")).toBeNull();
+    expect(parseTagsParam("a,b,")).toBeNull();
+    expect(parseTagsParam(`a,${"x".repeat(65)}`)).toBeNull();
+  });
+
+  it("caps the set at MAX_TAGS_PER_POST (= what one 苔片 can carry)", () => {
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`).join(",");
+    expect(parseTagsParam(ids(MAX_TAGS_PER_POST))).toHaveLength(MAX_TAGS_PER_POST);
+    expect(parseTagsParam(ids(MAX_TAGS_PER_POST + 1))).toBeNull();
   });
 });

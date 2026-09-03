@@ -47,7 +47,7 @@ test("register → post → today's moss darkens → reload → logout → login
 
   const timeline = page.locator("ol.posts");
   await expect(timeline.getByText(body, { exact: true })).toBeVisible();
-  await expect(timeline.locator("li.tag")).toHaveText(["e2e", "苔"]);
+  await expect(timeline.locator(".post-tags .tag-chip")).toHaveText(["e2e", "苔"]);
 
   // DoD 4, on screen and on the wire: exactly one step darker, and only today.
   await expect(total).toHaveText("計 1 片");
@@ -75,7 +75,8 @@ test("register → post → today's moss darkens → reload → logout → login
   const graphChart = page.locator("section.tag-graph");
   await expect(graphChart.locator(".tg-node")).toHaveCount(2);
   await expect(graphChart.locator(".tg-edge")).toHaveCount(1);
-  await graphChart.getByRole("button", { name: "苔 · 1 片" }).click();
+  // exact — the bridge button's name ("e2e × 苔 · 1 片") contains this too.
+  await graphChart.getByRole("button", { name: "苔 · 1 片", exact: true }).click();
   await expect(yearChart.getByText("「苔」の内訳")).toBeVisible();
   await expect(yearChart.locator("li.tl-row")).toHaveCount(2);
   await yearChart.getByRole("button", { name: "すべての石へ" }).click();
@@ -137,4 +138,42 @@ test("register → post → today's moss darkens → reload → logout → login
   await loginButton.click();
   await expect(garden).toBeVisible();
   await expect(timeline.getByText(body, { exact: true })).toBeVisible();
+
+  // タグ絞り込み (features.md §3): a second 苔片 carrying only "e2e" makes the
+  // filter observable — 2 苔片 open, 1 behind any 苔-filter. All three 導線
+  // land on the same feed, and both wire forms run against the real sqlite.
+  await page.getByLabel("いまの苔片").fill("絞り込み用の苔片");
+  await page.getByLabel("タグ（コンマ区切り・任意）").fill("e2e");
+  await page.getByRole("button", { name: "積む" }).click();
+  await expect(timeline.locator("li.post")).toHaveCount(2);
+
+  // 導線 1 — a 苔片's own chip: one stone, filtered by name (?tag=).
+  await timeline.getByRole("button", { name: "「苔」で絞り込む" }).click();
+  await expect(page.getByRole("button", { name: "「苔」の絞り込みを外す" })).toBeVisible();
+  await expect(timeline.locator("li.post")).toHaveCount(1);
+  await expect(timeline.getByText(body, { exact: true })).toBeVisible();
+  const byName = (await (
+    await page.request.get("/api/posts", { params: { tag: "苔" } })
+  ).json()) as { posts: { body: string }[] };
+  expect(byName.posts.map((p) => p.body)).toEqual([body]);
+
+  // 導線 2 — §8 focus → 投稿一覧へ: the focused stone becomes the filter.
+  await yearChart.getByRole("button", { name: "e2e", exact: true }).click();
+  await expect(yearChart.getByText("「e2e」の内訳")).toBeVisible();
+  await yearChart.getByRole("button", { name: "投稿一覧へ" }).click();
+  await expect(page.getByRole("button", { name: "「e2e」の絞り込みを外す" })).toBeVisible();
+  await expect(timeline.locator("li.post")).toHaveCount(2);
+
+  // 導線 3 — §6 bridge: both stones as an AND set (?tags=). The button's name
+  // orders the pair by tag id (a < b), so match either spelling.
+  await graphChart.getByRole("button", { name: /^(e2e × 苔|苔 × e2e) · 1 片$/ }).click();
+  await expect(timeline.locator("li.post")).toHaveCount(1);
+  await expect(timeline.getByText(body, { exact: true })).toBeVisible();
+  const bySet = (await (
+    await page.request.get(`/api/posts?tags=${stoneIds.join(",")}`)
+  ).json()) as { posts: { body: string }[] };
+  expect(bySet.posts.map((p) => p.body)).toEqual([body]);
+
+  await page.locator(".feed-filter").getByRole("button", { name: "解除" }).click();
+  await expect(timeline.locator("li.post")).toHaveCount(2);
 });
