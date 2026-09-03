@@ -1,20 +1,21 @@
 # e2e（Playwright）
 
-配線の事実だけを見る 3 spec。ドメインの意味は `worker/**/*.test.ts` / `src/**/*.test.tsx`（vitest）に置く。
+配線の事実だけを見る 4 spec。ドメインの意味は `worker/**/*.test.ts` / `src/**/*.test.tsx`（vitest）に置く。
 
 - `golden-path` — WebAuthn 仮想 authenticator（CDP）で初回登録 → リロードでセッションが残る → 苔片を 1 つ積む → タイムラインに復号された本文とタグ → 総草の今日のマスが level 0 → 1（画面と API の両方）→ リロードで残る → ログアウト → 登録したパスキーでログイン。`DEV_BYPASS_USER_ID` は作らない（配線を素通りしたら回帰を拾えない）
 - `auth-boundary` — セッション無しの `/api/*` は読み書き・未知パスとも 401 JSON（SPA に落ちない）。偽 Cookie は 401、登録トークン違いは 403、`login/begin` は公開のまま（mount 順の回帰検知）
+- `pat` — 設定 UI で発行（一度きり表示）→ Cookie 無しの送り側が `Authorization: Bearer` だけで `POST /api/posts`（Origin 不要 = CSRF 免除）→ 積まれた苔片は暗号化されて UI に復号表示 → post:write はタイムラインを読めない・PAT で PAT は作れない（403 `session_required`）・PAT は同乗 Cookie より先に判定 → UI で失効すると 401。D1 に生トークンが無いことも見る
 - `security-headers` — `/`・SPA fallback・`/health`・`/api` 401 に本番の strict CSP（`'unsafe-inline'` 無し）/ X-Frame-Options / nosniff / Referrer-Policy が付く。http なので HSTS は無いことを断定。`/api` は `no-store`。非 GET の Origin 不一致は 403
 
 ## 動かし方（コンテナ内）
 
 ```bash
-pnpm e2e            # build → prepare-config → wrangler dev（127.0.0.1:5183、ビルド成果物）→ 3 spec
+pnpm e2e            # build → prepare-config → wrangler dev（127.0.0.1:5183、ビルド成果物）→ 4 spec
 pnpm e2e:server     # サーバーだけ立てておく。以後の pnpm e2e は再ビルドを飛ばす（reuseExistingServer）
 ```
 
 - 対象は **ビルド成果物**（`dist/kokemusu/`）。`vite dev` には向けない — HMR の inline script を本番 CSP が弾いて React が立ち上がらない。
-- Worker の vars は `e2e/env.ts`（`RP_ID=localhost` / `ORIGIN=http://localhost:5183` / SESSION_SECRET / INITIAL_REGISTRATION_TOKEN / BODY_KEY、すべてテスト専用値）。`prepare-config.ts` が派生 config `dist/kokemusu/wrangler.json` に書き、ビルドがそこへコピーする `.dev.vars` を消す。`.dev.vars` も `wrangler.jsonc` も触らない。
+- Worker の vars は `e2e/env.ts`（`RP_ID=localhost` / `ORIGIN=http://localhost:5183` / SESSION_SECRET / INITIAL_REGISTRATION_TOKEN / BODY_KEY / PAT_PEPPER、すべてテスト専用値）。`prepare-config.ts` が派生 config `dist/kokemusu/wrangler.json` に書き、ビルドがそこへコピーする `.dev.vars` を消す。`.dev.vars` も `wrangler.jsonc` も触らない。
 - D1 は **e2e 専用の `.wrangler/e2e`**（global-setup が migrate → 全消し）。`pnpm dev` の `.wrangler/state` は触らない。
 - Chromium はイメージに焼き込み済み（`.docker/Dockerfile`、`PLAYWRIGHT_VERSION` = `@playwright/test` の版）。`playwright install` は不要で、CDN は firewall で不達。
 - `pnpm dev`（5173）とは別ポートなので同居できる。

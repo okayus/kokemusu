@@ -43,6 +43,10 @@ export function describeApiError(e: unknown): string {
         return "試行が多すぎます。1 分ほど待ってください。";
       case "encryption_not_configured":
         return "サーバの暗号化設定が未完了です（BODY_KEY 未設定）。";
+      case "pat_not_configured":
+        return "サーバの PAT 設定が未完了です（PAT_PEPPER 未設定）。";
+      case "session_required":
+        return "この操作はログイン中のブラウザからのみ行えます（API トークンでは不可）。";
       case "csrf_origin_mismatch":
         return "別のオリジンからのリクエストは受け付けません。";
       default:

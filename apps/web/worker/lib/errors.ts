@@ -12,11 +12,17 @@ const STATUS = {
   session_expired: 401,
   registration_closed: 403,
   csrf_origin_mismatch: 403,
+  // Authenticated with a PAT where only a cookie session may act
+  // (token management — a PAT must never mint or revoke PATs).
+  session_required: 403,
+  // A PAT whose grants don't include the scope this route demands.
+  insufficient_scope: 403,
   not_found: 404,
   rate_limited: 429,
   internal: 500,
   auth_not_configured: 503,
   encryption_not_configured: 503,
+  pat_not_configured: 503,
 } as const;
 
 export type ErrorType = keyof typeof STATUS;

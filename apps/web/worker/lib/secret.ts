@@ -15,3 +15,17 @@ export function getSessionSecret(env: Bindings): string | null {
   }
   return secret;
 }
+
+// Same fail-closed gate for PAT_PEPPER. Unset means: minting answers 503 and
+// Bearer validation matches nothing — deliberately NOT the skill's lenient
+// `?? ""`, which lets a token minted before the secret exists die silently the
+// moment the pepper is set. Here that trap cannot happen: no pepper, no token.
+export function getPatPepper(env: Bindings): string | null {
+  const pepper = env.PAT_PEPPER;
+  if (!pepper) return null;
+  if (pepper.length < MIN_SECRET_LENGTH) {
+    console.error("PAT_PEPPER is shorter than 32 chars; treating it as unset");
+    return null;
+  }
+  return pepper;
+}

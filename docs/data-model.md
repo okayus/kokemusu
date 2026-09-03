@@ -3,6 +3,10 @@
 SQLite / D1 前提。1インスタンス＝1ユーザーだが、認証情報のためにユーザーレコードは持つ。
 本文とメタデータを分離できる設計にしておく（暗号化と可視化の両立 → [security.md](security.md)）。
 
+2026-09-03 更新: **`api_token` を実装**（`drizzle/0002_api_token.sql`。葉テーブルの追加のみ = 既存テーブル再構築なしを
+生成 SQL とテスト `migrations.test.ts` の両方で確認）。`PAT_PEPPER` は fail closed —— 未設定なら発行が 503・Bearer 検証は
+全部不一致になるので、「pepper 未設定のまま発行 → 後から設定して全滅」は起こり得ない。
+
 2026-08-24 更新: 実スキーマを `drizzle/0001_kokemusu_schema.sql` として生成（[schema.ts](../apps/web/worker/db/schema.ts) が実物）。
 `post_tags(post_id)` は PK の暗黙 index と重複するので張らないことにした。
 
@@ -163,7 +167,8 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 ## 最初のマイグレーション（`0001`）に入れる範囲
 
 ✅ **`drizzle/0001_kokemusu_schema.sql` として生成済み**（`user` / `credential` / `session` / `post` / `tag` / `post_tags` の 6 つ。
-ローカル D1 に適用して検証済み。本番へは merge 時に Workers Builds の deploy command が当てる）。`api_token`（Phase 2）・`tag_alias`（Phase 2）・
+ローカル D1 に適用して検証済み。本番へは merge 時に Workers Builds の deploy command が当てる）。`api_token` は
+✅ `0002_api_token.sql` でこの経路どおり追加済み（CREATE TABLE + index 2 本のみ）。`tag_alias`（Phase 2）・
 `attachment`（Phase 4）は**葉テーブルなので後から追加しても既存テーブルを再構築しない** ＝ 必要になってから足す。
 逆に **`user` / `post` / `tag` は CASCADE の親**なので、NOT NULL にしたい列は `0001` で決めきる（後から NOT NULL 列を
 足す・型を変える・rename するとテーブル再構築 → 子行が消える。`cloudflare-d1-drizzle-migration`）。NULLABLE 列の追加は安全。

@@ -36,9 +36,9 @@ export const E2E_INITIAL_REGISTRATION_TOKEN = "e2e-initial-token";
  * Worker vars for the e2e server. They REPLACE the production RP_ID/ORIGIN
  * pinned in wrangler.jsonc — in the derived dist config only, never in
  * wrangler.jsonc itself. Test-only values by design (this file is public):
- * SESSION_SECRET merely clears the 32-char floor, BODY_KEY is base64 of the
- * ASCII "e2e-body-key-not-a-secret-32byte". Deliberately no DEV_CSP: e2e
- * asserts the production CSP.
+ * SESSION_SECRET and PAT_PEPPER merely clear the 32-char floor, BODY_KEY is
+ * base64 of the ASCII "e2e-body-key-not-a-secret-32byte". Deliberately no
+ * DEV_CSP: e2e asserts the production CSP.
  */
 export const E2E_VARS = {
   RP_ID: "localhost",
@@ -46,4 +46,5 @@ export const E2E_VARS = {
   SESSION_SECRET: "e2e-session-secret-0123456789abcdef0123456789abcdef",
   INITIAL_REGISTRATION_TOKEN: E2E_INITIAL_REGISTRATION_TOKEN,
   BODY_KEY: "ZTJlLWJvZHkta2V5LW5vdC1hLXNlY3JldC0zMmJ5dGU=",
+  PAT_PEPPER: "e2e-pat-pepper-not-a-secret-0123456789abcdef",
 } as const;

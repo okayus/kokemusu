@@ -18,8 +18,9 @@ import { credential, user } from "../db/schema";
 import { fromBase64Url, toBase64Url, utf8Bytes } from "../lib/base64url";
 import { fail } from "../lib/errors";
 import { getSessionSecret } from "../lib/secret";
+import { requireAuth } from "../middleware/auth";
 import { consumeChallenge, issueChallenge } from "../middleware/challenge-cookie";
-import { authRateLimit } from "../middleware/rate-limit";
+import { apiRateLimit, authRateLimit } from "../middleware/rate-limit";
 import { issueSession, revokeSession, sessionMiddleware } from "../middleware/session";
 import type { Env } from "../types";
 
@@ -259,7 +260,11 @@ export const authRoutes = new Hono<Env>()
     await revokeSession(c);
     return c.json({});
   })
-  .get("/me", sessionMiddleware(), (c) =>
+  // whoami — the one auth route a PAT may read (the sender's smoke test:
+  // `curl -H "Authorization: Bearer …" /api/auth/me`). Reachable without a
+  // session, hence the same per-IP budget as the protected group; the SPA's
+  // cookie path is unchanged (401 when anonymous).
+  .get("/me", apiRateLimit, requireAuth, (c) =>
     c.json({ id: c.get("userId"), displayName: c.get("displayName") }),
   )
   .get("/credentials", sessionMiddleware(), async (c) => {

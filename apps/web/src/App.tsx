@@ -20,6 +20,13 @@ import {
   type TagSummary,
 } from "./posts-api";
 import { TagTimelineSection } from "./TagTimeline";
+import {
+  createToken,
+  listTokens,
+  revokeToken,
+  type CreatedToken,
+  type TokenSummary,
+} from "./tokens-api";
 import { useAuth } from "./useAuth";
 
 const dateFmt = new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" });
@@ -181,6 +188,10 @@ function AuthedView(props: {
       <details className="panel">
         <summary>パスキー（端末）</summary>
         <DevicesSection />
+      </details>
+      <details className="panel">
+        <summary>API トークン（PAT）</summary>
+        <TokensSection />
       </details>
     </main>
   );
@@ -405,6 +416,139 @@ function Timeline(props: { posts: PostItem[] | null }) {
         </li>
       ))}
     </ol>
+  );
+}
+
+/**
+ * PAT 管理（features.md §7）: 発行 → 一度きりの表示 → 一覧 → 失効。生のトークンが
+ * 存在できるのは `created`（コンポーネント state）だけ — store にも URL にも
+ * localStorage にも入れない。ページを離れたら忘れる、が「今だけ表示」の契約。
+ */
+function TokensSection() {
+  const [tokens, setTokens] = useState<TokenSummary[] | null>(null);
+  const [created, setCreated] = useState<CreatedToken | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      setTokens(await listTokens());
+    } catch (e) {
+      setError(describeApiError(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const run = async (fn: () => Promise<unknown>): Promise<boolean> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      await reload();
+      return true;
+    } catch (e) {
+      setError(describeApiError(e));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async () => {
+    if (created === null) return;
+    try {
+      await navigator.clipboard.writeText(created.token);
+      setCopied(true);
+    } catch {
+      // クリップボードが使えない環境では <code> の user-select: all が受け皿。
+    }
+  };
+
+  return (
+    <>
+      <p className="hint">
+        別アプリ・CLI・エージェントが<strong>自分として</strong>苔片を積むための Bearer
+        トークン。スコープは post:write（投稿のみ — タイムラインの閲覧はできない）。
+      </p>
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const form = e.currentTarget;
+          const name = String(new FormData(form).get("tokenName") ?? "").trim();
+          void run(async () => {
+            setCopied(false);
+            setCreated(await createToken(name));
+          }).then((ok) => ok && form.reset());
+        }}
+      >
+        <div className="field">
+          <label htmlFor="tokenName">トークン名</label>
+          <input
+            id="tokenName"
+            name="tokenName"
+            required
+            maxLength={100}
+            autoComplete="off"
+            placeholder="mazuoboeru など、送り側の名前"
+          />
+        </div>
+        <button type="submit" disabled={busy}>
+          発行
+        </button>
+      </form>
+      {created && (
+        <div role="status" className="token-once">
+          <strong>「{created.name}」を発行しました。表示はこの一度きりです。</strong>
+          <code>{created.token}</code>
+          <div className="token-once-actions">
+            <button type="button" onClick={() => void copy()}>
+              {copied ? "コピーしました" : "コピー"}
+            </button>
+            <span className="hint">
+              送り側の secret / 環境変数に控えたら閉じてよい。失くしたら失効して再発行。
+            </span>
+          </div>
+        </div>
+      )}
+      {tokens === null ? (
+        <p className="quiet">…</p>
+      ) : tokens.length === 0 ? (
+        <p className="quiet">まだトークンはありません。</p>
+      ) : (
+        <ul className="tokens">
+          {tokens.map((t) => (
+            <li key={t.id}>
+              <div>
+                <strong>{t.name}</strong>
+                <span className="badge">{t.revokedAt !== null ? "失効済み" : "有効"}</span>
+              </div>
+              <p className="hint">
+                作成 {fmtDate(t.createdAt)} ／ 最終使用 {fmtDate(t.lastUsedAt)}
+                {t.revokedAt !== null && <> ／ 失効 {fmtDate(t.revokedAt)}</>}
+              </p>
+              {t.revokedAt === null && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void run(() => revokeToken(t.id))}
+                >
+                  失効
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }
 

@@ -51,6 +51,23 @@ describe("posts/tags routes sit behind the session guard", () => {
       "csrf_origin_mismatch",
     );
   });
+
+  // PAT boundary (features.md §7): the harness has no DB, so reaching D1 would
+  // crash as a 500 — the clean 401 is positive proof that a Bearer token
+  // without the kokemusu_pat_ prefix is rejected on a string compare, before
+  // any hashing or database read, even with a pepper configured.
+  it("junk Bearer without the PAT prefix dies before D1 (401, pepper set)", async () => {
+    const res = await app.request(
+      "/api/posts",
+      {
+        method: "POST",
+        headers: { Authorization: "Bearer some-other-apps-token" },
+      },
+      testEnv({ PAT_PEPPER: "unit-test-pat-pepper-0123456789abcdef" }),
+    );
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: { type: string } }).error.type).toBe("unauthorized");
+  });
 });
 
 describe("API responses are marked no-store (decrypted bodies must not be cached)", () => {

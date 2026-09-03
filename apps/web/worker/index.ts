@@ -1,13 +1,15 @@
 import { Hono } from "hono";
 import { runScheduled } from "./cron";
 import { fail } from "./lib/errors";
+import { requireAuth, requireSession } from "./middleware/auth";
 import { csrfOriginCheck } from "./middleware/csrf";
+import { apiRateLimit } from "./middleware/rate-limit";
 import { securityHeaders } from "./middleware/security-headers";
-import { sessionMiddleware } from "./middleware/session";
 import { authRoutes } from "./routes/auth";
 import { postRoutes } from "./routes/posts";
 import { statsRoutes } from "./routes/stats";
 import { tagRoutes } from "./routes/tags";
+import { tokenRoutes } from "./routes/tokens";
 import type { Bindings, Env } from "./types";
 
 export const app = new Hono<Env>();
@@ -40,11 +42,22 @@ api.use("*", async (c, next) => {
 // because they answered first. Swap the two and login/begin returns 401.
 api.route("/auth", authRoutes);
 
-// Everything else under /api requires a session: domain routes register on
-// `protectedApi` ABOVE the 404 catch-all.
+// Everything else under /api requires authentication: domain routes register
+// on `protectedApi` ABOVE the 404 catch-all. Layering (features.md §7):
+//
+//   apiRateLimit   per-IP, before auth — a Bearer guess must be throttled
+//                  before it can spend a sha256 + D1 read
+//   requireAuth    session or PAT (PAT judged first)
+//   /posts         the PAT-reachable router; gates per method inside
+//   requireSession everything registered BELOW is cookie-only — a PAT stops
+//                  with 403 session_required, and new routes added down here
+//                  are session-only by default (fail closed, not fail open)
 const protectedApi = new Hono<Env>();
-protectedApi.use("*", sessionMiddleware());
+protectedApi.use("*", apiRateLimit);
+protectedApi.use("*", requireAuth);
 protectedApi.route("/posts", postRoutes);
+protectedApi.use("*", requireSession);
+protectedApi.route("/tokens", tokenRoutes);
 protectedApi.route("/stats", statsRoutes);
 protectedApi.route("/tags", tagRoutes);
 protectedApi.all("*", (c) => fail(c, "not_found"));

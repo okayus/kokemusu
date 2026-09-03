@@ -37,6 +37,16 @@
       "name": "AUTH_RATE_LIMITER",
       "namespace_id": "1001",
       "simple": { "limit": 30, "period": 60 }
+    },
+    // Separate budget for the PAT-reachable surface (/api under requireAuth and
+    // GET /api/auth/me): Bearer requests arrive without a session, and each
+    // well-formed token guess costs a sha256 + one D1 read. Sized well above
+    // the SPA and any sender's burst; sharing 1001 would let a busy sender
+    // starve login.
+    {
+      "name": "API_RATE_LIMITER",
+      "namespace_id": "1002",
+      "simple": { "limit": 120, "period": 60 }
     }
   ],
   "d1_databases": [

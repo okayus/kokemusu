@@ -7,6 +7,7 @@ import { normalizeTagName, parseTagNames } from "../core/tag";
 import { createDb, type Db } from "../db";
 import { post, postTags, tag } from "../db/schema";
 import { fail } from "../lib/errors";
+import { requireScope, requireSession } from "../middleware/auth";
 import type { Env } from "../types";
 
 // Size caps: UTF-16 units, mirrored by the composer's maxLength. Generous for
@@ -74,7 +75,10 @@ async function tagsForPosts(db: Db, postIds: string[]): Promise<Map<string, TagS
 
 export const postRoutes = new Hono<Env>()
   // -------------------------------------------------------------- create (苔片を積む)
-  .post("/", async (c) => {
+  // The one PAT-reachable domain route (features.md §7): a session passes the
+  // scope gate untouched, a PAT needs post:write. The body is identical for
+  // both — nothing in it says who sent it (ADR-0002).
+  .post("/", requireScope("post:write"), async (c) => {
     const key = await getBodyKey(c.env);
     if (!key) return fail(c, "encryption_not_configured");
 
@@ -154,7 +158,10 @@ export const postRoutes = new Hono<Env>()
     return c.json(item, 201);
   })
   // -------------------------------------------------------------- timeline (新着順)
-  .get("/", async (c) => {
+  // Session-only: the timeline is the decrypted diary, and a post:write token
+  // deliberately has no scope that could ever read it (docs/data-model.md —
+  // `post:read` 必要になったら). A PAT here answers 403 session_required.
+  .get("/", requireSession, async (c) => {
     const key = await getBodyKey(c.env);
     if (!key) return fail(c, "encryption_not_configured");
 
