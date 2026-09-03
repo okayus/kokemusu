@@ -84,7 +84,7 @@ test("PAT: mint → Bearer post lands encrypted → write-only wall → revoke k
   const timeline = page.locator("ol.posts");
   await expect(timeline.getByText("PAT からの苔片", { exact: true })).toBeVisible();
   await expect(timeline.locator(".post-title").first()).toHaveText("まず覚える 2026-09-03");
-  await expect(timeline.locator("li.tag").first()).toHaveText("mazuoboeru");
+  await expect(timeline.locator(".post-tags .tag-chip").first()).toHaveText("mazuoboeru");
 
   // …while at rest title and body are k1. envelopes like every other 苔片.
   const storedPost = queryRows<{ title: string; body: string }>(

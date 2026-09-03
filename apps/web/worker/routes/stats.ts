@@ -25,6 +25,7 @@ import {
   isDayKey,
   type DayKey,
 } from "../core/day";
+import { parseTagsParam } from "../core/tag";
 import { createDb } from "../db";
 import { post, postTags, tag } from "../db/schema";
 import { fail } from "../lib/errors";
@@ -99,32 +100,16 @@ export function buildHeatmap(
 // takes MIN/MAX/COUNT over the raw epoch-ms axis, which is safe because
 // `dayKey` is monotonic.
 
-/** Mirrors posts' MAX_TAGS_PER_POST: an AND of more tags than a 苔片 can carry is empty by construction. */
-export const TIMELINE_MAX_TAGS = 20;
-
 // The three forms (docs/plans/tag-timeline.md): no param = one row per tag,
-// `?focus=` = that stone + stone×co-occurring-tag rows, `?tags=` = one AND row.
-// focus and tags are exclusive — a request mixing them has no meaning.
+// `?focus=` = that stone + stone×co-occurring-tag rows, `?tags=` = one AND row
+// (core/tag.ts の `?tags=` wire 規約 — posts の絞り込みと共有). focus and tags
+// are exclusive — a request mixing them has no meaning.
 export const timelineQuerySchema = z
   .object({
     focus: z.string().min(1).max(64).optional(),
     tags: z.string().min(1).max(1400).optional(),
   })
   .refine((q) => q.focus === undefined || q.tags === undefined, "focus and tags are exclusive");
-
-/**
- * `?tags=` parsed into 2..TIMELINE_MAX_TAGS unique ids in request order, or
- * null for a shape the route answers 400 to: an empty segment, an overlong id,
- * or a set that isn't a combination (fewer than 2 after dedupe — one tag is the
- * default/focus form's job).
- */
-export function parseTagsParam(raw: string): string[] | null {
-  const parts = raw.split(",").map((s) => s.trim());
-  if (parts.some((p) => p.length === 0 || p.length > 64)) return null;
-  const ids = [...new Set(parts)];
-  if (ids.length < 2 || ids.length > TIMELINE_MAX_TAGS) return null;
-  return ids;
-}
 
 /** A stone on the wire — same shape the posts API uses for tags. */
 export type TimelineTag = { id: string; name: string };

@@ -318,6 +318,8 @@ export function TagTimelineSection(props: {
   tagOptions: TagSummary[];
   focusTag: TagSummary | null;
   onFocusChange: (tag: TagSummary | null) => void;
+  /** 投稿一覧へ (visualization.md §8): land the post list's filter on the focused stone. */
+  onShowPosts: (tag: TagSummary) => void;
   onFault: (e: unknown) => void;
   /** Lets the page scroll the 年表 into view when a stone is tapped elsewhere. */
   ref?: Ref<HTMLElement>;
@@ -436,6 +438,9 @@ export function TagTimelineSection(props: {
         {focusTag !== null && (
           <p className="tl-focus">
             <span>「{focusTag.name}」の内訳</span>
+            <button type="button" onClick={() => props.onShowPosts(focusTag)}>
+              投稿一覧へ
+            </button>
             <button type="button" onClick={() => props.onFocusChange(null)}>
               すべての石へ
             </button>

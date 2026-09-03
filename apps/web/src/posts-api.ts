@@ -20,12 +20,15 @@ export type Timeline = { posts: PostItem[]; nextCursor: string | null };
 export const createPost = (input: { body: string; tags?: string[] }): Promise<PostItem> =>
   postJson("/api/posts", input);
 
+// `tag` = one tag by name, `tags` = a 2+ tag AND set by id (same wire 規約 as
+// the 年表's deep-dive rows) — the server rejects a request carrying both.
 export function listPosts(
-  opts: { cursor?: string; tag?: string; limit?: number } = {},
+  opts: { cursor?: string; tag?: string; tags?: string[]; limit?: number } = {},
 ): Promise<Timeline> {
   const q = new URLSearchParams();
   if (opts.cursor !== undefined) q.set("cursor", opts.cursor);
   if (opts.tag !== undefined) q.set("tag", opts.tag);
+  if (opts.tags !== undefined) q.set("tags", opts.tags.join(","));
   if (opts.limit !== undefined) q.set("limit", String(opts.limit));
   const qs = q.toString();
   return request(`/api/posts${qs ? `?${qs}` : ""}`);

@@ -98,13 +98,16 @@ describe("layoutGraph", () => {
 
 describe("TagGraphChart markup", () => {
   const graph: TagGraph = { nodes: [node("a", 5), node("b", 1)], edges: [edge("a", "b", 2)] };
-  const html = renderToStaticMarkup(<TagGraphChart graph={graph} onTagTap={() => {}} />);
+  const html = renderToStaticMarkup(
+    <TagGraphChart graph={graph} onTagTap={() => {}} onEdgeTap={() => {}} />,
+  );
 
   it("offers each stone as a keyboard-reachable button named with its count", () => {
     expect(html).toContain('aria-label="A · 5 片"');
     expect(html).toContain('aria-label="B · 1 片"');
-    expect(html.match(/role="button"/g)).toHaveLength(2);
-    expect(html.match(/tabindex="0"/g)).toHaveLength(2);
+    // 2 stones + 1 bridge: every tappable thing is a real tab stop.
+    expect(html.match(/role="button"/g)).toHaveLength(3);
+    expect(html.match(/tabindex="0"/g)).toHaveLength(3);
   });
 
   it("sizes stones by 苔片 count and bridges by co-occurrence", () => {
@@ -113,10 +116,13 @@ describe("TagGraphChart markup", () => {
     expect(html).toContain(`stroke-width="${edgeWidth(2)}"`);
   });
 
-  it("keeps bridges off the reading order but names them for hover", () => {
-    // The co-occurrence facts stay reachable non-visually as §8's focus rows.
-    expect(html).toContain('<g aria-hidden="true">');
+  it("offers the bridge as a button named with the pair, with a fat hit stroke", () => {
+    // Its landing is the 両タグ post list; a hairline bridge stays tappable
+    // through the transparent 14px hit line.
+    expect(html).toContain('aria-label="A × B · 2 片"');
     expect(html).toContain("<title>A × B · 2 片</title>");
+    expect(html).toContain('class="tg-hit-line"');
+    expect(html).not.toContain('aria-hidden="true"');
   });
 
   it("writes each stone's name under it", () => {
