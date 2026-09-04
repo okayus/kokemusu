@@ -13,7 +13,7 @@
 | セッション乗っ取り | HttpOnly / Secure / SameSite Cookie、短めの有効期限、再認証 |
 | サーバ/DB ファイルの流出（バックアップ含む）、D1 権限付き API トークンの漏洩 | 本文のアプリ層暗号化 (B)（[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）、暗号化バックアップ |
 | ホスティング事業者がデータを覗く（CF/VPS） | **守備範囲外**（VPS の業者と同程度に信頼する。端末側 E2E (C) は不採用 — [ADR-0001](adr/0001-body-encrypted-at-app-layer.md)） |
-| XSS（Markdown 描画経由） | サニタイズ、CSP |
+| XSS（Markdown 描画経由） | HTML 文字列を作らない描画（[ADR-0004](adr/0004-markdown-renders-to-react-elements.md)）、CSP |
 | CSRF | SameSite Cookie ＋ Origin チェック（Bearer PAT は免除） |
 | 依存ライブラリの脆弱性 | 依存最小化、定期更新、監査 |
 
@@ -67,7 +67,11 @@
 
 - HTTPS 必須・HSTS。HTTP は HTTPS へリダイレクト。
 - **CSP**（インラインスクリプト禁止、ソース限定）。
-- Markdown レンダリングは **サニタイズ必須**（DOMPurify 等）。生 HTML を許さない。
+- Markdown レンダリングは **生 HTML を許さない**。実装は「サニタイズして `innerHTML`」ではなく、
+  **HTML 文字列を一度も作らない描画**（marked で字句解析 → トークンを React 要素の allowlist に写す。
+  [ADR-0004](adr/0004-markdown-renders-to-react-elements.md)）。`dangerouslySetInnerHTML` / `innerHTML` が
+  `apps/web/src/` に無いことを単体テストで固定している。生 HTML は解釈せず字として出し、リンクは
+  `http` / `https` / `mailto` と相対のみ、画像は `<img>` にせずリンクにする（外部画像は閲覧を漏らす）。
 - セキュリティヘッダ一式（`X-Content-Type-Options` `Referrer-Policy` `X-Frame-Options`/frame-ancestors 等）。
 - CSRF 対策（SameSite ＋ 非 GET は `Origin` ヘッダが `ORIGIN` と一致することを要求。`Authorization: Bearer` 付きは免除＝Cookie を持たないので偽造できない）。
 - API は最小限の公開面。ヘルスチェック等から情報を漏らさない。
@@ -89,5 +93,5 @@
 
 | 区分 | 内容 |
 | --- | --- |
-| MVP 必須 | パスキー認証（閉じた登録 ＋ リカバリ runbook）、安全な Cookie/セッション、HTTPS/HSTS、CSP、Markdown サニタイズ、レート制限、**本文のアプリ層暗号化 (B)**（メタデータは平文） |
+| MVP 必須 | パスキー認証（閉じた登録 ＋ リカバリ runbook）、安全な Cookie/セッション、HTTPS/HSTS、CSP、Markdown の安全な描画（ADR-0004）、レート制限、**本文のアプリ層暗号化 (B)**（メタデータは平文） |
 | 後続 | 鍵ローテーション手順、暗号化バックアップ、ログイン履歴 UI（API 用 PAT は 2026-09-03 実装済み） |

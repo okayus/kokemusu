@@ -588,11 +588,177 @@ textarea {
   display: block;
 }
 
-/* 本文はプレーンテキスト描画: 改行を保ち、長い語も枠内で折る。 */
+/* 本文は Markdown（markdown.tsx）。間隔は .post の gap が持つので詰めて置く。 */
 .post-body {
   margin: 0;
-  white-space: pre-wrap;
+}
+
+/* ---- Markdown 描画（苔片の本文とコンポーザのプレビューが共用） ---- */
+
+/* 長い URL や語も枠内で折る（素描き時代からの約束）。 */
+.md {
   overflow-wrap: anywhere;
+}
+
+/* 段落・リスト・引用・コードは同じ間隔で積み、見出しだけ上を広く取る。 */
+.md :is(p, ul, ol, pre, hr, blockquote, .md-table-scroll) {
+  margin-block: 0.6rem;
+}
+
+.md :is(h3, h4, h5, h6) {
+  margin-block: 1rem 0.4rem;
+  line-height: 1.3;
+}
+
+/* 器の縁では詰める（外の間隔は .post の gap や li の行が持っている）。 */
+.md > :first-child,
+.md :is(li, blockquote) > :first-child {
+  margin-block-start: 0;
+}
+
+.md > :last-child,
+.md :is(li, blockquote) > :last-child {
+  margin-block-end: 0;
+}
+
+.md h3 {
+  font-size: 1.1rem;
+}
+
+.md h4 {
+  font-size: 1rem;
+}
+
+.md :is(h5, h6) {
+  font-size: 0.95rem;
+  color: var(--quiet);
+}
+
+.md :is(ul, ol) {
+  padding-inline-start: 1.4rem;
+}
+
+/* 苔片は ol.posts の中なので、素の marker は 2 段目（circle）から始まってしまう。
+   本文の中の入れ子だけで数え直す。 */
+.md ul {
+  list-style-type: disc;
+}
+
+.md ul ul {
+  list-style-type: circle;
+}
+
+.md ul ul ul {
+  list-style-type: square;
+}
+
+.md li {
+  margin-block: 0.15rem;
+}
+
+/* チェックリストは印そのものが行頭記号 — 押せない（読み物）。 */
+.md li.md-task {
+  list-style: none;
+  margin-inline-start: -1.4rem;
+}
+
+/* 入力欄の既定（幅 100% の大きな枠）はチェック印には要らない。色は accent-color。 */
+.md li.md-task > input[type="checkbox"] {
+  inline-size: auto;
+  min-block-size: 0;
+  margin-inline-end: 0.4rem;
+  padding: 0;
+  border: 0;
+}
+
+.md blockquote {
+  margin-inline: 0;
+  padding-inline-start: 0.75rem;
+  border-inline-start: 3px solid var(--line);
+  color: var(--quiet);
+}
+
+.md :is(code, pre) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+
+.md code.md-code {
+  padding: 0.1em 0.3em;
+  border-radius: 0.25rem;
+  background: var(--moss-0);
+}
+
+/* 長い行は枠の中で流す（版から溢れさせない）。 */
+.md pre.md-pre {
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.4rem;
+  background: var(--moss-0);
+  overflow-x: auto;
+}
+
+.md pre.md-pre code {
+  padding: 0;
+  background: none;
+}
+
+.md hr {
+  border: 0;
+  border-block-start: 1px solid var(--line);
+}
+
+/* 解釈しなかった生 HTML は、打った通りの字として見せる（markdown.tsx）。 */
+.md .md-raw {
+  white-space: pre-wrap;
+  color: var(--quiet);
+}
+
+/* 画像は貼らずリンクにしてある（markdown.tsx）— それとわかる印をつける。 */
+.md .md-image-link::before {
+  content: "🖼 ";
+}
+
+.md-table-scroll {
+  overflow-x: auto;
+}
+
+.md table {
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.md :is(th, td) {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--line);
+  text-align: start;
+}
+
+.md .md-al-center {
+  text-align: center;
+}
+
+.md .md-al-right {
+  text-align: end;
+}
+
+/* ---- コンポーザ / 編集フォームのプレビュー ---- */
+
+.md-preview {
+  margin-block-start: 0.5rem;
+}
+
+.md-preview > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--quiet);
+}
+
+/* 開いた中身（描画結果、または「まだ何も」）を枠で囲って本文と見分ける。 */
+.md-preview > :not(summary) {
+  margin-block-start: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px dashed var(--line);
+  border-radius: 0.4rem;
 }
 
 .post-tags {

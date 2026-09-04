@@ -9,7 +9,9 @@
 - スタイリング: Tailwind CSS（軽量・素早い）。または CSS Modules。
 - 状態管理: まずは React 標準（hooks）＋ 必要なら軽量ライブラリ（Zustand など、関数志向）。
 - 可視化: 重いライブラリを避け、自作 SVG/Canvas から。必要なら `visx` / `Observable Plot`。
-- Markdown: パーサ ＋ **サニタイズ必須**（DOMPurify）。
+- Markdown: パーサは `marked`（字句解析だけを使う。依存ゼロ）。**サニタイザは挟まず、トークンを
+  React 要素の allowlist に写して描く**（HTML 文字列を作らない = `innerHTML` シンクが無い。
+  [ADR-0004](adr/0004-markdown-renders-to-react-elements.md)）。
 - PWA / オフライン対応は後フェーズ（[roadmap](roadmap.md)）。
 
 ## バックエンド / API
