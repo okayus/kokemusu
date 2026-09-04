@@ -142,10 +142,48 @@ test("register → post → today's moss darkens → reload → logout → login
   // タグ絞り込み (features.md §3): a second 苔片 carrying only "e2e" makes the
   // filter observable — 2 苔片 open, 1 behind any 苔-filter. All three 導線
   // land on the same feed, and both wire forms run against the real sqlite.
-  await page.getByLabel("いまの苔片").fill("絞り込み用の苔片");
+  // Its body is Markdown, so the same 苔片 also carries the 描画 checks below.
+  const markdownBody = [
+    "絞り込み用の苔片",
+    "",
+    "## 見出し",
+    "",
+    "- 箇条書き",
+    "",
+    "`コード` と [リンク](https://example.test/) と <b>生 HTML</b> と [罠](javascript:alert(1))",
+  ].join("\n");
+  await page.getByLabel("いまの苔片").fill(markdownBody);
+
+  // コンポーザのプレビューは苔片の表示と同じ描画器を通る — ここで見えるものが積まれる。
+  const composer = page.locator("form.composer");
+  await composer.locator("summary").click();
+  const preview = composer.locator(".md-preview .md");
+  await expect(preview.locator("h4")).toHaveText("見出し");
+  await expect(preview.locator("li")).toHaveText("箇条書き");
+
   await page.getByLabel("タグ（コンマ区切り・任意）").fill("e2e");
   await page.getByRole("button", { name: "積む" }).click();
   await expect(timeline.locator("li.post")).toHaveCount(2);
+
+  // Markdown + サニタイズ (security.md / ADR-0004), against the production
+  // bundle and the production CSP: the body went through AES-GCM to D1 and
+  // back, and comes out as ELEMENTS — while 生 HTML stays text and a
+  // `javascript:` href never becomes a link. The unit tests say what the
+  // renderer does; this says the real 苔片 is rendered by it.
+  // 一覧は新しい順なので、いま積んだ 2 つ目が先頭。以降もこの手で掴む — 編集フォームを
+  // 開くと本文は textarea の中へ移り、hasText では掴めなくなる。
+  const second = timeline.locator("li.post").first();
+  const secondBody = second.locator(".post-body");
+  await expect(secondBody.locator("h4")).toHaveText("見出し");
+  await expect(secondBody.locator("li")).toHaveText("箇条書き");
+  await expect(secondBody.locator("code")).toHaveText("コード");
+  const mdLink = secondBody.locator("a");
+  await expect(mdLink).toHaveCount(1);
+  await expect(mdLink).toHaveAttribute("href", "https://example.test/");
+  await expect(mdLink).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(secondBody.locator("b")).toHaveCount(0);
+  await expect(secondBody).toContainText("<b>生 HTML</b>");
+  await expect(secondBody).toContainText("罠");
 
   // 導線 1 — a 苔片's own chip: one stone, filtered by name (?tag=).
   await timeline.getByRole("button", { name: "「苔」で絞り込む" }).click();
@@ -181,7 +219,6 @@ test("register → post → today's moss darkens → reload → logout → login
   // stones replaced, re-encrypted at rest — and the counts stay put: an edit
   // is not a new 苔片. (exact: the tag chips' accessible names contain 編集
   // and 削除 as substrings once the new stone exists.)
-  const second = timeline.locator("li.post", { hasText: "絞り込み用の苔片" });
   await second.getByRole("button", { name: "編集", exact: true }).click();
   await second.getByLabel("本文").fill("編集された苔片");
   await second.getByLabel("タグ（コンマ区切り・任意）").fill("e2e, 編集");

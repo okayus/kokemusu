@@ -11,6 +11,7 @@ import {
 } from "./auth-api";
 import { clearDraft, loadDraft, saveDraft } from "./draft";
 import { HeatmapSection } from "./Heatmap";
+import { Markdown } from "./markdown";
 import {
   createPost,
   deletePost,
@@ -427,6 +428,52 @@ function Garden(props: { onSessionLost: () => void }) {
   );
 }
 
+/**
+ * 本文の入力欄 — textarea ＋ Markdown の案内 ＋ プレビュー。コンポーザと編集フォームで
+ * 共有する（プレビューは苔片の表示と同じ描画器を通るので、見えるものが積まれるもの）。
+ */
+function BodyField(props: {
+  id: string;
+  label: string;
+  placeholder?: string;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  // プレビューは開いている間だけ描く。閉じたまま毎打鍵で字句解析しないためであり、
+  // 隠れた本文の写しを DOM に残さないためでもある（削除確認ダイアログと同じ理由）。
+  const [open, setOpen] = useState(false);
+  const hintId = `${props.id}-hint`;
+  return (
+    <div className="field">
+      <label htmlFor={props.id}>{props.label}</label>
+      <textarea
+        id={props.id}
+        name="body"
+        required
+        maxLength={20000}
+        rows={3}
+        value={props.value}
+        placeholder={props.placeholder}
+        aria-describedby={hintId}
+        onChange={(e) => props.onChange(e.target.value)}
+        onKeyDown={submitOnCmdEnter}
+      />
+      <p className="hint" id={hintId}>
+        Markdown で書けます（見出し・箇条書き・コード・リンク）。
+      </p>
+      <details className="md-preview" onToggle={(e) => setOpen(e.currentTarget.open)}>
+        <summary>プレビュー</summary>
+        {open &&
+          (props.value.trim() === "" ? (
+            <p className="quiet">まだ何も書かれていません。</p>
+          ) : (
+            <Markdown source={props.value} className="md" />
+          ))}
+      </details>
+    </div>
+  );
+}
+
 function Composer(props: {
   tagOptions: TagSummary[];
   onCreated: (created: PostItem) => void;
@@ -475,20 +522,13 @@ function Composer(props: {
         void submit();
       }}
     >
-      <div className="field">
-        <label htmlFor="post-body">いまの苔片</label>
-        <textarea
-          id="post-body"
-          name="body"
-          required
-          maxLength={20000}
-          rows={3}
-          value={body}
-          placeholder="なにを積む？"
-          onChange={(e) => update(e.target.value, tagField)}
-          onKeyDown={submitOnCmdEnter}
-        />
-      </div>
+      <BodyField
+        id="post-body"
+        label="いまの苔片"
+        placeholder="なにを積む？"
+        value={body}
+        onChange={(next) => update(next, tagField)}
+      />
       <div className="field">
         <label htmlFor="post-tags">タグ（コンマ区切り・任意）</label>
         <input
@@ -572,12 +612,15 @@ function PostEntry(props: {
   onDeleted: (id: string) => void;
   onSessionLost: () => void;
 }) {
+  const p = props.post;
   const [editing, setEditing] = useState(false);
+  // 編集中の本文だけ state（プレビューが要る）。見出しとタグは form のまま。
+  // 「編集」を押した時点の本文で毎回蒔き直すので、やめる ＝ 捨てる が保たれる。
+  const [editBody, setEditBody] = useState(p.body);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const confirmRef = useRef<HTMLDialogElement | null>(null);
-  const p = props.post;
 
   // The confirm dialog is mounted only while confirming — a permanently
   // mounted (closed) one would keep a hidden copy of the 苔片's text in the
@@ -635,7 +678,7 @@ function PostEntry(props: {
             const fd = new FormData(e.currentTarget);
             void save({
               title: String(fd.get("title") ?? "").trim(),
-              body: String(fd.get("body") ?? ""),
+              body: editBody,
               tags: splitTagField(String(fd.get("tags") ?? "")),
             });
           }}
@@ -651,18 +694,12 @@ function PostEntry(props: {
               onKeyDown={submitOnCmdEnter}
             />
           </div>
-          <div className="field">
-            <label htmlFor={`edit-body-${p.id}`}>本文</label>
-            <textarea
-              id={`edit-body-${p.id}`}
-              name="body"
-              required
-              maxLength={20000}
-              rows={3}
-              defaultValue={p.body}
-              onKeyDown={submitOnCmdEnter}
-            />
-          </div>
+          <BodyField
+            id={`edit-body-${p.id}`}
+            label="本文"
+            value={editBody}
+            onChange={setEditBody}
+          />
           <div className="field">
             <label htmlFor={`edit-tags-${p.id}`}>タグ（コンマ区切り・任意）</label>
             {/* list: the composer's datalist — one source of completion. */}
@@ -707,9 +744,8 @@ function PostEntry(props: {
         {fmtDate(p.createdAt)}
       </time>
       {p.title !== null && <strong className="post-title">{p.title}</strong>}
-      {/* Plaintext on purpose — React's default escaping is the whole
-          renderer until Markdown + sanitising lands (outside PR4). */}
-      <p className="post-body">{p.body}</p>
+      {/* 本文は Markdown。描画器は HTML 文字列を作らない（markdown.tsx / ADR-0004）。 */}
+      <Markdown source={p.body} className="post-body md" />
       {p.tags.length > 0 && (
         <ul className="post-tags" role="list">
           {p.tags.map((t) => (
@@ -732,7 +768,14 @@ function PostEntry(props: {
         </p>
       )}
       <div className="post-actions">
-        <button type="button" disabled={busy} onClick={() => setEditing(true)}>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setEditBody(p.body);
+            setEditing(true);
+          }}
+        >
           編集
         </button>
         <button type="button" disabled={busy} onClick={() => setConfirming(true)}>
