@@ -3,19 +3,23 @@
 // Two rules this file is built around (docs/plans/vertical-slice.md, skill
 // `cloudflare-d1-drizzle-migration`):
 //
-//  1. Migrations stay ADDITIVE. D1 ignores `PRAGMA foreign_keys=OFF`, so any
-//     change that rebuilds a table (NULL → NOT NULL, type change, rename)
+//  1. Migrations never REBUILD a table. D1 ignores `PRAGMA foreign_keys=OFF`,
+//     so any change that rebuilds one (NULL → NOT NULL, type change, rename)
 //     emits `DROP TABLE <parent>` and cascade-deletes every child row. `user`,
 //     `post` and `tag` are CASCADE parents, so their NOT NULL columns are
-//     decided here and never touched again. Adding a NULLABLE column, a new
-//     leaf table or an index is safe.
+//     decided here and never touched again. Safe shapes: a NULLABLE column, a
+//     new leaf table, an index — and DROPPING a column, which SQLite does in
+//     place, so it is subtractive without being a rebuild (drop the index
+//     first: an indexed column cannot be dropped). `migrations.test.ts` is the
+//     guard — it fails on the rebuild markers in any generated file.
 //  2. Timestamps are epoch ms in a plain `integer` (docs/data-model.md 規約),
 //     not Drizzle's `timestamp_ms` mode: the domain functions (`dayKey`) take
 //     numbers, and the wire format stays JSON-native.
 //
 // Deliberately NOT here — all leaf tables, addable later without a rebuild:
 // `tag_alias` (Phase 2), `attachment` (Phase 4). `api_token` joined in 0002
-// exactly that way (additive: one CREATE TABLE + two indexes).
+// exactly that way (additive: one CREATE TABLE + two indexes); `deleted_at`
+// left `post` in 0003 the other safe way (DROP INDEX → ALTER TABLE DROP COLUMN).
 
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
@@ -128,15 +132,10 @@ export const post = sqliteTable(
     // never by SQLite's UTC-based `date()`.
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
-    // ADR-0003: deletion is physical, so nothing ever writes this (always
-    // NULL). Kept only until a follow-up migration drops the index, then the
-    // column — dropping is a schema change and rides its own reviewed PR.
-    deletedAt: integer("deleted_at"),
+    // No `deleted_at`: deletion is physical (ADR-0003). 0001 carried the column
+    // and its index; 0003 dropped both — see rule 1 at the top of this file.
   },
-  (t) => [
-    index("post_user_id_created_at_idx").on(t.userId, t.createdAt),
-    index("post_deleted_at_idx").on(t.deletedAt),
-  ],
+  (t) => [index("post_user_id_created_at_idx").on(t.userId, t.createdAt)],
 );
 
 /** A tag (石). `norm` absorbs the ways the same tag gets typed. */

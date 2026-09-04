@@ -100,7 +100,10 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 | body_format | text | `markdown`（将来 `plain` 等）。平文メタデータ |
 | created_at | integer | epoch ms。**平文メタデータ**（可視化の軸） |
 | updated_at | integer | |
-| deleted_at | integer? | **廃止**（[ADR-0003](adr/0003-post-delete-is-physical.md): 削除は物理削除）。どこからも書かれない。後続 migration で index → 列の順に drop |
+
+> `deleted_at` は無い。[ADR-0003](adr/0003-post-delete-is-physical.md)（削除は物理削除）で書き手が消え、
+> `0003_drop_post_deleted_at` が `DROP INDEX` → `ALTER TABLE ... DROP COLUMN` の 2 文で列ごと落とした
+> （`CREATE TABLE` 無し ＝ `post` の再構築は起きていない）。
 
 > ✅ **集計の「日」= `Asia/Tokyo` で切る**（2026-08-23）。`created_at` は epoch ms（UTC の一瞬）で保存し、
 > 「その日」はコアの定数 `APP_TZ = "Asia/Tokyo"` を使う純粋関数 `dayKey()` で決める。**`user` に TZ 列は持たない** ——
@@ -171,12 +174,13 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 ✅ `0002_api_token.sql` でこの経路どおり追加済み（CREATE TABLE + index 2 本のみ）。`tag_alias`（Phase 2）・
 `attachment`（Phase 4）は**葉テーブルなので後から追加しても既存テーブルを再構築しない** ＝ 必要になってから足す。
 逆に **`user` / `post` / `tag` は CASCADE の親**なので、NOT NULL にしたい列は `0001` で決めきる（後から NOT NULL 列を
-足す・型を変える・rename するとテーブル再構築 → 子行が消える。`cloudflare-d1-drizzle-migration`）。NULLABLE 列の追加は安全。
+足す・型を変える・rename するとテーブル再構築 → 子行が消える。`cloudflare-d1-drizzle-migration`）。
+NULLABLE 列の追加は安全。**列の drop も安全** ── SQLite は再構築せずその場で落とす（索引付きの列は落とせないので
+`DROP INDEX` が先）。`0003` が `post.deleted_at` をそう消し、`post_tags` の行は 1 行も減っていない。
 
 ## インデックス（目安）
 
 - `post(user_id, created_at)` ── タイムライン・期間絞り込み。
-- `post(deleted_at)` ── **廃止**（ADR-0003。列と一緒に後続 migration で drop）。
 - `post_tags(tag_id)` ── 多対多の逆方向（共起クエリもこれで足りる）。
   **`post_tags(post_id)` は張らない** ── PK `(post_id, tag_id)` が作る暗黙の index
   `sqlite_autoindex_post_tags_1` が `WHERE post_id = ?` を covering index で捌く（`0001` 適用後の

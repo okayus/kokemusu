@@ -35,6 +35,9 @@ D1 に無期限に残る」——消したい投稿ほどセンシティブで�
   急がない。index を先に落としてから列。生成 SQL が `post` の再構築になっていないことを
   `migrations.test.ts` で確認——`cloudflare-d1-drizzle-migration` の CASCADE 罠）。それまで
   schema.ts には「決して書かない列」としてコメントつきで残る。
+  ✅ 実施済み（2026-09-04、`0003_drop_post_deleted_at`）: 生成 SQL は `DROP INDEX` → `ALTER TABLE ... DROP COLUMN`
+  の 2 文だけ（`CREATE TABLE` 無し ＝ 再構築なし）。ローカル D1 に親子行を仕込んで適用し、`post` / `post_tags`
+  の行数が変わらないことと FK `ON DELETE CASCADE` が残ることを確認した上で `migrations.test.ts` に固定。
 - 物理削除も即時のバイト消去ではない: Time Travel の保持窓と取得済みバックアップには残る（本文は
   暗号文——ADR-0001 が受容済みのライン）。窓の経過後は確実に消える点がソフトデリートとの差。
 - 編集（PATCH）はこの決定と独立に、再暗号化 + `updated_at` 打刻の上書きで行う（版の保持はしない。
