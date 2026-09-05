@@ -5,6 +5,7 @@ import {
   axisTicks,
   barGeom,
   chartDomain,
+  labelPx,
   monthSegments,
   rowNote,
   spanTitle,
@@ -109,17 +110,34 @@ describe("chartDomain", () => {
   });
 });
 
-describe("axisTicks", () => {
+describe("axisTicks — labels for an axis of a given pixel width", () => {
+  const labels = (domain: Parameters<typeof axisTicks>[0], axisPx: number) =>
+    axisTicks(domain, axisPx).map((t) => t.label);
+
+  it("estimates a label's width from its glyphs: 5.5px a digit, 9px a CJK glyph", () => {
+    expect(labelPx("2026年")).toBe(31);
+    expect(labelPx("12月")).toBe(20);
+    expect(labelPx("今日")).toBe(18);
+  });
+
   it("ticks by month on a short domain, naming the year at January", () => {
-    const ticks = axisTicks({ from: "2026-11-20", to: "2027-03-05" });
-    expect(ticks.map((t) => t.label)).toEqual(["12月", "2027年", "2月"]);
-    // 3月 exists in the domain but sits under the 今日 label's zone.
-    expect(ticks.every((t) => t.x <= 92)).toBe(true);
+    // 106 days on 400px: every month fits, but 3月 (x ≈ 95%) would run into 今日.
+    expect(labels({ from: "2026-11-20", to: "2027-03-05" }, 400)).toEqual(["12月", "2027年", "2月"]);
+  });
+
+  it("yields to 今日 by pixels, not by a fixed zone", () => {
+    // The same domain on 120px: 2月 (x ≈ 69%) now ends inside 今日's room too.
+    expect(labels({ from: "2026-11-20", to: "2027-03-05" }, 120)).toEqual(["12月", "2027年"]);
+  });
+
+  it("coarsens months to calendar quarters when neighbours would touch", () => {
+    // 288 days on 200px: 12月 and 2026年 (29px) would overlap, so the ladder
+    // steps to 1・4・7・10月 — January (the year) kept, not every other month.
+    expect(labels({ from: "2025-11-20", to: "2026-09-03" }, 200)).toEqual(["2026年", "4月", "7月"]);
   });
 
   it("ticks by year on a multi-year domain", () => {
-    const ticks = axisTicks({ from: "2020-01-15", to: "2026-09-03" });
-    expect(ticks.map((t) => t.label)).toEqual([
+    expect(labels({ from: "2020-01-15", to: "2026-09-03" }, 600)).toEqual([
       "2021年",
       "2022年",
       "2023年",
@@ -129,20 +147,33 @@ describe("axisTicks", () => {
     ]);
   });
 
-  it("thins a decades-wide domain from the end, keeping the newest surviving year", () => {
-    // On a 27-year domain the 今日 zone (x > 92) is ~2 years wide, so 2025 and
-    // 2026 drop and the newest surviving tick is 2024; thinning (step 4 over
-    // the remaining 25) walks back from it. 今日 itself labels the right edge.
-    const ticks = axisTicks({ from: "2000-01-01", to: "2026-09-03" });
-    expect(ticks.map((t) => t.label)).toEqual([
-      "2000年",
-      "2004年",
-      "2008年",
-      "2012年",
-      "2016年",
-      "2020年",
+  it("drops the last year rather than let it run into 今日", () => {
+    // 2026年 starts at x ≈ 90%: on 400px its 29px would reach the 今日 label.
+    expect(labels({ from: "2020-01-15", to: "2026-09-03" }, 400)).toEqual([
+      "2021年",
+      "2022年",
+      "2023年",
       "2024年",
+      "2025年",
     ]);
+  });
+
+  it("thins years on a narrow axis to a calendar-aligned interval", () => {
+    // ~30px per year on 200px: single years collide, even years clear.
+    expect(labels({ from: "2020-01-15", to: "2026-09-03" }, 200)).toEqual(["2022年", "2024年"]);
+    // 27 years on 360px: 1 and 2 collide, 5 clears; 2025 yields to 今日.
+    expect(labels({ from: "2000-01-01", to: "2026-09-03" }, 360)).toEqual([
+      "2000年",
+      "2005年",
+      "2010年",
+      "2015年",
+      "2020年",
+    ]);
+  });
+
+  it("leaves only 今日 on an unmeasured axis or a one-day domain", () => {
+    expect(labels({ from: "2000-01-01", to: "2026-09-03" }, 0)).toEqual([]);
+    expect(labels({ from: "2026-09-03", to: "2026-09-03" }, 600)).toEqual([]);
   });
 });
 
@@ -268,6 +299,15 @@ describe("TimelineChart markup", () => {
     // January wears the year — the 年表's spine — and later months their 月.
     expect(html).toContain(">2026年</text>");
     expect(html).toContain(">2月</text>");
+  });
+
+  it("lays the axis out for the nominal width until the browser measures it", () => {
+    // Static markup never runs layout: 320px is assumed, on which every year
+    // of this domain fits except 2026, which would run into 今日.
+    const html = render([chartRow("a", span("2020-01-15", "2020-02-01", 2))], "2026-09-10");
+    expect(html).toContain(">2021年</text>");
+    expect(html).toContain(">2025年</text>");
+    expect(html).not.toContain(">2026年</text>");
   });
 
   it("shows an empty AND row as 重なる苔片なし with 0 片, bar-less", () => {
