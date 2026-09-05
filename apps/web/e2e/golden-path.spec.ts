@@ -50,10 +50,17 @@ test("register → post → today's moss darkens → reload → logout → login
   await page.reload();
   await expect(garden).toBeVisible();
 
+  // The composer is a dialog (features.md §1): 積む in the sticky bar opens it,
+  // the fields live inside, and success closes it (the dialog is unmounted).
+  const bar = page.locator("header.bar");
+  const stack = bar.getByRole("button", { name: "積む", exact: true });
+  const dialog = page.getByRole("dialog");
   const body = `e2e の苔片 ${Date.now()}`;
-  await page.getByLabel("いまの苔片").fill(body);
-  await page.getByLabel("タグ（コンマ区切り・任意）").fill("e2e, 苔");
-  await page.getByRole("button", { name: "積む" }).click();
+  await stack.click();
+  await dialog.getByLabel("いまの苔片").fill(body);
+  await dialog.getByLabel("タグ（コンマ区切り・任意）").fill("e2e, 苔");
+  await dialog.getByRole("button", { name: "積む", exact: true }).click();
+  await expect(dialog).toBeHidden();
 
   const timeline = page.locator("ol.posts");
   await expect(timeline.getByText(body, { exact: true })).toBeVisible();
@@ -177,17 +184,21 @@ test("register → post → today's moss darkens → reload → logout → login
     "",
     "`コード` と [リンク](https://example.test/) と <b>生 HTML</b> と [罠](javascript:alert(1))",
   ].join("\n");
-  await page.getByLabel("いまの苔片").fill(markdownBody);
+  // `n` opens the dialog too (features.md §1) — from the page, not from a field.
+  await page.keyboard.press("n");
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("いまの苔片").fill(markdownBody);
 
   // コンポーザのプレビューは苔片の表示と同じ描画器を通る — ここで見えるものが積まれる。
-  const composer = page.locator("form.composer");
-  await composer.locator("summary").click();
+  const composer = dialog.locator("form.composer");
+  await composer.locator(".md-preview > summary").click();
   const preview = composer.locator(".md-preview .md");
   await expect(preview.locator("h4")).toHaveText("見出し");
   await expect(preview.locator("li")).toHaveText("箇条書き");
 
-  await page.getByLabel("タグ（コンマ区切り・任意）").fill("e2e");
-  await page.getByRole("button", { name: "積む" }).click();
+  await dialog.getByLabel("タグ（コンマ区切り・任意）").fill("e2e");
+  await dialog.getByRole("button", { name: "積む", exact: true }).click();
+  await expect(dialog).toBeHidden();
   await expect(timeline.locator("li.post")).toHaveCount(2);
 
   // Markdown + サニタイズ (security.md / ADR-0004), against the production
@@ -365,4 +376,65 @@ test("register → post → today's moss darkens → reload → logout → login
   await expect(feed.getByText("この絞り込みに合う苔片はありません。")).toBeVisible();
   await periodChip.click();
   await expect(timeline.getByText(body, { exact: true })).toBeVisible();
+
+  // 積む dialog (features.md §1): closing is saving. Nothing carried over from
+  // the last post (the draft was spent); a body typed and dismissed with Esc is
+  // there again on the next open.
+  await stack.click();
+  await expect(dialog.getByLabel("タグ（コンマ区切り・任意）")).toHaveValue("");
+  await expect(dialog.getByLabel("いまの苔片")).toHaveValue("");
+  await dialog.getByLabel("いまの苔片").fill("今日の苔片");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await stack.click();
+  await expect(dialog.getByLabel("いまの苔片")).toHaveValue("今日の苔片");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+
+  // Posting while the feed is narrowed to yesterday: today's 苔片 falls outside
+  // the window, so the feed does not move — the bar says so and the moss
+  // darkens; the chip's × then shows it at the head.
+  await cellOf(yesterday).click();
+  await expect(periodChip).toHaveText(`${slashed(yesterday)} ×`);
+  await stack.click();
+  await expect(dialog.getByLabel("いまの苔片")).toHaveValue("今日の苔片");
+  await dialog.getByLabel("タグ（コンマ区切り・任意）").fill("e2e");
+  await dialog.getByRole("button", { name: "積む", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const receipt = bar.getByRole("status");
+  await expect(receipt).toHaveText("積みました（いまの絞り込みの外）");
+  await expect(timeline.locator("li.post")).toHaveCount(1);
+  await expect(total).toHaveText("計 2 片");
+  await expect(today).toHaveClass(/\bl1\b/);
+  await periodChip.click();
+  await expect(timeline.locator("li.post")).toHaveCount(2);
+  await expect(timeline.locator("li.post").first()).toContainText("今日の苔片");
+
+  // 同じ石に積む (CONTEXT.md): the survivor's stones seed the tag field and the
+  // body starts empty; the new 苔片 lands at the head of the feed carrying them —
+  // and a 見出し from the toggle, encrypted at rest like the body.
+  const survivor = timeline.locator("li.post").nth(1);
+  await expect(survivor.getByText(body, { exact: true })).toBeVisible();
+  await survivor.getByRole("button", { name: "同じ石に積む" }).click();
+  await expect(dialog.getByLabel("タグ（コンマ区切り・任意）")).toHaveValue("e2e, 苔");
+  await expect(dialog.getByLabel("いまの苔片")).toHaveValue("");
+  await dialog.getByText("見出しを付ける").click();
+  await dialog.getByLabel("見出し（任意）").fill("同じ石");
+  await dialog.getByLabel("いまの苔片").fill("同じ石に積んだ苔片");
+  await dialog.getByRole("button", { name: "積む", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(receipt).toHaveText("積みました");
+  const stacked = timeline.locator("li.post").first();
+  await expect(stacked).toContainText("同じ石に積んだ苔片");
+  await expect(stacked.locator(".post-title")).toHaveText("同じ石");
+  await expect(stacked.locator(".post-tags .tag-chip")).toHaveText(["e2e", "苔"]);
+  await expect(stacked).toBeInViewport();
+  await expect(timeline.locator("li.post")).toHaveCount(3);
+  await expect(total).toHaveText("計 3 片");
+  const titled = queryRows<{ title: string | null }>(
+    "SELECT title FROM post WHERE title IS NOT NULL",
+  );
+  expect(titled).toHaveLength(1);
+  expect(titled[0]?.title).toMatch(/^k1\.[A-Za-z0-9_-]{16}\./);
+  expect(titled[0]?.title).not.toContain("同じ石");
 });

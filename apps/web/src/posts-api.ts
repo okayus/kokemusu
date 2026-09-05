@@ -20,8 +20,12 @@ export type PostItem = {
 /** `today` is server-decided (JST) like the 年表's axis edge — the anchor of the period presets. */
 export type Timeline = { posts: PostItem[]; nextCursor: string | null; today: string };
 
-export const createPost = (input: { body: string; tags?: string[] }): Promise<PostItem> =>
-  postJson("/api/posts", input);
+// `title` = the optional 見出し (roadmap 決めること 7); omitted = none.
+export const createPost = (input: {
+  body: string;
+  tags?: string[];
+  title?: string;
+}): Promise<PostItem> => postJson("/api/posts", input);
 
 // Wholesale replacement of the editable fields — the edit form always sends
 // the complete new state, so an omitted/blank title clears the heading and

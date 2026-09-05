@@ -59,6 +59,7 @@ test("PAT: mint → Bearer post lands encrypted → write-only wall → revoke k
     data: { title: "まず覚える 2026-09-03", body: "PAT からの苔片", tags: ["mazuoboeru"] },
   });
   expect(created.status()).toBe(201);
+  const createdId = ((await created.json()) as { id: string }).id;
 
   // The write-only wall: post:write cannot read the decrypted timeline…
   expect((await sender.get("/api/posts", { headers: bearer })).status()).toBe(403);
@@ -91,8 +92,10 @@ test("PAT: mint → Bearer post lands encrypted → write-only wall → revoke k
   await expect(timeline.locator(".post-tags .tag-chip").first()).toHaveText("mazuoboeru");
 
   // …while at rest title and body are k1. envelopes like every other 苔片.
+  // (By id — the specs share one sqlite, and the golden path leaves a titled
+  // 苔片 of its own behind since the 見出し toggle.)
   const storedPost = queryRows<{ title: string; body: string }>(
-    "SELECT title, body FROM post WHERE title IS NOT NULL",
+    `SELECT title, body FROM post WHERE id = '${createdId}'`,
   );
   expect(storedPost).toHaveLength(1);
   expect(storedPost[0]?.title).toMatch(/^k1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,}$/);
