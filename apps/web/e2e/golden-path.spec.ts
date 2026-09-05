@@ -340,4 +340,29 @@ test("register → post → today's moss darkens → reload → logout → login
   await expect(feed.getByText("この絞り込みに合う苔片はありません。")).toBeVisible();
   await periodChip.click();
   await expect(timeline.getByText(body, { exact: true })).toBeVisible();
+
+  // 総草のマスのタップ (visualization.md §1): the fourth 導線 into the feed. A
+  // reload redraws the 総草 with the survivor on yesterday's cell (it moved at
+  // rest; the grid never refetched). One tab stop: today's cell, ↑ walks a day
+  // back and the stop follows, Enter lands the feed on that day — the same
+  // 1-day window the 今日 preset makes, so the chip reads the day. A click on
+  // today's cell finds nothing (the 苔片 is yesterday's), and × brings it back.
+  await page.reload();
+  const cellOf = (day: string) => page.locator(`rect.heatmap-cell[data-day="${day}"]`);
+  await expect(cellOf(yesterday)).toHaveClass(/\bl1\b/);
+  await expect(today).toHaveClass(/\bl0\b/);
+  await expect(today).toHaveAttribute("tabindex", "0");
+  await today.focus();
+  await page.keyboard.press("ArrowUp");
+  await expect(cellOf(yesterday)).toBeFocused();
+  await expect(cellOf(yesterday)).toHaveAttribute("tabindex", "0");
+  await expect(today).toHaveAttribute("tabindex", "-1");
+  await page.keyboard.press("Enter");
+  await expect(periodChip).toHaveText(`${slashed(yesterday)} ×`);
+  await expect(timeline.getByText(body, { exact: true })).toBeVisible();
+  await today.click();
+  await expect(periodChip).toHaveText(`${slashed(todayKey)} ×`);
+  await expect(feed.getByText("この絞り込みに合う苔片はありません。")).toBeVisible();
+  await periodChip.click();
+  await expect(timeline.getByText(body, { exact: true })).toBeVisible();
 });

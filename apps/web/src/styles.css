@@ -202,8 +202,11 @@ textarea {
   margin-block: 1.5rem 2rem;
 }
 
+/* .heatmaps のグリッドアイテム。min-width: auto のままだと svg の幅（53 週 = 715px）まで
+   伸びて .heatmap-scroll が溢れず（= スクロールせず）、section ごと画面外へはみ出す。 */
 .heatmap {
   margin: 0;
+  min-width: 0;
 }
 
 .heatmap-caption {
@@ -234,7 +237,9 @@ textarea {
   font-size: 9px;
 }
 
+/* マスはボタン: タップでその日の投稿一覧へ（visualization.md §1）。 */
 .heatmap-cell {
+  cursor: pointer;
   /* 投稿直後に「マスが濃くなる」のを見せる、UI で唯一の動き。 */
   transition: fill 0.4s;
 }
@@ -251,13 +256,22 @@ textarea {
 .heatmap-cell.l3 { fill: var(--moss-3); }
 .heatmap-cell.l4 { fill: var(--moss-4); }
 
-/* 今日のマスは常に見つけられるように縁取る。hover の応答が後勝ち。 */
+/* 今日のマスは常に見つけられるように縁取る。hover / focus の応答が後勝ち。 */
 .heatmap-cell.today {
   stroke: var(--quiet);
 }
 
-.heatmap-cell:hover {
+.heatmap-cell:hover,
+.heatmap-cell:focus-visible {
   stroke: var(--ink);
+}
+
+/* 石と同じ moss の輪だが、11px のマスに合わせて細く（svg 側の余白 RING に収まる）。
+   solid は Chromium が SVG 図形の外周を右下へ 2px ずらして描く（2026-09-05 実測）ので、
+   図形に沿って描かれる auto にする。 */
+.heatmap-cell:focus-visible {
+  outline: 2px auto var(--moss);
+  outline-offset: 2px;
 }
 
 .heatmap-legend {
