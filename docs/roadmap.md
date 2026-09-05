@@ -10,7 +10,7 @@
 ## Phase 1 — MVP（毎日使える最小形）
 
 ゴール: **自分が毎日投稿して、最低限の苔（ヒートマップ）を眺められる。**
-最初の縦切り「投稿 → タグ → ヒートマップに 1 マス点く」は **完了（2026-09-02、DoD 1〜5 全通過。[log.md](log.md)。plans/vertical-slice.md は削除済み＝ git 履歴）**。e2e（PR6、#26）も 2026-09-02 に完了。タグ絞り込み UI（チップ / §8 フォーカス / §6 橋 の 3 導線、`?tags=` AND を posts にも）は 2026-09-03 に完了。投稿の編集・削除（物理削除 — [ADR-0003](adr/0003-post-delete-is-physical.md)）は 2026-09-04 に完了（#34）。Markdown 描画（サニタイザではなく React 要素へ — [ADR-0004](adr/0004-markdown-renders-to-react-elements.md)）も 2026-09-04 に完了。残り: 期間絞り込みの UI。
+最初の縦切り「投稿 → タグ → ヒートマップに 1 マス点く」は **完了（2026-09-02、DoD 1〜5 全通過。[log.md](log.md)。plans/vertical-slice.md は削除済み＝ git 履歴）**。e2e（PR6、#26）も 2026-09-02 に完了。タグ絞り込み UI（チップ / §8 フォーカス / §6 橋 の 3 導線、`?tags=` AND を posts にも）は 2026-09-03 に完了。投稿の編集・削除（物理削除 — [ADR-0003](adr/0003-post-delete-is-physical.md)）は 2026-09-04 に完了（#34）。Markdown 描画（サニタイザではなく React 要素へ — [ADR-0004](adr/0004-markdown-renders-to-react-elements.md)）も 2026-09-04 に完了。期間絞り込み UI（`?from=`/`?to=` ＋ 今日 / 今週 / 今月 / 今年 ＋ カスタム範囲）も 2026-09-05 に完了 — **Phase 1 の取りこぼしは無し**。
 
 - DB スキーマとマイグレーション（[data-model.md](data-model.md)）。実スキーマ投入前に `cloudflare-d1-drizzle-migration` 必読。
 - 投稿 CRUD（作成・編集・削除 [物理削除、[ADR-0003](adr/0003-post-delete-is-physical.md)]、Markdown 描画 [[ADR-0004](adr/0004-markdown-renders-to-react-elements.md)]、任意の `title`）。

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { E2E_INITIAL_REGISTRATION_TOKEN } from "./env";
-import { queryRows } from "./helpers/db";
+import { executeSql, queryRows } from "./helpers/db";
 import { enableVirtualAuthenticator } from "./helpers/webauthn";
 
 type HeatmapWire = {
@@ -8,6 +8,16 @@ type HeatmapWire = {
   to: string;
   days: { day: string; count: number; level: number }[];
 };
+
+type PostsWire = { posts: { body: string; day: string }[]; today: string };
+
+/** A `YYYY-MM-DD` key moved by whole days — civil math on the UTC carrier, like the app's own. */
+const shiftDay = (day: string, days: number) =>
+  new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, +day.slice(8, 10) + days))
+    .toISOString()
+    .slice(0, 10);
+
+const slashed = (day: string) => day.replaceAll("-", "/");
 
 // The vertical slice, wired end to end: token-gated passkey registration (a real
 // WebAuthn ceremony against a CDP virtual authenticator — no DEV_BYPASS) → the
@@ -257,4 +267,62 @@ test("register → post → today's moss darkens → reload → logout → login
   expect(queryRows<{ c: number }>("SELECT COUNT(*) AS c FROM post")[0]?.c).toBe(1);
   // ON DELETE CASCADE took the dead 苔片's links; the survivor keeps its two.
   expect(queryRows<{ c: number }>("SELECT COUNT(*) AS c FROM post_tags")[0]?.c).toBe(2);
+
+  // 期間絞り込み (features.md §3): the presets cut where the server cuts. The
+  // feed's `today` is the server's JST day — the 総草's `to` names the same
+  // day — and the survivor was stacked today, so 今日 keeps it.
+  const feed = page.locator("section.post-feed");
+  await feed.getByText("期間で絞る").click();
+  await feed.getByRole("button", { name: "今日" }).click();
+  const todayKey = afterDelete.to;
+  const periodChip = page.getByRole("button", { name: "期間の絞り込みを外す" });
+  await expect(periodChip).toHaveText(`${slashed(todayKey)} ×`);
+  await expect(timeline.locator("li.post")).toHaveCount(1);
+  const byDay = (await (
+    await page.request.get("/api/posts", { params: { from: todayKey, to: todayKey } })
+  ).json()) as PostsWire;
+  expect(byDay.today).toBe(todayKey);
+  expect(byDay.posts.map((p) => [p.body, p.day])).toEqual([[body, todayKey]]);
+
+  // Move the survivor back one day AT REST (the API can only stack "now"): the
+  // same day window empties while yesterday's holds it — the JST cut of
+  // `created_at`, against the real sqlite — and each half stands alone.
+  executeSql("UPDATE post SET created_at = created_at - 86400000");
+  const yesterday = shiftDay(todayKey, -1);
+  const countIn = async (params: Record<string, string>) =>
+    ((await (await page.request.get("/api/posts", { params })).json()) as PostsWire).posts.length;
+  expect(await countIn({ from: todayKey, to: todayKey })).toBe(0);
+  expect(await countIn({ from: yesterday, to: yesterday })).toBe(1);
+  expect(await countIn({ to: yesterday })).toBe(1);
+  expect(await countIn({ from: todayKey })).toBe(0);
+  // Nothing the server would have to guess at: an inverted pair, a non-day.
+  const rejected = async (params: Record<string, string>) =>
+    (await page.request.get("/api/posts", { params })).status();
+  expect(await rejected({ from: todayKey, to: yesterday })).toBe(400);
+  expect(await rejected({ from: "2026-02-30" })).toBe(400);
+
+  // The custom range finds it on yesterday …
+  await feed.getByLabel("開始日").fill(yesterday);
+  await feed.getByLabel("終了日").fill(yesterday);
+  await feed.getByRole("button", { name: "絞る" }).click();
+  await expect(periodChip).toHaveText(`${slashed(yesterday)} ×`);
+  await expect(timeline.getByText(body, { exact: true })).toBeVisible();
+
+  // … and an inverted range never leaves the browser: 開始日 after 終了日 is
+  // the field's own rangeOverflow (max = 終了日), the submit is blocked, the
+  // chip stays, and no request — hence no error — is made.
+  const fromField = feed.getByLabel("開始日");
+  await fromField.fill(todayKey);
+  await feed.getByRole("button", { name: "絞る" }).click();
+  expect(await fromField.evaluate((el) => (el as HTMLInputElement).validity.rangeOverflow)).toBe(
+    true,
+  );
+  await expect(periodChip).toHaveText(`${slashed(yesterday)} ×`);
+  await expect(feed.locator("[role=alert]")).toHaveCount(0);
+
+  // 今日 now finds nothing — the 苔片 is yesterday's — and the chip's × brings it back.
+  await feed.getByRole("button", { name: "今日" }).click();
+  await expect(feed.getByText("この絞り込みに合う苔片はありません。")).toBeVisible();
+  await periodChip.click();
+  await expect(timeline.getByText(body, { exact: true })).toBeVisible();
 });

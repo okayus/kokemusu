@@ -1,8 +1,9 @@
-import { and, countDistinct, desc, eq, inArray, lt, or, type SQL } from "drizzle-orm";
+import { and, countDistinct, desc, eq, gte, inArray, lt, or, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { decodeCursor, encodeCursor } from "../core/cursor";
 import { decryptBody, encryptBody, importBodyKey } from "../core/crypto";
+import { addDays, dayKey, dayStartMs, isDayKey, type DayKey } from "../core/day";
 import { MAX_TAGS_PER_POST, normalizeTagName, parseTagNames, parseTagsParam } from "../core/tag";
 import { createDb, type Db } from "../db";
 import { post, postTags, tag } from "../db/schema";
@@ -31,18 +32,53 @@ export const createPostSchema = z.object({
   tags: z.array(z.string().min(1).max(MAX_TAG_CHARS)).max(MAX_TAGS_PER_POST).optional(),
 });
 
-// The two filter forms: `?tag=` = one tag by (normalized) name — hand-writable;
-// `?tags=` = a 2+ tag AND set by id, the same wire 規約 as the 年表's deep-dive
-// rows (core/tag.ts) so §6's edge tap and a §8 row land here symmetrically.
-// They are exclusive — a request mixing them has no meaning.
+// The two tag filter forms: `?tag=` = one tag by (normalized) name —
+// hand-writable; `?tags=` = a 2+ tag AND set by id, the same wire 規約 as the
+// 年表's deep-dive rows (core/tag.ts) so §6's edge tap and a §8 row land here
+// symmetrically. They are exclusive — a request mixing them has no meaning.
+//
+// The period (features.md §3): `?from=` / `?to=` are inclusive calendar days,
+// the 総草's own wire form — so 日・週・月・年 and a custom range are all one
+// shape, and the boundary is cut the one way every day is: core `dayKey` in
+// APP_TZ, never SQLite's UTC `date()`. Each half stands alone (`from` =
+// それ以降, `to` = それ以前); together they must not invert. Day keys compare
+// as strings (4-digit years — core/day.ts).
 export const listPostsQuerySchema = z
   .object({
     limit: z.coerce.number().int().min(1).max(50).default(20),
     cursor: z.string().min(1).max(256).optional(),
     tag: z.string().min(1).max(MAX_TAG_CHARS).optional(),
     tags: z.string().min(1).max(1400).optional(),
+    from: z.string().refine(isDayKey, "must be a YYYY-MM-DD calendar day").optional(),
+    to: z.string().refine(isDayKey, "must be a YYYY-MM-DD calendar day").optional(),
   })
-  .refine((q) => q.tag === undefined || q.tags === undefined, "tag and tags are exclusive");
+  .refine((q) => q.tag === undefined || q.tags === undefined, "tag and tags are exclusive")
+  .refine(
+    (q) => q.from === undefined || q.to === undefined || q.from <= q.to,
+    "from must not be after to",
+  );
+
+/** The `created_at` bounds of a day range — a side is undefined when its half is absent. */
+export type PeriodBounds = { startMs: number | undefined; endMs: number | undefined };
+
+/**
+ * Resolve the inclusive day range into the half-open instant window the SQL
+ * takes: `created_at >= dayStartMs(from)` and `< dayStartMs(addDays(to, 1))`
+ * — the 総草's cut (stats.ts), so a 苔片 written at 00:30 JST on the 1st is
+ * in the month that has begun here, not in UTC's previous one. Null on a
+ * `to` at the end of the 4-digit calendar (`addDays(to, 1)` has no key), which
+ * the route answers 400 to — the same line resolveWindow draws.
+ */
+export function resolvePeriod(query: {
+  from?: string | undefined;
+  to?: string | undefined;
+}): PeriodBounds | null {
+  if (query.to === "9999-12-31") return null;
+  return {
+    startMs: query.from === undefined ? undefined : dayStartMs(query.from),
+    endMs: query.to === undefined ? undefined : dayStartMs(addDays(query.to, 1)),
+  };
+}
 
 // The :id of PATCH/DELETE. Bounded like tokens' id schema — the shape says
 // nothing about existence; unknown and foreign ids share one 404 later.
@@ -58,6 +94,8 @@ type PostItem = {
   bodyFormat: string;
   createdAt: number;
   updatedAt: number;
+  /** The 「日」 this 苔片 stacks into (CONTEXT.md), decided here in APP_TZ — the client only compares. */
+  day: DayKey;
   tags: TagSummary[];
 };
 
@@ -179,6 +217,7 @@ export const postRoutes = new Hono<Env>()
       bodyFormat: row.bodyFormat ?? "markdown",
       createdAt: now,
       updatedAt: now,
+      day: dayKey(now),
       tags: resolved,
     };
     return c.json(item, 201);
@@ -196,11 +235,15 @@ export const postRoutes = new Hono<Env>()
       cursor: c.req.query("cursor"),
       tag: c.req.query("tag"),
       tags: c.req.query("tags"),
+      from: c.req.query("from"),
+      to: c.req.query("to"),
     });
     if (!parsed.success) return fail(c, "validation_error");
     const { limit } = parsed.data;
     const cursor = parsed.data.cursor === undefined ? null : decodeCursor(parsed.data.cursor);
     if (parsed.data.cursor !== undefined && cursor === null) return fail(c, "validation_error");
+    const period = resolvePeriod(parsed.data);
+    if (period === null) return fail(c, "validation_error");
 
     const userId = c.get("userId");
     const db = createDb(c.env.DB);
@@ -248,6 +291,15 @@ export const postRoutes = new Hono<Env>()
         )
       : undefined;
 
+    // The period is two more bounds on the very axis the cursor walks, so the
+    // two compose as plain AND on post(user_id, created_at) — a page under a
+    // period is the same page of the same order, minus the days outside it.
+    // Absent halves are undefined and `and()` drops them, like the cursor.
+    const periodCond = and(
+      period.startMs === undefined ? undefined : gte(post.createdAt, period.startMs),
+      period.endMs === undefined ? undefined : lt(post.createdAt, period.endMs),
+    );
+
     let query = db
       .select({
         id: post.id,
@@ -267,7 +319,7 @@ export const postRoutes = new Hono<Env>()
       );
     }
     const rows = await query
-      .where(and(eq(post.userId, userId), tagSetCond, cursorCond))
+      .where(and(eq(post.userId, userId), tagSetCond, periodCond, cursorCond))
       .orderBy(desc(post.createdAt), desc(post.id))
       .limit(limit + 1);
 
@@ -288,15 +340,21 @@ export const postRoutes = new Hono<Env>()
         bodyFormat: r.bodyFormat,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
+        day: dayKey(r.createdAt),
         tags: tagsByPost.get(r.id) ?? [],
       })),
     );
 
+    // `today` rides along like the 年表's axis edge: the server decides "today"
+    // for every view that cuts days (stats.ts), and the feed's period presets
+    // (今日 / 今週 / 今月 / 今年) are anchored on it rather than on a client
+    // clock that may sit in another zone.
     const last = page[page.length - 1];
     return c.json({
       posts,
       nextCursor:
         hasMore && last ? encodeCursor({ createdAt: last.createdAt, id: last.id }) : null,
+      today: dayKey(Date.now()),
     });
   })
   // ------------------------------------------------------------ edit (苔片を直す)
@@ -358,6 +416,7 @@ export const postRoutes = new Hono<Env>()
       bodyFormat: owned.bodyFormat,
       createdAt: owned.createdAt,
       updatedAt: now,
+      day: dayKey(owned.createdAt),
       tags: resolved,
     };
     return c.json(item);
