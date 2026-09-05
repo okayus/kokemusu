@@ -1,6 +1,6 @@
-import { useEffect, useState, type Ref } from "react";
+import { useEffect, useId, useState, type Ref } from "react";
 import type { TagSummary } from "./posts-api";
-import { getTimeline, type TagTimeline, type TimelineRow } from "./stats-api";
+import { getTimeline, type MonthCount, type TagTimeline, type TimelineRow } from "./stats-api";
 
 // 石の年表 (docs/visualization.md §8): one horizontal bar per tag set — first
 // 苔片 to last 苔片 — sorted by start day so it reads as a 年表. Tapping a
@@ -21,7 +21,19 @@ const dayIndex = (day: string) =>
 /** The shared x-axis of every bar: [first 苔片 of any row, today]. */
 export type Domain = { from: string; to: string };
 
-export type Span = { firstDay: string; lastDay: string; count: number };
+/** A day range, first and last inclusive — all the bar geometry needs. */
+export type DayRange = { firstDay: string; lastDay: string };
+
+/** A row's data: the range, the 苔片 count, and its 活動月 — the month segments (§8). */
+export type Span = DayRange & { count: number; months: MonthCount[] };
+
+/** A row on the wire → the chart's span. */
+export const toSpan = (r: TimelineRow): Span => ({
+  firstDay: r.firstDay,
+  lastDay: r.lastDay,
+  count: r.count,
+  months: r.months,
+});
 
 /** One drawn row. `span: null` = the set overlaps on no 苔片 (empty AND row). */
 export type ChartRow = {
@@ -50,13 +62,47 @@ const MIN_BAR_PCT = 1.2;
  * its last day fully — first and last day inclusive). Clamped: never thinner
  * than MIN_BAR_PCT, never past the right edge.
  */
-export function barGeom(span: Span, domain: Domain): { x: number; w: number } {
+export function barGeom(range: DayRange, domain: Domain): { x: number; w: number } {
   const total = dayIndex(domain.to) - dayIndex(domain.from) + 1;
-  let x = ((dayIndex(span.firstDay) - dayIndex(domain.from)) / total) * 100;
-  let w = ((dayIndex(span.lastDay) - dayIndex(span.firstDay) + 1) / total) * 100;
+  let x = ((dayIndex(range.firstDay) - dayIndex(domain.from)) / total) * 100;
+  let w = ((dayIndex(range.lastDay) - dayIndex(range.firstDay) + 1) / total) * 100;
   if (w < MIN_BAR_PCT) w = MIN_BAR_PCT;
   if (x + w > 100) x = 100 - w;
   return { x: round3(x), w: round3(w) };
+}
+
+/** Months since year 0 of a day key — the unit for "how many months does a span cross". */
+const monthIndex = (day: string) => +day.slice(0, 4) * 12 + (+day.slice(5, 7) - 1);
+
+/** First / last day of a `YYYY-MM` month; the last via `Date.UTC(y, m, 0)` = day 0 of the next month. */
+const monthFirstDay = (month: string) => `${month}-01`;
+const monthLastDay = (month: string) => {
+  const last = new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7), 0)).getUTCDate();
+  return `${month}-${String(last).padStart(2, "0")}`;
+};
+
+export type MonthSegment = MonthCount & { x: number; w: number };
+
+/**
+ * The month segments of a bar (visualization.md §8): one per 活動月, each cut
+ * to the span — the first and last are partial months, so the segments' extent
+ * is the span's and the bar never grows past its first or last 苔片. A month
+ * outside the span cannot come from the server (a row's months lie within its
+ * MIN/MAX) and is skipped rather than drawn off the bar. Geometry is barGeom's,
+ * floor included, so an isolated month stays a visible dot on a years-long
+ * axis; where the floor pushes a segment past the era bar's end, the SVG clips.
+ */
+export function monthSegments(span: Span, domain: Domain): MonthSegment[] {
+  const segments: MonthSegment[] = [];
+  for (const m of span.months) {
+    const first = monthFirstDay(m.month);
+    const last = monthLastDay(m.month);
+    const firstDay = first < span.firstDay ? span.firstDay : first;
+    const lastDay = last > span.lastDay ? span.lastDay : last;
+    if (lastDay < firstDay) continue;
+    segments.push({ ...m, ...barGeom({ firstDay, lastDay }, domain) });
+  }
+  return segments;
 }
 
 export type AxisTick = { x: number; label: string };
@@ -110,11 +156,22 @@ export function rowNote(span: Span): string {
   return `${span.count} 片 · ${density}日/片`;
 }
 
-/** Hover / accessible description of a bar: the period and the count. */
+/**
+ * Hover / accessible description of a bar: the period, the count, and — once
+ * the span crosses a month — how many of its months saw a 苔片, which is what
+ * the segments show and the only place a screen reader hears it.
+ */
 export function spanTitle(span: Span): string {
   const period =
     span.firstDay === span.lastDay ? span.firstDay : `${span.firstDay} 〜 ${span.lastDay}`;
-  return `${period} · ${span.count} 片`;
+  const base = `${period} · ${span.count} 片`;
+  const crossed = monthIndex(span.lastDay) - monthIndex(span.firstDay) + 1;
+  return crossed > 1 ? `${base} · 活動 ${span.months.length}/${crossed} か月` : base;
+}
+
+/** Hover text of one month segment. */
+export function monthTitle(m: MonthCount): string {
+  return `${m.month} · ${m.count} 片`;
 }
 
 // ------------------------------------------------- rows = server + ad-hoc mix
@@ -139,7 +196,7 @@ export function assembleRows(base: TimelineRow[], adhoc: readonly AdhocEntry[]):
   const rows: ChartRow[] = base.map((r) => ({
     key: rowKey(r.tags),
     tags: r.tags,
-    span: { firstDay: r.firstDay, lastDay: r.lastDay, count: r.count },
+    span: toSpan(r),
   }));
   for (const a of adhoc) {
     const i = rows.findIndex((r) => r.key === a.afterKey);
@@ -294,13 +351,36 @@ function TimelineRowItem(props: {
 function TimelineBar(props: { span: Span; domain: Domain }) {
   const { x, w } = barGeom(props.span, props.domain);
   const title = spanTitle(props.span);
+  // <clipPath> ids are document-wide; one bar per row, so one id per bar.
+  const clipId = useId();
   return (
     <svg className="tl-bar" role="img" aria-label={title}>
       <line className="tl-track" x1="0" x2="100%" y1="8" y2="8" />
-      {/* A range bar: both ends are data ends, so both wear the 4px rounding. */}
+      {/* The era, first 苔片 to last, as a faint underlay: both ends are data
+          ends, so both wear the 4px rounding. Dormant months show only this. */}
       <rect className="tl-span" x={`${x}%`} y="3" width={`${w}%`} height="10" rx="4">
         <title>{title}</title>
       </rect>
+      {/* The 活動月, solid, cut to the era's rounded outline: a run's outer
+          corners match the underlay while the cut between two runs stays
+          square — the gap is the point (§8). */}
+      <clipPath id={clipId}>
+        <rect x={`${x}%`} y="3" width={`${w}%`} height="10" rx="4" />
+      </clipPath>
+      <g clipPath={`url(#${clipId})`}>
+        {monthSegments(props.span, props.domain).map((s) => (
+          <rect
+            key={s.month}
+            className="tl-month"
+            x={`${s.x}%`}
+            y="3"
+            width={`${s.w}%`}
+            height="10"
+          >
+            <title>{monthTitle(s)}</title>
+          </rect>
+        ))}
+      </g>
     </svg>
   );
 }
@@ -396,14 +476,7 @@ export function TagTimelineSection(props: {
     setAdhoc((list) =>
       list.map((a) =>
         a.key === key
-          ? {
-              ...a,
-              loading: false,
-              span:
-                found === null
-                  ? null
-                  : { firstDay: found.firstDay, lastDay: found.lastDay, count: found.count },
-            }
+          ? { ...a, loading: false, span: found === null ? null : toSpan(found) }
           : a,
       ),
     );

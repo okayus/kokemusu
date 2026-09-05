@@ -9,6 +9,8 @@ import {
   buildTagSpans,
   graphQuerySchema,
   heatmapQuerySchema,
+  monthCounts,
+  monthCountsByTag,
   periodStartDay,
   resolveWindow,
   timelineQuerySchema,
@@ -232,6 +234,41 @@ describe("buildTagSpans", () => {
       raw("ok", "ok", jst(2026, 9, 2), jst(2026, 9, 2)),
     ]);
     expect(spans.map((s) => s.tag.id)).toEqual(["ok"]);
+  });
+});
+
+describe("monthCounts — a row's 活動月: JST months, sparse and ascending", () => {
+  it("files a JST morning on the 1st under the new month, not the UTC calendar's old one", () => {
+    const morning = jst(2026, 9, 1, 8, 0);
+    expect(new Date(morning).toISOString()).toBe("2026-08-31T23:00:00.000Z");
+    expect(monthCounts([morning])).toEqual([{ month: "2026-09", count: 1 }]);
+  });
+
+  it("lists only months with a 苔片, oldest first, whatever order the rows came in", () => {
+    expect(monthCounts([jst(2026, 3, 20), jst(2026, 1, 5), jst(2026, 3, 2)])).toEqual([
+      { month: "2026-01", count: 1 },
+      { month: "2026-03", count: 2 },
+    ]);
+  });
+
+  it("is empty for no 苔片", () => {
+    expect(monthCounts([])).toEqual([]);
+  });
+});
+
+describe("monthCountsByTag — the same fold per stone", () => {
+  it("groups the axis rows by tag, each list sparse and ascending", () => {
+    const byTag = monthCountsByTag([
+      { tagId: "ts", createdAt: jst(2026, 9, 2) },
+      { tagId: "moss", createdAt: jst(2026, 9, 2) },
+      { tagId: "ts", createdAt: jst(2026, 7, 1) },
+    ]);
+    expect(byTag.get("ts")).toEqual([
+      { month: "2026-07", count: 1 },
+      { month: "2026-09", count: 1 },
+    ]);
+    expect(byTag.get("moss")).toEqual([{ month: "2026-09", count: 1 }]);
+    expect(byTag.has("ghost")).toBe(false);
   });
 });
 

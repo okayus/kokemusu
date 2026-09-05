@@ -12,12 +12,19 @@ export type Heatmap = { from: string; to: string; days: HeatmapDay[] };
 // §1). Per-tag devotion belongs to the graph and the tag timeline (Phase 2).
 export const getHeatmap = (): Promise<Heatmap> => request("/api/stats/heatmap");
 
-/** One row of the 年表: a tag set, its first/last JST day, and the 苔片 count. */
+/**
+ * 苔片 per 活動月: the JST `YYYY-MM` and its count. Sparse — only months with
+ * a 苔片 — and ascending; the counts add up to the row's `count`.
+ */
+export type MonthCount = { month: string; count: number };
+
+/** One row of the 年表: a tag set, its first/last JST day, the 苔片 count, and its 活動月 (the month segments, §8). */
 export type TimelineRow = {
   tags: { id: string; name: string }[];
   firstDay: string;
   lastDay: string;
   count: number;
+  months: MonthCount[];
 };
 
 /** `today` is server-decided (JST) — it is the axis's right edge in every view. */

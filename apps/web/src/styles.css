@@ -415,11 +415,20 @@ textarea {
   stroke-width: 1;
 }
 
+/* 棒 = 最初の苔片〜最後の苔片の「時代」。活動月（.tl-month）の下地なので薄く —
+   休眠していた月はこの薄さだけが残る（visualization.md §8 月セグメント棒）。 */
 .tl-span {
+  fill: var(--moss);
+  fill-opacity: 0.3;
+}
+
+/* 活動月。角丸は下地の輪郭で clip される（TimelineBar の <clipPath>）。 */
+.tl-month {
   fill: var(--moss);
 }
 
-.tl-span:hover {
+.tl-span:hover,
+.tl-month:hover {
   stroke: var(--ink);
 }
 

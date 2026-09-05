@@ -115,7 +115,10 @@ test("register → post → today's moss darkens → reload → logout → login
   // The third form on the wire — `?tags=` (タグ集合 AND) has no UI shortcut with
   // only two stones, so prove the SQL against the real sqlite here: both stones
   // together = exactly the one 苔片, echoed in request order.
-  type TimelineWire = { today: string; rows: { tags: { id: string }[]; count: number }[] };
+  type TimelineWire = {
+    today: string;
+    rows: { tags: { id: string }[]; count: number; months: { month: string; count: number }[] }[];
+  };
   const all = (await (await page.request.get("/api/stats/timeline")).json()) as TimelineWire;
   const stoneIds = all.rows.map((r) => r.tags[0]?.id ?? "");
   expect(stoneIds).toHaveLength(2);
@@ -125,6 +128,18 @@ test("register → post → today's moss darkens → reload → logout → login
   expect(combined.rows).toHaveLength(1);
   expect(combined.rows[0]?.count).toBe(1);
   expect(combined.rows[0]?.tags.map((t) => t.id)).toEqual(stoneIds);
+
+  // 月セグメント棒 (visualization.md §8): every form carries each row's 活動月 —
+  // this JST month, the one 苔片 — folded in core from the raw axis, against
+  // the real sqlite; on screen the bar paints one segment per row.
+  const thisMonth = [{ month: all.today.slice(0, 7), count: 1 }];
+  expect(all.rows.map((r) => r.months)).toEqual([thisMonth, thisMonth]);
+  expect(combined.rows[0]?.months).toEqual(thisMonth);
+  const focused = (await (
+    await page.request.get(`/api/stats/timeline?focus=${stoneIds[0] ?? ""}`)
+  ).json()) as TimelineWire;
+  expect(focused.rows.map((r) => r.months)).toEqual([thisMonth, thisMonth]);
+  await expect(yearChart.locator("rect.tl-month")).toHaveCount(2);
 
   // At rest it is a `k1.<iv>.<ciphertext>` envelope (ADR-0001), never the text —
   // the DoD 5 check, read from the sqlite itself rather than through the API.

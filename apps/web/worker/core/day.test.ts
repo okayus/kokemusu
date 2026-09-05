@@ -3,11 +3,13 @@ import {
   APP_TZ,
   addDays,
   bucketByDay,
+  bucketByMonth,
   dayKey,
   dayOfWeek,
   dayStartMs,
   enumerateDays,
   isDayKey,
+  monthKey,
   parseDayKey,
 } from "./day";
 
@@ -267,5 +269,44 @@ describe("bucketByDay folds 苔片 onto the day axis", () => {
       { day: "2026-08-24", count: 0 },
       { day: "2026-08-25", count: 1 },
     ]);
+  });
+});
+
+describe("monthKey / bucketByMonth fold 苔片 onto the month axis", () => {
+  it("is the day's YYYY-MM — a JST morning on the 1st is the new month, not UTC's old one", () => {
+    const morning = jst(2026, 9, 1, 8, 0);
+    expect(new Date(morning).toISOString()).toBe("2026-08-31T23:00:00.000Z");
+    expect(monthKey(morning)).toBe("2026-09");
+    expect(monthKey(morning - 9 * HOUR)).toBe("2026-08");
+  });
+
+  it("crosses the year on the JST boundary", () => {
+    expect(monthKey(jst(2027, 1, 1, 0, 0))).toBe("2027-01");
+    expect(monthKey(jst(2027, 1, 1, 0, 0) - 1)).toBe("2026-12");
+  });
+
+  it("honours the zone it is given, like dayKey", () => {
+    const t = utc(2026, 8, 31, 23, 30);
+    expect(monthKey(t, "UTC")).toBe("2026-08");
+    expect(monthKey(t, APP_TZ)).toBe("2026-09");
+  });
+
+  it("counts per JST month, and nothing for nothing", () => {
+    expect(bucketByMonth([])).toEqual(new Map());
+    const counts = bucketByMonth([
+      jst(2026, 8, 31, 23, 59),
+      jst(2026, 9, 1, 0, 0),
+      jst(2026, 9, 15, 12, 0),
+      jst(2026, 11, 3, 8, 0),
+    ]);
+    expect([...counts]).toEqual([
+      ["2026-08", 1],
+      ["2026-09", 2],
+      ["2026-11", 1],
+    ]);
+  });
+
+  it("throws on a broken timestamp instead of miscounting", () => {
+    expect(() => bucketByMonth([Number.NaN])).toThrow(RangeError);
   });
 });
