@@ -379,6 +379,17 @@ function Garden(props: { onSessionLost: () => void }) {
     feedRef.current?.scrollIntoView({ block: "start" });
   };
 
+  // The period's twin: the 総草's cell lands on that one day (visualization.md
+  // §1) — the same 1-day window the 今日 preset makes, so the chip reads
+  // 「YYYY/MM/DD ×」 and the 期間で絞る fields show the day. The stones stay:
+  // the cell counts every 苔片 of the day, but a reader who narrowed to a stone
+  // asked for that stone's, and the chips say both.
+  const showDay = (day: string) => {
+    const period = { from: day, to: day };
+    setPostPeriod((current) => (periodKey(current) === periodKey(period) ? current : period));
+    feedRef.current?.scrollIntoView({ block: "start" });
+  };
+
   // Chips and the live announcement share one wording: stones by name, the
   // period as its chip text (a whole month reads as the month).
   const narrowedBy = [
@@ -398,7 +409,7 @@ function Garden(props: { onSessionLost: () => void }) {
           {error}
         </p>
       )}
-      <HeatmapSection refreshKey={mossVersion} onFault={fault} />
+      <HeatmapSection refreshKey={mossVersion} onDayTap={showDay} onFault={fault} />
       <TagTimelineSection
         ref={timelineRef}
         refreshKey={mossVersion}

@@ -68,8 +68,11 @@ export function periodFromFields(from: string, to: string): Period | null {
 export const periodKey = (period: Period | null): string =>
   period === null ? "" : `${period.from ?? ""}~${period.to ?? ""}`;
 
-/** `YYYY-MM-DD` → `YYYY/MM/DD`, the spelling the 苔片 timestamps use (ja-JP). */
-const slash = (day: string) => day.replaceAll("-", "/");
+/**
+ * `YYYY-MM-DD` → `YYYY/MM/DD`, the spelling the 苔片 timestamps use (ja-JP).
+ * Shared with the 総草, whose cells name their day the way the chip will read it.
+ */
+export const slashDay = (day: string) => day.replaceAll("-", "/");
 
 /**
  * The chip's text. A whole year or a whole month is named as the unit, a
@@ -78,15 +81,15 @@ const slash = (day: string) => day.replaceAll("-", "/");
 export function periodLabel(period: Period): string {
   const { from, to } = period;
   if (from !== undefined && to !== undefined) {
-    if (from === to) return slash(from);
+    if (from === to) return slashDay(from);
     if (from === `${year(from)}-01-01` && to === `${year(from)}-12-31`) return `${year(from)}年`;
     if (from === `${from.slice(0, 7)}-01` && to === monthEnd(from)) {
       return `${year(from)}年${month(from)}月`;
     }
-    return `${slash(from)} 〜 ${slash(to)}`;
+    return `${slashDay(from)} 〜 ${slashDay(to)}`;
   }
-  if (from !== undefined) return `${slash(from)} 以降`;
-  if (to !== undefined) return `${slash(to)} 以前`;
+  if (from !== undefined) return `${slashDay(from)} 以降`;
+  if (to !== undefined) return `${slashDay(to)} 以前`;
   return "";
 }
 
