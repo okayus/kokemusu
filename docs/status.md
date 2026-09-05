@@ -24,4 +24,4 @@
 
 ## 進行中 PR
 
-- 設計 docs（ADR-0005 ＋ CONTEXT.md ＋ plans ＋ features / data-model / visualization / roadmap）— `docs/adr/` を含むので人間 merge。
+- **#42** 設計 docs（ADR-0005 ＋ CONTEXT.md ＋ plans ＋ features / data-model / visualization / security / roadmap）— `docs/adr/` を含むので人間 merge。merge 後 `git fetch --prune`、A1 は `origin/main` から切る。
