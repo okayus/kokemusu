@@ -284,3 +284,34 @@ export function bucketByDay(
   }
   return counts;
 }
+
+/** A calendar month in some zone, ISO `YYYY-MM` — a DayKey's first 7 chars, so it sorts the same way. */
+export type MonthKey = string;
+
+/**
+ * The month an instant belongs to: `dayKey` cut to `YYYY-MM`, so a 苔片 is in
+ * the month its day is in — 08:00 JST on the 1st is still last month on the
+ * UTC calendar, and `strftime('%Y-%m', …)` in SQL would file it there. The
+ * bucket of the 年表's month segments (visualization.md §8, 活動月).
+ *
+ * @throws RangeError as `dayKey`.
+ */
+export function monthKey(epochMs: number, tz: string = APP_TZ): MonthKey {
+  return dayKey(epochMs, tz).slice(0, 7);
+}
+
+/**
+ * Fold 苔片 timestamps into "how many in each month" — `bucketByDay`'s
+ * sibling for the month segments. Same diet: instants only, never a body.
+ */
+export function bucketByMonth(
+  timestamps: Iterable<number>,
+  tz: string = APP_TZ,
+): Map<MonthKey, number> {
+  const counts = new Map<MonthKey, number>();
+  for (const epochMs of timestamps) {
+    const key = monthKey(epochMs, tz);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}

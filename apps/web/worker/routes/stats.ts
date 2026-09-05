@@ -17,12 +17,14 @@ import { z } from "zod";
 import {
   addDays,
   bucketByDay,
+  bucketByMonth,
   dayKey,
   dayOfWeek,
   dayStartMs,
   enumerateDays,
   isDayKey,
   type DayKey,
+  type MonthKey,
 } from "../core/day";
 import { parseTagsParam } from "../core/tag";
 import { createDb } from "../db";
@@ -94,10 +96,11 @@ export function buildHeatmap(
 // タグのタイムライン (visualization.md §8): rows of "first 苔片 → last 苔片" per
 // tag set. Like the heatmap, this whole route reads plaintext metadata only —
 // `created_at` and `post_tags` — so BODY_KEY never enters the path (ADR-0001)
-// and the 年表 draws even while the key is missing. Day bucketing happens in
-// core (`dayKey`, Asia/Tokyo), never via SQLite's UTC-based `date()`; SQL only
-// takes MIN/MAX/COUNT over the raw epoch-ms axis, which is safe because
-// `dayKey` is monotonic.
+// and the 年表 draws even while the key is missing. Day and month bucketing
+// happen in core (`dayKey` / `monthKey`, Asia/Tokyo), never via SQLite's
+// UTC-based `date()` / `strftime()`; SQL only takes MIN/MAX/COUNT over the raw
+// epoch-ms axis for the span — safe because `dayKey` is monotonic — and hands
+// the raw instants over for the month segments (`monthCounts`).
 
 // The three forms (docs/plans/tag-timeline.md): no param = one row per tag,
 // `?focus=` = that stone + stone×co-occurring-tag rows, `?tags=` = one AND row
@@ -113,8 +116,20 @@ export const timelineQuerySchema = z
 /** A stone on the wire — same shape the posts API uses for tags. */
 export type TimelineTag = { id: string; name: string };
 
-/** One row of the 年表: the tag set, its first/last day (JST), and the 苔片 count. */
-export type TimelineRow = { tags: TimelineTag[]; firstDay: DayKey; lastDay: DayKey; count: number };
+/**
+ * 苔片 per 活動月 on the wire: the JST `YYYY-MM` and its count. Sparse — only
+ * months holding a 苔片 — and ascending; the counts add up to the row's count.
+ */
+export type MonthCount = { month: MonthKey; count: number };
+
+/** One row of the 年表: the tag set, its first/last day (JST), the 苔片 count, and its 活動月 (the month segments). */
+export type TimelineRow = {
+  tags: TimelineTag[];
+  firstDay: DayKey;
+  lastDay: DayKey;
+  count: number;
+  months: MonthCount[];
+};
 
 /** What the grouped SQL hands back per tag; `norm` rides along as the tiebreaker. */
 export type RawTagSpan = {
@@ -159,6 +174,33 @@ export function buildTagSpans(raws: RawTagSpan[]): TagSpan[] {
             : 0,
   );
   return spans.map(({ norm: _norm, ...span }) => span);
+}
+
+/**
+ * Fold instants into a row's `months` — its 活動月 with their counts, sparse
+ * and ascending, so the client paints exactly these and nothing in between
+ * (visualization.md §8: a single bar shows a gap as if it were one stretch).
+ * Bucketed here for the same reason days are: a month is a zone fact, so SQL
+ * hands over the raw `created_at` and never runs `strftime('%Y-%m', …)`.
+ */
+export function monthCounts(timestamps: Iterable<number>): MonthCount[] {
+  return [...bucketByMonth(timestamps)]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([month, count]) => ({ month, count }));
+}
+
+/** What the raw axis SQL hands back: one row per (苔片, tag) link. */
+export type AxisRow = { tagId: string; createdAt: number };
+
+/** `monthCounts` per tag — for the forms whose rows are one per tag. */
+export function monthCountsByTag(rows: Iterable<AxisRow>): Map<string, MonthCount[]> {
+  const instants = new Map<string, number[]>();
+  for (const r of rows) {
+    const list = instants.get(r.tagId);
+    if (list === undefined) instants.set(r.tagId, [r.createdAt]);
+    else list.push(r.createdAt);
+  }
+  return new Map([...instants].map(([tagId, ts]) => [tagId, monthCounts(ts)]));
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +318,10 @@ export const statsRoutes = new Hono<Env>()
       count: count(),
     };
     const ownPosts = eq(post.userId, userId);
+    // The raw axis for the month segments (§8): one row per (苔片, tag) link,
+    // bucketed into months in core. Each form batches it with its span SQL —
+    // one D1 round trip, one snapshot — so a row's months add up to its count.
+    const axisColumns = { tagId: postTags.tagId, createdAt: post.createdAt };
 
     // ---- ?tags=t1,t2,…: the one AND row — posts carrying the whole set.
     if (parsed.data.tags !== undefined) {
@@ -291,24 +337,28 @@ export const statsRoutes = new Hono<Env>()
         .where(inArray(postTags.tagId, ids))
         .groupBy(postTags.postId)
         .having(eq(countDistinct(postTags.tagId), ids.length));
-      const agg = (
-        await db
-          .select({ first: min(post.createdAt), last: max(post.createdAt), count: count() })
-          .from(post)
-          .where(and(ownPosts, inArray(post.id, matched)))
-      )[0];
+      const inSet = and(ownPosts, inArray(post.id, matched));
+      const aggQuery = db
+        .select({ first: min(post.createdAt), last: max(post.createdAt), count: count() })
+        .from(post)
+        .where(inSet);
+      // The set's 苔片 themselves — no tag column needed, the one row is the set.
+      const axisQuery = db.select({ createdAt: post.createdAt }).from(post).where(inSet);
+      // The user filter is belt and braces against echoing a foreign name:
+      // count ≥ 1 below proves every id is a real tag on the user's own posts.
+      const namedQuery = db
+        .select({ id: tag.id, name: tag.name })
+        .from(tag)
+        .where(and(eq(tag.userId, userId), inArray(tag.id, ids)));
+      const [aggRows, axis, named] = await db.batch([aggQuery, axisQuery, namedQuery]);
+
       // No 苔片 carries the whole set (an unknown id lands here too — nothing
       // can carry it): an empty 年表, not an error, same as posts' unknown ?tag=.
+      const agg = aggRows[0];
       if (agg === undefined || agg.count === 0 || agg.first === null || agg.last === null) {
         return c.json({ today, rows: [] });
       }
 
-      // count ≥ 1 proves every id is a real tag on the user's own posts; the
-      // user filter here is belt and braces against echoing a foreign name.
-      const named = await db
-        .select({ id: tag.id, name: tag.name })
-        .from(tag)
-        .where(and(eq(tag.userId, userId), inArray(tag.id, ids)));
       const byId = new Map(named.map((t) => [t.id, t] as const));
       const tagsInOrder = ids.flatMap((id) => {
         const hit = byId.get(id);
@@ -321,6 +371,7 @@ export const statsRoutes = new Hono<Env>()
         firstDay: dayKey(agg.first),
         lastDay: dayKey(agg.last),
         count: agg.count,
+        months: monthCounts(axis.map((r) => r.createdAt)),
       };
       return c.json({ today, rows: [row] });
     }
@@ -348,19 +399,39 @@ export const statsRoutes = new Hono<Env>()
         .innerJoin(tag, eq(b.tagId, tag.id))
         .where(and(eq(a.tagId, focusId), ownPosts))
         .groupBy(tag.id, tag.name, tag.norm);
-      const [aloneRaw, coocRaw] = await db.batch([aloneQuery, coocQuery]);
+      // Every link on every 苔片 carrying the stone: the stone's own links are
+      // its months, and each other tag's links are the 石×共起タグ row's — a
+      // 苔片 in here carries the stone by construction, so no self-join.
+      const stonePosts = db
+        .select({ postId: postTags.postId })
+        .from(postTags)
+        .where(eq(postTags.tagId, focusId));
+      const axisQuery = db
+        .select(axisColumns)
+        .from(postTags)
+        .innerJoin(post, eq(postTags.postId, post.id))
+        .where(and(ownPosts, inArray(post.id, stonePosts)));
+      const [aloneRaw, coocRaw, axis] = await db.batch([aloneQuery, coocQuery, axisQuery]);
 
       // Unknown id or a stone whose 苔片 are all gone: empty, not an error.
       const alone = buildTagSpans(aloneRaw)[0];
       if (alone === undefined) return c.json({ today, rows: [] });
 
+      const months = monthCountsByTag(axis);
       const rows: TimelineRow[] = [
-        { tags: [alone.tag], firstDay: alone.firstDay, lastDay: alone.lastDay, count: alone.count },
+        {
+          tags: [alone.tag],
+          firstDay: alone.firstDay,
+          lastDay: alone.lastDay,
+          count: alone.count,
+          months: months.get(alone.tag.id) ?? [],
+        },
         ...buildTagSpans(coocRaw).map((s) => ({
           tags: [alone.tag, s.tag],
           firstDay: s.firstDay,
           lastDay: s.lastDay,
           count: s.count,
+          months: months.get(s.tag.id) ?? [],
         })),
       ];
       return c.json({ today, rows });
@@ -369,18 +440,26 @@ export const statsRoutes = new Hono<Env>()
     // ---- default: every tag as one row, 開始日順 — the whole 年表. Archived
     // stones stay in on purpose: this chart is the history, not the composer's
     // suggestion list (tags route), and hiding them would erase read periods.
-    const raw = await db
+    const spanQuery = db
       .select(spanColumns)
       .from(postTags)
       .innerJoin(post, eq(postTags.postId, post.id))
       .innerJoin(tag, eq(postTags.tagId, tag.id))
       .where(ownPosts)
       .groupBy(tag.id, tag.name, tag.norm);
+    const axisQuery = db
+      .select(axisColumns)
+      .from(postTags)
+      .innerJoin(post, eq(postTags.postId, post.id))
+      .where(ownPosts);
+    const [raw, axis] = await db.batch([spanQuery, axisQuery]);
+    const months = monthCountsByTag(axis);
     const rows: TimelineRow[] = buildTagSpans(raw).map((s) => ({
       tags: [s.tag],
       firstDay: s.firstDay,
       lastDay: s.lastDay,
       count: s.count,
+      months: months.get(s.tag.id) ?? [],
     }));
     return c.json({ today, rows });
   })

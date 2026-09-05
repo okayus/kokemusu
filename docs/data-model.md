@@ -159,6 +159,9 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
     `HAVING COUNT(DISTINCT pt.tag_id) = n` で「全部付いた苔片」に絞り、外側で MIN/MAX/COUNT。
   - **フォーカス（1 タグで絞った共起タグ別の内訳）**: 共起クエリと同じ自己 JOIN を
     `a.tag_id = :focus` で絞って `b.tag_id` で GROUP BY し、各共起タグの MIN/MAX/COUNT を一括で取る。
+  - **活動月（月セグメント棒）**: 同じ JOIN から `created_at` を生のまま取り（SQL は MIN/MAX/COUNT のまま。
+    `strftime('%Y-%m', …)` は UTC 基準なので使わない）、コアの `bucketByMonth()`（`dayKey` の `YYYY-MM`）で
+    月に束ねる。span の集計と同じ batch（＝同じスナップショット）で読むので、行の件数と月ごとの件数の和が一致する。
 - **累積（積み上げ）**: 上記を日付昇順で累積和。
 - **ストリーク**: タグ別に投稿のある日付集合を取り、連続日数を計算（純粋関数でやる）。
 - **内訳**: 期間内のタグ別件数。
