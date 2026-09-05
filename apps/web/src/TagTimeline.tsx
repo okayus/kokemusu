@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type Ref } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type Ref } from "react";
 import type { TagSummary } from "./posts-api";
 import { getTimeline, type MonthCount, type TagTimeline, type TimelineRow } from "./stats-api";
 
@@ -109,14 +109,56 @@ export type AxisTick = { x: number; label: string };
 
 /** Domains up to ~13 months tick by month; wider ones by year. */
 const MONTH_TICKS_MAX_DAYS = 400;
-/** More labels than this and they collide: thin, keeping the most recent. */
-const MAX_TICKS = 8;
-/** The right edge belongs to the 今日 label — drop ticks that would sit under it. */
-const TICK_MAX_X = 92;
+/**
+ * Tick intervals in months, calendar-aligned: a month boundary survives at
+ * interval k when its month index (year × 12 + month) is a multiple of k —
+ * 1・3・6 か月, then 1・2・5・10・20・50 年. Round years (2020, 2025) are how a
+ * 年表's spine reads; counting back from the newest tick would drift with today.
+ */
+const TICK_LADDER = [1, 3, 6, 12, 24, 60, 120, 240, 600];
+/**
+ * Label widths at `.tl-axis text`'s 9px: a CJK glyph is its em (9px); a digit
+ * runs 4.5–5.7px across system-ui fonts (Yu Gothic UI · Segoe · SF · Roboto ·
+ * Noto Sans · DejaVu), so lean towards the wide end — a too-wide estimate
+ * thins one step early at a boundary, a too-narrow one eats the air between
+ * neighbours. An estimate, not a measurement: the labels are digits + 年 / 月 /
+ * 今日 only, and measuring would mean rendering before deciding what to render.
+ */
+const DIGIT_PX = 5.5;
+const GLYPH_PX = 9;
+const LABEL_GAP_PX = 8;
+const TODAY_LABEL = "今日";
 
-export function axisTicks(domain: Domain): AxisTick[] {
+export function labelPx(label: string): number {
+  let px = 0;
+  for (const ch of label) px += ch >= "0" && ch <= "9" ? DIGIT_PX : GLYPH_PX;
+  return px;
+}
+
+/** Left edge of a tick's label, in px, on an axis `axisPx` wide (labels are start-anchored at x). */
+const labelLeft = (tick: AxisTick, axisPx: number) => (tick.x / 100) * axisPx;
+
+/** True when no label runs into the one after it. */
+const labelsClear = (ticks: readonly AxisTick[], axisPx: number) =>
+  ticks.every((tick, i) => {
+    const prev = ticks[i - 1];
+    return (
+      prev === undefined ||
+      labelLeft(prev, axisPx) + labelPx(prev.label) + LABEL_GAP_PX <= labelLeft(tick, axisPx)
+    );
+  });
+
+/**
+ * The axis labels for an axis `axisPx` CSS pixels wide. Every month boundary
+ * in the domain is a candidate (a January wears its year in both modes — that
+ * is the 年表's spine). 今日 owns the right edge, so a label that would run
+ * into it yields; then the ladder coarsens the interval until no label runs
+ * into its neighbour. An unknown width (0) leaves only 今日.
+ */
+export function axisTicks(domain: Domain, axisPx: number): AxisTick[] {
   const total = dayIndex(domain.to) - dayIndex(domain.from) + 1;
-  const monthly = total <= MONTH_TICKS_MAX_DAYS;
+  const finest = total <= MONTH_TICKS_MAX_DAYS ? 1 : 12;
+  const todayLeft = axisPx - labelPx(TODAY_LABEL) - LABEL_GAP_PX;
   // Walk the 1sts from the first month boundary at or after `from`.
   let y = +domain.from.slice(0, 4);
   let m = +domain.from.slice(5, 7);
@@ -127,14 +169,14 @@ export function axisTicks(domain: Domain): AxisTick[] {
       y += 1;
     }
   }
-  const ticks: AxisTick[] = [];
+  const candidates: (AxisTick & { month: number })[] = [];
   for (;;) {
     const day = `${y}-${String(m).padStart(2, "0")}-01`;
     if (day > domain.to) break;
-    if (monthly || m === 1) {
-      const x = round3(((dayIndex(day) - dayIndex(domain.from)) / total) * 100);
-      // A January tick names the year in both modes — that is the 年表's spine.
-      if (x <= TICK_MAX_X) ticks.push({ x, label: m === 1 ? `${y}年` : `${m}月` });
+    const x = round3(((dayIndex(day) - dayIndex(domain.from)) / total) * 100);
+    const label = m === 1 ? `${y}年` : `${m}月`;
+    if ((x / 100) * axisPx + labelPx(label) <= todayLeft) {
+      candidates.push({ x, label, month: monthIndex(day) });
     }
     m += 1;
     if (m === 13) {
@@ -142,10 +184,12 @@ export function axisTicks(domain: Domain): AxisTick[] {
       y += 1;
     }
   }
-  if (ticks.length <= MAX_TICKS) return ticks;
-  // Thin from the END so the recent years always keep their labels.
-  const step = Math.ceil(ticks.length / MAX_TICKS);
-  return ticks.filter((_, i) => (ticks.length - 1 - i) % step === 0);
+  for (const interval of TICK_LADDER) {
+    if (interval < finest) continue;
+    const kept = candidates.filter((t) => t.month % interval === 0);
+    if (labelsClear(kept, axisPx)) return kept.map(({ x, label }) => ({ x, label }));
+  }
+  return [];
 }
 
 /** 「N 片 · d日/片」 — count plus density (期間 ÷ 件数), the "細く長く vs 太く短く" discriminator. */
@@ -229,17 +273,7 @@ export function TimelineChart(props: {
   const domain = chartDomain(props.rows, props.today);
   return (
     <div className="tl-grid">
-      {/* Decorative: every tick fact is recoverable from the bars' own labels. */}
-      <svg className="tl-axis" aria-hidden="true">
-        {axisTicks(domain).map((t) => (
-          <text key={t.x} x={`${t.x}%`} y="10">
-            {t.label}
-          </text>
-        ))}
-        <text x="100%" y="10" textAnchor="end">
-          今日
-        </text>
-      </svg>
+      <TimelineAxis domain={domain} />
       {/* role="list": list-style is stripped for the grid, Safari drops list semantics without it. */}
       <ol className="tl-rows" role="list">
         {props.rows.map((row) => (
@@ -260,6 +294,46 @@ export function TimelineChart(props: {
         </datalist>
       )}
     </div>
+  );
+}
+
+/**
+ * Before the first measurement — and in static markup, where no layout runs —
+ * the axis is laid out for this width, a typical desktop bar column.
+ */
+const AXIS_NOMINAL_PX = 320;
+
+/**
+ * Decorative (every tick fact is recoverable from the bars' own labels), and
+ * measured rather than styled: how many labels fit is a function of the
+ * column's pixel width, which only the browser knows (subgrid column, chip
+ * widths, viewport), and no container query can count labels. useLayoutEffect
+ * so the first paint already wears the measured set; a ResizeObserver for
+ * every later change (viewport, a picker form widening the chip column).
+ */
+function TimelineAxis(props: { domain: Domain }) {
+  const ref = useRef<SVGSVGElement>(null);
+  const [axisPx, setAxisPx] = useState(AXIS_NOMINAL_PX);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el === null) return;
+    const measure = () => setAxisPx(el.getBoundingClientRect().width);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <svg ref={ref} className="tl-axis" aria-hidden="true">
+      {axisTicks(props.domain, axisPx).map((t) => (
+        <text key={t.x} x={`${t.x}%`} y="10">
+          {t.label}
+        </text>
+      ))}
+      <text x="100%" y="10" textAnchor="end">
+        {TODAY_LABEL}
+      </text>
+    </svg>
   );
 }
 
