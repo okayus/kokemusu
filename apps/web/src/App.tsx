@@ -13,6 +13,15 @@ import { clearDraft, loadDraft, saveDraft } from "./draft";
 import { HeatmapSection } from "./Heatmap";
 import { Markdown } from "./markdown";
 import {
+  dayInPeriod,
+  periodFromFields,
+  periodKey,
+  periodLabel,
+  PRESETS,
+  presetPeriod,
+  type Period,
+} from "./period";
+import {
   createPost,
   deletePost,
   listPosts,
@@ -216,6 +225,11 @@ function filterQuery(filter: TagSummary[]): { tag?: string; tags?: string[] } {
   return filter.length === 1 ? { tag: first.name } : { tags: filter.map((t) => t.id) };
 }
 
+/** Everything the feed is narrowed by, in wire form: stones and the period AND together. */
+function feedQuery(filter: TagSummary[], period: Period | null) {
+  return { ...filterQuery(filter), ...(period ?? {}) };
+}
+
 /** Composer + timeline: the daily surface. Owns the loaded page of 苔片. */
 function Garden(props: { onSessionLost: () => void }) {
   const [posts, setPosts] = useState<PostItem[] | null>(null);
@@ -233,6 +247,12 @@ function Garden(props: { onSessionLost: () => void }) {
   // 投稿一覧のタグ絞り込み (features.md §3) — the landing of three 導線: a
   // 苔片's own chip (1 石), §8 フォーカスの「投稿一覧へ」(1 石), §6 の橋 (2 石).
   const [postFilter, setPostFilter] = useState<TagSummary[]>([]);
+  // 期間の絞り込み (features.md §3): the reader's own 導線 — a preset or a
+  // custom range from the 期間で絞る form — and it ANDs with the stones.
+  const [postPeriod, setPostPeriod] = useState<Period | null>(null);
+  // Server-decided today (JST), refreshed with every first page: the anchor
+  // of 今日 / 今週 / 今月 / 今年, so the presets cut where the server cuts.
+  const [today, setToday] = useState<string | null>(null);
   const feedRef = useRef<HTMLElement | null>(null);
 
   const { onSessionLost } = props;
@@ -245,11 +265,12 @@ function Garden(props: { onSessionLost: () => void }) {
     [onSessionLost],
   );
 
-  // The filter moved: drop the shown page before this render's output so stale
-  // 苔片 never sit under the new chips (the adjust-state-while-rendering
-  // pattern, same as the 年表's focus). The epoch keeps a slow もっと遡る
-  // answer from appending the old filter's page under the new one.
-  const filterKey = rowKey(postFilter);
+  // The filter moved (stones or period): drop the shown page before this
+  // render's output so stale 苔片 never sit under the new chips (the
+  // adjust-state-while-rendering pattern, same as the 年表's focus). The epoch
+  // keeps a slow もっと遡る answer from appending the old filter's page under
+  // the new one.
+  const filterKey = `${rowKey(postFilter)}|${periodKey(postPeriod)}`;
   const [shownFilterKey, setShownFilterKey] = useState(filterKey);
   const feedEpoch = useRef(0);
   if (shownFilterKey !== filterKey) {
@@ -265,11 +286,12 @@ function Garden(props: { onSessionLost: () => void }) {
 
   useEffect(() => {
     let cancelled = false;
-    listPosts(filterQuery(postFilter))
+    listPosts(feedQuery(postFilter, postPeriod))
       .then((timeline) => {
         if (cancelled) return;
         setPosts(timeline.posts);
         setNextCursor(timeline.nextCursor);
+        setToday(timeline.today);
       })
       .catch((e) => {
         if (!cancelled) fault(e);
@@ -277,13 +299,19 @@ function Garden(props: { onSessionLost: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [postFilter, fault]);
+  }, [postFilter, postPeriod, fault]);
 
   const handleCreated = (created: PostItem) => {
     setError(null);
-    // A 苔片 not carrying every filtered stone belongs off-screen — the moss
-    // still darkens below, which is the visible receipt that it landed.
-    if (postFilter.every((f) => created.tags.some((t) => t.id === f.id))) {
+    // A 苔片 not carrying every filtered stone, or stacked on a day outside
+    // the period (its day is the server's call — a post at 00:01 belongs to
+    // the new day even if the chip was set at 23:59), belongs off-screen —
+    // the moss still darkens below, which is the visible receipt that it
+    // landed.
+    if (
+      postFilter.every((f) => created.tags.some((t) => t.id === f.id)) &&
+      dayInPeriod(created.day, postPeriod)
+    ) {
       setPosts((current) => [created, ...(current ?? [])]);
     }
     setMossVersion((v) => v + 1);
@@ -328,7 +356,10 @@ function Garden(props: { onSessionLost: () => void }) {
     const epoch = feedEpoch.current;
     setLoadingMore(true);
     try {
-      const timeline = await listPosts({ cursor: nextCursor, ...filterQuery(postFilter) });
+      const timeline = await listPosts({
+        cursor: nextCursor,
+        ...feedQuery(postFilter, postPeriod),
+      });
       if (epoch === feedEpoch.current) {
         setPosts((current) => [...(current ?? []), ...timeline.posts]);
         setNextCursor(timeline.nextCursor);
@@ -347,6 +378,13 @@ function Garden(props: { onSessionLost: () => void }) {
     setPostFilter((current) => (rowKey(current) === rowKey(tags) ? current : tags));
     feedRef.current?.scrollIntoView({ block: "start" });
   };
+
+  // Chips and the live announcement share one wording: stones by name, the
+  // period as its chip text (a whole month reads as the month).
+  const narrowedBy = [
+    ...postFilter.map((t) => `「${t.name}」`),
+    ...(postPeriod === null ? [] : [periodLabel(postPeriod)]),
+  ];
 
   return (
     <>
@@ -387,11 +425,9 @@ function Garden(props: { onSessionLost: () => void }) {
         {/* The one polite live seat of the feed. Rendered before any filter
             exists — a region must already be in the tree when its text lands. */}
         <p className="visually-hidden" role="status">
-          {postFilter.length > 0
-            ? `${postFilter.map((t) => `「${t.name}」`).join("と")}で絞り込み中`
-            : ""}
+          {narrowedBy.length > 0 ? `${narrowedBy.join("と")}で絞り込み中` : ""}
         </p>
-        {postFilter.length > 0 && (
+        {narrowedBy.length > 0 && (
           <div className="feed-filter">
             <span className="feed-filter-label">絞り込み:</span>
             {postFilter.map((t) => (
@@ -405,14 +441,43 @@ function Garden(props: { onSessionLost: () => void }) {
                 {t.name} ×
               </button>
             ))}
-            <button type="button" className="feed-filter-clear" onClick={() => setPostFilter([])}>
+            {postPeriod !== null && (
+              <button
+                type="button"
+                className="tag-chip period-chip"
+                aria-label="期間の絞り込みを外す"
+                onClick={() => setPostPeriod(null)}
+              >
+                {periodLabel(postPeriod)} ×
+              </button>
+            )}
+            <button
+              type="button"
+              className="feed-filter-clear"
+              onClick={() => {
+                setPostFilter([]);
+                setPostPeriod(null);
+              }}
+            >
               解除
             </button>
           </div>
         )}
+        {/* Closed is the everyday face of the feed; the form only unfolds on
+            request. Keyed on the period so an applied range shows in the
+            fields and a removed chip empties them. */}
+        <details className="feed-period">
+          <summary>期間で絞る</summary>
+          <PeriodForm
+            key={periodKey(postPeriod)}
+            period={postPeriod}
+            today={today}
+            onChange={setPostPeriod}
+          />
+        </details>
         <Timeline
           posts={posts}
-          filtered={postFilter.length > 0}
+          filtered={narrowedBy.length > 0}
           onTagTap={(t) => showPosts([t])}
           onUpdated={handleUpdated}
           onDeleted={handleDeleted}
@@ -425,6 +490,78 @@ function Garden(props: { onSessionLost: () => void }) {
         )}
       </section>
     </>
+  );
+}
+
+/**
+ * 期間で絞る (features.md §3): 日・週・月・年 as one-tap presets over the server's
+ * today, and a custom range on two native date fields. `min` / `max` are
+ * cross-set, so an inverted range is the browser's own rangeUnderflow /
+ * rangeOverflow — the form never submits it and no request is made; the
+ * server's check is the security half. Either field may stay empty (それ以降
+ * / それ以前); both empty = no period, which reads as 解除.
+ */
+function PeriodForm(props: {
+  period: Period | null;
+  today: string | null;
+  onChange: (next: Period | null) => void;
+}) {
+  // Controlled only so each field can bound the other; the values are the
+  // fields' own `YYYY-MM-DD` — never parsed into a Date on this side.
+  const [from, setFrom] = useState(props.period?.from ?? "");
+  const [to, setTo] = useState(props.period?.to ?? "");
+  const { today } = props;
+  return (
+    <form
+      className="feed-period-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        props.onChange(periodFromFields(from, to));
+      }}
+    >
+      <fieldset className="feed-period-presets">
+        <legend className="visually-hidden">よく使う期間</legend>
+        {PRESETS.map((p) => (
+          <button
+            key={p.kind}
+            type="button"
+            disabled={today === null}
+            onClick={() => {
+              if (today !== null) props.onChange(presetPeriod(p.kind, today));
+            }}
+          >
+            {p.label}
+          </button>
+        ))}
+      </fieldset>
+      <fieldset className="feed-period-range">
+        <legend className="visually-hidden">カスタム範囲</legend>
+        <div className="feed-period-field">
+          <label htmlFor="period-from">開始日</label>
+          <input
+            type="date"
+            id="period-from"
+            name="from"
+            value={from}
+            max={to || undefined}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+        </div>
+        <div className="feed-period-field">
+          <label htmlFor="period-to">終了日</label>
+          <input
+            type="date"
+            id="period-to"
+            name="to"
+            value={to}
+            min={from || undefined}
+            onChange={(e) => setTo(e.target.value)}
+          />
+        </div>
+        <button type="submit">絞る</button>
+      </fieldset>
+      <p className="hint">片方だけでも絞れます（開始日だけ = それ以降、終了日だけ = それ以前）。</p>
+    </form>
   );
 }
 

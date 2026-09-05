@@ -12,10 +12,13 @@ export type PostItem = {
   bodyFormat: string;
   createdAt: number;
   updatedAt: number;
+  /** The JST 「日」 this 苔片 stacks into (`YYYY-MM-DD`) — server-decided; the client only compares. */
+  day: string;
   tags: TagSummary[];
 };
 
-export type Timeline = { posts: PostItem[]; nextCursor: string | null };
+/** `today` is server-decided (JST) like the 年表's axis edge — the anchor of the period presets. */
+export type Timeline = { posts: PostItem[]; nextCursor: string | null; today: string };
 
 export const createPost = (input: { body: string; tags?: string[] }): Promise<PostItem> =>
   postJson("/api/posts", input);
@@ -38,13 +41,24 @@ export const deletePost = (id: string): Promise<Record<string, never>> =>
 
 // `tag` = one tag by name, `tags` = a 2+ tag AND set by id (same wire 規約 as
 // the 年表's deep-dive rows) — the server rejects a request carrying both.
+// `from` / `to` = inclusive JST days (`YYYY-MM-DD`, the 総草's window form),
+// either half alone allowed; the server rejects an inverted pair.
 export function listPosts(
-  opts: { cursor?: string; tag?: string; tags?: string[]; limit?: number } = {},
+  opts: {
+    cursor?: string;
+    tag?: string;
+    tags?: string[];
+    from?: string;
+    to?: string;
+    limit?: number;
+  } = {},
 ): Promise<Timeline> {
   const q = new URLSearchParams();
   if (opts.cursor !== undefined) q.set("cursor", opts.cursor);
   if (opts.tag !== undefined) q.set("tag", opts.tag);
   if (opts.tags !== undefined) q.set("tags", opts.tags.join(","));
+  if (opts.from !== undefined) q.set("from", opts.from);
+  if (opts.to !== undefined) q.set("to", opts.to);
   if (opts.limit !== undefined) q.set("limit", String(opts.limit));
   const qs = q.toString();
   return request(`/api/posts${qs ? `?${qs}` : ""}`);

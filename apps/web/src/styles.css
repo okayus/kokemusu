@@ -571,6 +571,62 @@ textarea {
   border-radius: 999px;
 }
 
+/* 期間で絞る: 閉じたままが日常の姿。開くとプリセット 4 つとネイティブ date 2 欄。 */
+.feed-period {
+  margin-block-start: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.feed-period summary {
+  cursor: pointer;
+  color: var(--quiet);
+}
+
+.feed-period-form {
+  display: grid;
+  gap: 0.75rem;
+  margin-block-start: 0.5rem;
+}
+
+.feed-period-presets,
+.feed-period-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+  min-inline-size: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.feed-period-presets button {
+  min-height: 36px;
+  padding: 0 0.9rem;
+  font-size: 0.85rem;
+  border-radius: 999px;
+}
+
+.feed-period-field {
+  flex: 1 1 10rem;
+}
+
+.feed-period-field label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--quiet);
+  margin-block-end: 0.25rem;
+}
+
+/* テキストフィールド向けの 48px を少し詰める（フォーム全体が絞り込みバーの脇役なので）。 */
+.feed-period-range :is(input, button) {
+  min-height: 40px;
+}
+
+.feed-period .hint {
+  margin: 0;
+}
+
 .posts {
   list-style: none;
   padding: 0;

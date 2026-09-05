@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { app } from "../index";
 import { TEST_ORIGIN, testEnv } from "../test-support";
-import { createPostSchema, listPostsQuerySchema } from "./posts";
+import { createPostSchema, listPostsQuerySchema, resolvePeriod } from "./posts";
+
+const HOUR = 3_600_000;
+
+/** The instant a JST wall-clock reading names. JST is UTC+9 flat — no DST, ever. */
+const jst = (y: number, mo: number, d: number, h = 0, mi = 0) =>
+  Date.UTC(y, mo - 1, d, h, mi) - 9 * HOUR;
 
 // The Node harness has no D1 (test-support.ts), so these route tests stay on
 // the paths that fail BEFORE the database: mount order, CSRF, the session
@@ -190,5 +196,68 @@ describe("listPostsQuerySchema", () => {
 
   it("rejects tag and tags together — a mixed request has no meaning", () => {
     expect(listPostsQuerySchema.safeParse({ tag: "苔", tags: "id-a,id-b" }).success).toBe(false);
+  });
+
+  it("accepts a period as calendar days — either half alone, or both", () => {
+    expect(listPostsQuerySchema.safeParse({ from: "2026-09-01" }).success).toBe(true);
+    expect(listPostsQuerySchema.safeParse({ to: "2026-09-30" }).success).toBe(true);
+    expect(
+      listPostsQuerySchema.safeParse({ from: "2026-09-01", to: "2026-09-30" }).success,
+    ).toBe(true);
+    // One day is a range too, and the period composes with every other filter.
+    expect(
+      listPostsQuerySchema.safeParse({ from: "2026-09-05", to: "2026-09-05" }).success,
+    ).toBe(true);
+    expect(
+      listPostsQuerySchema.safeParse({
+        cursor: "abc",
+        tags: "id-a,id-b",
+        from: "2026-09-01",
+        to: "2026-09-30",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a day the calendar does not have, or one not spelled YYYY-MM-DD", () => {
+    expect(listPostsQuerySchema.safeParse({ from: "2026-02-30" }).success).toBe(false);
+    expect(listPostsQuerySchema.safeParse({ to: "2026-13-01" }).success).toBe(false);
+    expect(listPostsQuerySchema.safeParse({ from: "2026-9-1" }).success).toBe(false);
+    expect(listPostsQuerySchema.safeParse({ from: "" }).success).toBe(false);
+    expect(listPostsQuerySchema.safeParse({ to: "2026-09-01T00:00:00Z" }).success).toBe(false);
+  });
+
+  it("rejects an inverted period", () => {
+    expect(
+      listPostsQuerySchema.safeParse({ from: "2026-09-30", to: "2026-09-01" }).success,
+    ).toBe(false);
+  });
+});
+
+describe("resolvePeriod — inclusive JST days become a half-open created_at window", () => {
+  it("cuts both ends at JST midnight: the day after `to` is excluded from its first ms", () => {
+    const bounds = resolvePeriod({ from: "2026-09-01", to: "2026-09-30" });
+    expect(bounds).toEqual({ startMs: jst(2026, 9, 1), endMs: jst(2026, 10, 1) });
+    // 00:30 JST on the 1st is still Aug 31 in UTC — SQLite's date() would file
+    // it under August; this window opened 30 minutes before it.
+    const firstNight = jst(2026, 9, 1, 0, 30);
+    expect(new Date(firstNight).toISOString()).toBe("2026-08-31T15:30:00.000Z");
+    expect(bounds?.startMs).toBeLessThanOrEqual(firstNight);
+  });
+
+  it("leaves an absent half unbounded", () => {
+    expect(resolvePeriod({ from: "2026-09-01" })).toEqual({
+      startMs: jst(2026, 9, 1),
+      endMs: undefined,
+    });
+    expect(resolvePeriod({ to: "2026-09-01" })).toEqual({
+      startMs: undefined,
+      endMs: jst(2026, 9, 2),
+    });
+    expect(resolvePeriod({})).toEqual({ startMs: undefined, endMs: undefined });
+  });
+
+  it("refuses the last day of the 4-digit calendar — the day after it has no key", () => {
+    expect(resolvePeriod({ to: "9999-12-31" })).toBeNull();
+    expect(resolvePeriod({ from: "9999-12-31" })).not.toBeNull();
   });
 });
