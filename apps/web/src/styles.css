@@ -399,18 +399,30 @@ dialog.compose h2 {
 
 .tl-head {
   display: flex;
+  /* Narrow screens: the focus controls drop under the heading rather than
+     squeezing 年表 into 年／表 (390px の目視). */
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.25rem 1rem;
+}
+
+.tl-head h2 {
+  white-space: nowrap;
 }
 
 .tl-focus {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.4rem 0.6rem;
   font-size: 0.85rem;
   color: var(--quiet);
   margin: 0;
+}
+
+.tl-focus button {
+  white-space: nowrap;
 }
 
 .tl-focus button {
@@ -496,13 +508,19 @@ dialog.compose h2 {
 
 .tl-picker input {
   min-height: 28px;
+  /* The picker sits in the fit-content(11rem) stone column: the field is the
+     part that gives, so 足す keeps its one line (#40 の目視で 2 行に折れていた). */
   inline-size: 9rem;
+  min-inline-size: 0;
+  flex: 1 1 auto;
   padding: 0.1rem 0.5rem;
   font-size: 0.8rem;
 }
 
 .tl-picker button {
   min-height: 28px;
+  flex-shrink: 0;
+  white-space: nowrap;
   padding: 0 0.6rem;
   font-size: 0.8rem;
 }
