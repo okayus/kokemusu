@@ -9,7 +9,15 @@ import {
   type AuthUser,
   type CredentialSummary,
 } from "./auth-api";
-import { clearDraft, loadDraft, saveDraft } from "./draft";
+import {
+  BodyField,
+  ComposeDialog,
+  submitOnCmdEnter,
+  tagsField,
+  useComposeShortcut,
+  type ComposeRequest,
+} from "./Compose";
+import { clearDraft } from "./draft";
 import { HeatmapSection } from "./Heatmap";
 import { Markdown } from "./markdown";
 import {
@@ -22,7 +30,6 @@ import {
   type Period,
 } from "./period";
 import {
-  createPost,
   deletePost,
   listPosts,
   listTags,
@@ -44,14 +51,6 @@ import { useAuth } from "./useAuth";
 
 const dateFmt = new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" });
 const fmtDate = (ms: number | null) => (ms === null ? "—" : dateFmt.format(new Date(ms)));
-
-/** ⌘/Ctrl+Enter submits the surrounding form (composer と編集フォームで共用). */
-const submitOnCmdEnter = (e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
-  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-    e.preventDefault();
-    e.currentTarget.form?.requestSubmit();
-  }
-};
 
 export function App() {
   const auth = useAuth();
@@ -184,20 +183,44 @@ function AuthedView(props: {
   onSessionLost: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  // The 積む dialog's request lives here because two places raise it: the bar's
+  // 積む and the `n` key (resume the draft as it is) up here, and a 苔片's
+  // 同じ石に積む (that 苔片's stones seeded) down in the feed. Garden renders it.
+  const [compose, setCompose] = useState<ComposeRequest | null>(null);
+  // The receipt after a post — 「積みました」, and where it went when the feed
+  // cannot show it — hangs from the sticky bar so it is in view wherever the
+  // reader was. It goes away on its own; nothing else moves.
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (notice === null) return;
+    const timer = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  const openCompose = useCallback(() => setCompose({ seedTags: null }), []);
+  useComposeShortcut(openCompose);
   return (
     <main className="shell">
       <header className="bar">
         <h1>苔むす</h1>
-        <button
-          type="button"
-          onClick={() => {
-            // A shared machine keeps no half-written 苔片 after logout.
-            clearDraft();
-            void props.onLogout().catch((e) => setError(describeAuthError(e)));
-          }}
-        >
-          ログアウト
-        </button>
+        <div className="bar-actions">
+          <button type="button" className="primary" onClick={openCompose}>
+            積む
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              // A shared machine keeps no half-written 苔片 after logout.
+              clearDraft();
+              void props.onLogout().catch((e) => setError(describeAuthError(e)));
+            }}
+          >
+            ログアウト
+          </button>
+        </div>
+        {/* Always in the tree: a live region must exist before its text lands. */}
+        <p role="status" className={notice === null ? "bar-notice" : "bar-notice on"}>
+          {notice ?? ""}
+        </p>
       </header>
       <p className="quiet">{props.user.displayName} の庭。</p>
       {error && (
@@ -205,7 +228,13 @@ function AuthedView(props: {
           {error}
         </p>
       )}
-      <Garden onSessionLost={props.onSessionLost} />
+      <Garden
+        onSessionLost={props.onSessionLost}
+        compose={compose}
+        onCompose={setCompose}
+        onComposeClose={() => setCompose(null)}
+        onNotice={setNotice}
+      />
       <details className="panel">
         <summary>パスキー（端末）</summary>
         <DevicesSection />
@@ -230,8 +259,19 @@ function feedQuery(filter: TagSummary[], period: Period | null) {
   return { ...filterQuery(filter), ...(period ?? {}) };
 }
 
-/** Composer + timeline: the daily surface. Owns the loaded page of 苔片. */
-function Garden(props: { onSessionLost: () => void }) {
+/**
+ * The garden: 苔（総草）→ 年表 → 石のつながり → 投稿一覧, top to bottom (features.md
+ * §3, 2026-09-05 — the composer left the top for a dialog, so the page is for
+ * looking back; the feed grows downward with もっと遡る, so it stays last).
+ * Owns the loaded page of 苔片 and renders the 積む dialog when asked.
+ */
+function Garden(props: {
+  onSessionLost: () => void;
+  compose: ComposeRequest | null;
+  onCompose: (request: ComposeRequest) => void;
+  onComposeClose: () => void;
+  onNotice: (text: string) => void;
+}) {
   const [posts, setPosts] = useState<PostItem[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [tagOptions, setTagOptions] = useState<TagSummary[]>([]);
@@ -306,14 +346,19 @@ function Garden(props: { onSessionLost: () => void }) {
     // A 苔片 not carrying every filtered stone, or stacked on a day outside
     // the period (its day is the server's call — a post at 00:01 belongs to
     // the new day even if the chip was set at 23:59), belongs off-screen —
-    // the moss still darkens below, which is the visible receipt that it
-    // landed.
-    if (
+    // the moss still darkens, which is the visible receipt that it landed,
+    // and the bar says where it went.
+    const shown =
       postFilter.every((f) => created.tags.some((t) => t.id === f.id)) &&
-      dayInPeriod(created.day, postPeriod)
-    ) {
+      dayInPeriod(created.day, postPeriod);
+    if (shown) {
       setPosts((current) => [created, ...(current ?? [])]);
+      // The dialog has closed and focus is back on its invoker — the bar, or a
+      // 苔片 somewhere down the feed — so the new 苔片 at the head of the list
+      // is usually off-screen: travel there, the 導線's own movement.
+      feedRef.current?.scrollIntoView({ block: "start" });
     }
+    props.onNotice(shown ? "積みました" : "積みました（いまの絞り込みの外）");
     setMossVersion((v) => v + 1);
     // The post may have minted new stones — refresh the completion list.
     if (created.tags.length > 0) {
@@ -399,11 +444,21 @@ function Garden(props: { onSessionLost: () => void }) {
 
   return (
     <>
-      <Composer
-        tagOptions={tagOptions}
-        onCreated={handleCreated}
-        onSessionLost={props.onSessionLost}
-      />
+      {/* One completion list for every tag field — the dialog's and the edit
+          forms' — mounted with the garden rather than with the dialog. */}
+      <datalist id="tag-options">
+        {tagOptions.map((t) => (
+          <option key={t.id} value={t.name} />
+        ))}
+      </datalist>
+      {props.compose !== null && (
+        <ComposeDialog
+          seedTags={props.compose.seedTags}
+          onCreated={handleCreated}
+          onClose={props.onComposeClose}
+          onSessionLost={props.onSessionLost}
+        />
+      )}
       {error && (
         <p role="alert" className="error">
           {error}
@@ -490,6 +545,7 @@ function Garden(props: { onSessionLost: () => void }) {
           posts={posts}
           filtered={narrowedBy.length > 0}
           onTagTap={(t) => showPosts([t])}
+          onSameStones={(tags) => props.onCompose({ seedTags: tagsField(tags) })}
           onUpdated={handleUpdated}
           onDeleted={handleDeleted}
           onSessionLost={props.onSessionLost}
@@ -576,145 +632,11 @@ function PeriodForm(props: {
   );
 }
 
-/**
- * 本文の入力欄 — textarea ＋ Markdown の案内 ＋ プレビュー。コンポーザと編集フォームで
- * 共有する（プレビューは苔片の表示と同じ描画器を通るので、見えるものが積まれるもの）。
- */
-function BodyField(props: {
-  id: string;
-  label: string;
-  placeholder?: string;
-  value: string;
-  onChange: (next: string) => void;
-}) {
-  // プレビューは開いている間だけ描く。閉じたまま毎打鍵で字句解析しないためであり、
-  // 隠れた本文の写しを DOM に残さないためでもある（削除確認ダイアログと同じ理由）。
-  const [open, setOpen] = useState(false);
-  const hintId = `${props.id}-hint`;
-  return (
-    <div className="field">
-      <label htmlFor={props.id}>{props.label}</label>
-      <textarea
-        id={props.id}
-        name="body"
-        required
-        maxLength={20000}
-        rows={3}
-        value={props.value}
-        placeholder={props.placeholder}
-        aria-describedby={hintId}
-        onChange={(e) => props.onChange(e.target.value)}
-        onKeyDown={submitOnCmdEnter}
-      />
-      <p className="hint" id={hintId}>
-        Markdown で書けます（見出し・箇条書き・コード・リンク）。
-      </p>
-      <details className="md-preview" onToggle={(e) => setOpen(e.currentTarget.open)}>
-        <summary>プレビュー</summary>
-        {open &&
-          (props.value.trim() === "" ? (
-            <p className="quiet">まだ何も書かれていません。</p>
-          ) : (
-            <Markdown source={props.value} className="md" />
-          ))}
-      </details>
-    </div>
-  );
-}
-
-function Composer(props: {
-  tagOptions: TagSummary[];
-  onCreated: (created: PostItem) => void;
-  onSessionLost: () => void;
-}) {
-  // The draft survives reloads and failed submits (plans PR4: localStorage 退避).
-  const [draft] = useState(loadDraft);
-  const [body, setBody] = useState(draft?.body ?? "");
-  const [tagField, setTagField] = useState(draft?.tags ?? "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const update = (nextBody: string, nextTags: string) => {
-    setBody(nextBody);
-    setTagField(nextTags);
-    saveDraft({ body: nextBody, tags: nextTags });
-  };
-
-  const submit = async () => {
-    if (busy) return;
-    if (body.trim().length === 0) {
-      setError("本文が空です。");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const created = await createPost({ body, tags: splitTagField(tagField) });
-      // The body is spent; the tags usually carry over to the next 苔片.
-      update("", tagField);
-      props.onCreated(created);
-    } catch (e) {
-      // The entry stays in the fields (and in the saved draft) on failure.
-      if (isApiError(e) && e.status === 401) props.onSessionLost();
-      else setError(describeApiError(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <form
-      className="composer"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void submit();
-      }}
-    >
-      <BodyField
-        id="post-body"
-        label="いまの苔片"
-        placeholder="なにを積む？"
-        value={body}
-        onChange={(next) => update(next, tagField)}
-      />
-      <div className="field">
-        <label htmlFor="post-tags">タグ（コンマ区切り・任意）</label>
-        <input
-          id="post-tags"
-          name="tags"
-          list="tag-options"
-          autoComplete="off"
-          maxLength={500}
-          value={tagField}
-          placeholder="typescript, 読書"
-          onChange={(e) => update(body, e.target.value)}
-          onKeyDown={submitOnCmdEnter}
-        />
-        <datalist id="tag-options">
-          {props.tagOptions.map((t) => (
-            <option key={t.id} value={t.name} />
-          ))}
-        </datalist>
-      </div>
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
-      <div className="composer-actions">
-        <button type="submit" className="primary" disabled={busy}>
-          積む
-        </button>
-        <span className="hint">⌘/Ctrl + Enter でも積めます</span>
-      </div>
-    </form>
-  );
-}
-
 function Timeline(props: {
   posts: PostItem[] | null;
   filtered: boolean;
   onTagTap: (tag: TagSummary) => void;
+  onSameStones: (tags: TagSummary[]) => void;
   onUpdated: (updated: PostItem) => void;
   onDeleted: (id: string) => void;
   onSessionLost: () => void;
@@ -738,6 +660,7 @@ function Timeline(props: {
           key={p.id}
           post={p}
           onTagTap={props.onTagTap}
+          onSameStones={props.onSameStones}
           onUpdated={props.onUpdated}
           onDeleted={props.onDeleted}
           onSessionLost={props.onSessionLost}
@@ -756,6 +679,7 @@ function Timeline(props: {
 function PostEntry(props: {
   post: PostItem;
   onTagTap: (tag: TagSummary) => void;
+  onSameStones: (tags: TagSummary[]) => void;
   onUpdated: (updated: PostItem) => void;
   onDeleted: (id: string) => void;
   onSessionLost: () => void;
@@ -916,6 +840,13 @@ function PostEntry(props: {
         </p>
       )}
       <div className="post-actions">
+        {/* 同じ石に積む (CONTEXT.md): only its stones travel, and only when it
+            has some — a bare 苔片 would just be 積む again. */}
+        {p.tags.length > 0 && (
+          <button type="button" disabled={busy} onClick={() => props.onSameStones(p.tags)}>
+            同じ石に積む
+          </button>
+        )}
         <button
           type="button"
           disabled={busy}
