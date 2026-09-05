@@ -16,7 +16,8 @@ const series = (from: string, counts: number[]): Heatmap => {
   });
   const last = days[days.length - 1];
   if (last === undefined) throw new Error("series needs at least one day");
-  return { from, to: last.day, days };
+  // Every fixture 苔片 is a single day, so the server's total is the cells' sum.
+  return { from, to: last.day, total: counts.reduce((sum, c) => sum + c, 0), days };
 };
 
 const render = (data: Heatmap) =>

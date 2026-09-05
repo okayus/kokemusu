@@ -1,12 +1,17 @@
-// The day axis (CONTEXT.md 「日」): the unit 苔片 stack into, and one cell of the
-// heatmap. A 苔片 stores `created_at` — epoch ms, a UTC instant — and the day it
-// falls in is decided here, in Asia/Tokyo, and nowhere else.
+// The day axis (CONTEXT.md 「日」, ADR-0005): the unit 苔片 stack into, and one
+// cell of the heatmap. A 苔片 stores the days it was there — `first_day` and
+// `last_day`, JST calendar days as `YYYY-MM-DD` text — so on the read side a
+// day is compared, enumerated and bucketed as a string and no zone is involved.
+// The zone enters exactly once, on the write side: `dayKey(now)` is the day a
+// 苔片 stacked "now" lands on, decided here, in Asia/Tokyo, and nowhere else.
 //
 // Why not in SQL: `date(created_at / 1000, 'unixepoch')` cuts days in UTC, so
-// every 苔片 written before 09:00 JST would light the previous day's cell.
-// Adding a fixed `+9 hours` instead only hides that until the constant moves.
-// Both are wrong the same way — a day is a calendar fact in a time zone — so
-// the conversion goes through Intl, from the zone, in one place.
+// every 苔片 written before 09:00 JST would land on the previous day. Adding a
+// fixed `+9 hours` instead only hides that until the constant moves. Both are
+// wrong the same way — a day is a calendar fact in a time zone — so the
+// conversion goes through Intl, from the zone, in one place. (Migration 0004
+// used the `+9h` form exactly once, to backfill rows that all predate the
+// axis: one statement over a zone with no DST, not a pattern.)
 //
 // Everything here is pure: no clock, no I/O, same arguments -> same result.
 // `tz` is a parameter (the app always passes APP_TZ, and `user` has no TZ
@@ -14,15 +19,16 @@
 // zones that have DST. Tokyo has had none since 1951, which is exactly why a
 // Tokyo-only implementation could be wrong without anyone noticing.
 
-// Temporal is where all of this would live (`Instant.toZonedDateTimeISO(tz).toPlainDate()`,
-// `PlainDate.toZonedDateTime(tz).epochMilliseconds`) — but it is not available to us:
-// checked 2026-09-01, workerd 2026-08-20 has no `Temporal` global (not even under
-// --all-autogates), node 24 only behind --harmony-temporal, and TypeScript 7.0.2 ships no
-// types for it. So this module is that API's replacement, and only `dayKey` / `dayStartMs`
-// touch a zone — the swap, when it lands, is those two bodies. Both were differentially
-// tested against Temporal as an oracle (53k values, 13 zones incl. 30-minute DST, negative
-// DST, midnight transitions, and Samoa's skipped 2011-12-30): no disagreement, down to the
-// "compatible" disambiguation of a local midnight that does not exist.
+// Temporal is where `dayKey` would live (`Instant.toZonedDateTimeISO(tz).toPlainDate()`) —
+// but it is not available to us: checked 2026-09-01, workerd 2026-08-20 has no `Temporal`
+// global (not even under --all-autogates), node 24 only behind --harmony-temporal, and
+// TypeScript 7.0.2 ships no types for it. So this module is that API's replacement, and
+// only `dayKey` touches a zone — the swap, when it lands, is that one body. It was
+// differentially tested against Temporal as an oracle (53k values, 13 zones incl.
+// 30-minute DST, negative DST, midnight transitions, and Samoa's skipped 2011-12-30):
+// no disagreement.
+
+import { isInput, isOutput, type PostKind } from "./kind";
 
 /** The one time zone this instance cuts days in (docs/data-model.md, 2026-08-23). */
 export const APP_TZ = "Asia/Tokyo";
@@ -30,8 +36,17 @@ export const APP_TZ = "Asia/Tokyo";
 /** A calendar day in some zone, ISO `YYYY-MM-DD`. Sorts lexicographically = chronologically. */
 export type DayKey = string;
 
+/** A calendar month in some zone, ISO `YYYY-MM` — a DayKey's first 7 chars, so it sorts the same way. */
+export type MonthKey = string;
+
 /** A `YYYY-MM-DD` day key taken apart. Month is 1-based, unlike `Date`. */
 export type CivilDate = { year: number; month: number; day: number };
+
+/** The days a 苔片 was there, both inclusive (ADR-0005). A single-day 苔片 has the two equal. */
+export type DaySpan = { firstDay: DayKey; lastDay: DayKey };
+
+/** What grew on one day: every 苔片 there, and the two sides of its 向き (core/kind.ts). */
+export type DayTally = { count: number; input: number; output: number };
 
 const MS_PER_DAY = 86_400_000;
 /** ECMA-262 time-value range: ±100,000,000 days around the epoch. */
@@ -40,16 +55,17 @@ const MAX_TIME_VALUE = 8_640_000_000_000_000;
  *  route caps its window far below, and 4-digit years could otherwise ask for
  *  3.6M strings in a 128 MB Worker. */
 const MAX_SPAN_DAYS = 36_600;
+/** The same ~100 years, in months — the ceiling of a 続く苔片's month walk. */
+const MAX_SPAN_MONTHS = 1200;
 
 const DAY_KEY_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Building an Intl.DateTimeFormat costs orders of magnitude more than using
-// one, and a year of heatmap rows calls dayKey hundreds of times — so they are
-// memoized per zone. Observationally pure: the cache is keyed by `tz` and can
-// only change how long a call takes. Intl throws on anything that is not a
-// real zone, so nothing but the tz database can ever land in these maps.
+// one, and a burst of writes calls dayKey repeatedly — so they are memoized
+// per zone. Observationally pure: the cache is keyed by `tz` and can only
+// change how long a call takes. Intl throws on anything that is not a real
+// zone, so nothing but the tz database can ever land in this map.
 const dayFormatters = new Map<string, Intl.DateTimeFormat>();
-const clockFormatters = new Map<string, Intl.DateTimeFormat>();
 
 // `-u-ca-iso8601` pins the proleptic Gregorian calendar (no era-relative years
 // from a locale's default calendar); formatToParts keeps us off locale
@@ -64,24 +80,6 @@ function dayFormatter(tz: string): Intl.DateTimeFormat {
       day: "2-digit",
     });
     dayFormatters.set(tz, cached);
-  }
-  return cached;
-}
-
-function clockFormatter(tz: string): Intl.DateTimeFormat {
-  let cached = clockFormatters.get(tz);
-  if (cached === undefined) {
-    cached = new Intl.DateTimeFormat("en-US-u-ca-iso8601", {
-      timeZone: tz,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    });
-    clockFormatters.set(tz, cached);
   }
   return cached;
 }
@@ -128,26 +126,17 @@ function requireCivil(day: DayKey): CivilDate {
   return civil;
 }
 
-/** Offset of `tz` at an instant, in ms east of UTC (JST = +9h, EST = −5h). */
-function offsetMsAt(tz: string, instantMs: number): number {
-  const parts = clockFormatter(tz).formatToParts(instantMs);
-  const localAsUtc =
-    civilToUtcMs({
-      year: numericPart(parts, "year"),
-      month: numericPart(parts, "month"),
-      day: numericPart(parts, "day"),
-    }) +
-    numericPart(parts, "hour") * 3_600_000 +
-    numericPart(parts, "minute") * 60_000 +
-    numericPart(parts, "second") * 1000;
-  // The parts stop at whole seconds, so compare against the same resolution —
-  // otherwise a timestamp's stray ms would show up as part of the offset.
-  return localAsUtc - Math.floor(instantMs / 1000) * 1000;
+function requireSpan(span: DaySpan): void {
+  requireCivil(span.firstDay);
+  requireCivil(span.lastDay);
+  // Both keys are valid 4-digit-year days here, so the string order is the day order.
+  if (span.lastDay < span.firstDay) throw new RangeError("day: span ends before it begins");
 }
 
 /**
- * The day an instant belongs to. `dayKey(t)` is the only answer to "which cell
- * does this 苔片 light up".
+ * The day an instant belongs to — the write side's one question: a 苔片
+ * stacked "now" gets `first_day = last_day = dayKey(now)`, and `today` on the
+ * wire is `dayKey(Date.now())`.
  *
  * @throws RangeError on a non-integer / out-of-range timestamp, or an unknown
  * zone (Intl) — a broken timestamp must not silently pick a neighbouring day.
@@ -165,7 +154,8 @@ export function dayKey(epochMs: number, tz: string = APP_TZ): DayKey {
 /**
  * A `YYYY-MM-DD` string taken apart, or null if it is not a day the calendar
  * has (`2026-02-30`, `2026-13-01`, `2026-9-1`). Days come off the wire as
- * `?from=` / `?to=`, so nothing unvalidated reaches the SQL window.
+ * `?from=` / `?to=` (and, from A2 on, as the days to stack on), so nothing
+ * unvalidated reaches the SQL.
  */
 export function parseDayKey(raw: string): CivilDate | null {
   if (!DAY_KEY_SHAPE.test(raw)) return null;
@@ -188,29 +178,6 @@ export function parseDayKey(raw: string): CivilDate | null {
 
 export function isDayKey(raw: string): boolean {
   return parseDayKey(raw) !== null;
-}
-
-/**
- * The instant a day begins in `tz` — the inverse of `dayKey`, and the lower
- * bound of the heatmap's `created_at` window (`>= dayStartMs(from)` and
- * `< dayStartMs(addDays(to, 1))`, so the window stays half-open and no 苔片
- * is counted twice).
- *
- * @throws RangeError on a malformed day key.
- */
-export function dayStartMs(day: DayKey, tz: string = APP_TZ): number {
-  const midnightAsUtc = civilToUtcMs(requireCivil(day));
-  // Read local midnight with the offset in force *around* it, then re-read it
-  // with the offset actually in force at that candidate: a DST change between
-  // the two moves the answer by the jump.
-  const first = midnightAsUtc - offsetMsAt(tz, midnightAsUtc);
-  const second = midnightAsUtc - offsetMsAt(tz, first);
-  if (second === first) return first;
-  // `second` is right whenever local midnight exists. When a spring-forward
-  // skips midnight itself (Santiago jumps 24:00 -> 01:00), `second` lands back
-  // on the previous day; the day then begins at the transition, which is
-  // `first`. Never reached under APP_TZ — Tokyo has no DST.
-  return dayKey(second, tz) === day ? second : first;
 }
 
 /**
@@ -245,8 +212,9 @@ export function dayOfWeek(day: DayKey): number {
 
 /**
  * Every day from `from` to `to`, inclusive and ascending — the heatmap's grid
- * before any counts are laid on it. An inverted range is an empty span rather
- * than a throw; the route rejects that with a 400 before it gets here.
+ * before any counts are laid on it, and the days a 続く苔片 was there. An
+ * inverted range is an empty span rather than a throw; the route rejects that
+ * with a 400 before it gets here.
  *
  * @throws RangeError on a malformed key or an absurdly wide span (see MAX_SPAN_DAYS).
  */
@@ -263,55 +231,99 @@ export function enumerateDays(from: DayKey, to: DayKey): DayKey[] {
 }
 
 /**
- * Fold 苔片 timestamps into "how many on each day" — the whole heatmap
- * aggregation, working on plaintext metadata only (ADR-0001: bodies stay
- * encrypted and are never touched to draw the moss).
+ * The month a day is in — `YYYY-MM`, the 年表's 活動月 bucket (visualization.md
+ * §8). A day key already carries its zone's calendar, so this is a cut of the
+ * string, not a conversion.
  *
- * Iteration order is the input's; pair it with `enumerateDays` for the dense
- * ascending series the SVG draws:
- *
- *     const counts = bucketByDay(rows.map((r) => r.createdAt));
- *     enumerateDays(from, to).map((day) => ({ day, count: counts.get(day) ?? 0 }));
+ * @throws RangeError on a malformed day key.
  */
-export function bucketByDay(
-  timestamps: Iterable<number>,
-  tz: string = APP_TZ,
-): Map<DayKey, number> {
-  const counts = new Map<DayKey, number>();
-  for (const epochMs of timestamps) {
-    const key = dayKey(epochMs, tz);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+export function monthOf(day: DayKey): MonthKey {
+  requireCivil(day);
+  return day.slice(0, 7);
+}
+
+/**
+ * Every month from `from`'s to `to`'s, inclusive and ascending — the months a
+ * 続く苔片 touches. An inverted pair is an empty span, like `enumerateDays`.
+ *
+ * @throws RangeError on a malformed key or an absurdly wide span (see MAX_SPAN_MONTHS).
+ */
+export function enumerateMonths(from: DayKey, to: DayKey): MonthKey[] {
+  const start = requireCivil(from);
+  const end = requireCivil(to);
+  const first = start.year * 12 + (start.month - 1);
+  const last = end.year * 12 + (end.month - 1);
+  if (last < first) return [];
+  if (last - first + 1 > MAX_SPAN_MONTHS) {
+    throw new RangeError("day: span too wide to enumerate by month");
   }
-  return counts;
+  const months: MonthKey[] = [];
+  for (let m = first; m <= last; m++) {
+    months.push(`${pad(Math.floor(m / 12), 4)}-${pad((m % 12) + 1, 2)}`);
+  }
+  return months;
 }
 
-/** A calendar month in some zone, ISO `YYYY-MM` — a DayKey's first 7 chars, so it sorts the same way. */
-export type MonthKey = string;
-
 /**
- * The month an instant belongs to: `dayKey` cut to `YYYY-MM`, so a 苔片 is in
- * the month its day is in — 08:00 JST on the 1st is still last month on the
- * UTC calendar, and `strftime('%Y-%m', …)` in SQL would file it there. The
- * bucket of the 年表's month segments (visualization.md §8, 活動月).
+ * Fold 苔片 spans into "what was there on each day" of the window `from`..`to`
+ * — the whole heatmap aggregation, on plaintext metadata only (ADR-0001:
+ * bodies stay encrypted and are never touched to draw the moss). A 続く苔片
+ * counts once on every day it was there (CONTEXT.md: 在った 1 片, not 毎日 1 片);
+ * a day no 苔片 touched is simply absent. Spans are clipped to the window, so
+ * what lies outside costs nothing and a span wholly outside contributes nothing.
  *
- * @throws RangeError as `dayKey`.
+ * Pair it with `enumerateDays` for the dense ascending series the SVG draws:
+ *
+ *     const tallies = bucketSpansByDay(rows, from, to);
+ *     enumerateDays(from, to).map((day) => ({ day, count: tallies.get(day)?.count ?? 0 }));
+ *
+ * @throws RangeError on a malformed key or an inverted span — a broken row
+ * must not silently light the wrong cells.
  */
-export function monthKey(epochMs: number, tz: string = APP_TZ): MonthKey {
-  return dayKey(epochMs, tz).slice(0, 7);
+export function bucketSpansByDay(
+  spans: Iterable<DaySpan & { kind: PostKind | null }>,
+  from: DayKey,
+  to: DayKey,
+): Map<DayKey, DayTally> {
+  requireCivil(from);
+  requireCivil(to);
+  const tallies = new Map<DayKey, DayTally>();
+  for (const span of spans) {
+    requireSpan(span);
+    const lo = span.firstDay < from ? from : span.firstDay;
+    const hi = span.lastDay > to ? to : span.lastDay;
+    if (hi < lo) continue;
+    const input = isInput(span.kind) ? 1 : 0;
+    const output = isOutput(span.kind) ? 1 : 0;
+    for (const day of enumerateDays(lo, hi)) {
+      let tally = tallies.get(day);
+      if (tally === undefined) {
+        tally = { count: 0, input: 0, output: 0 };
+        tallies.set(day, tally);
+      }
+      tally.count += 1;
+      tally.input += input;
+      tally.output += output;
+    }
+  }
+  return tallies;
 }
 
 /**
- * Fold 苔片 timestamps into "how many in each month" — `bucketByDay`'s
- * sibling for the month segments. Same diet: instants only, never a body.
+ * Fold 苔片 spans into "how many were there in each month" — `bucketSpansByDay`'s
+ * sibling for the 年表's month segments (visualization.md §8). A 続く苔片 counts
+ * once in every month it touches, so over a row these add up to AT LEAST the
+ * row's 苔片 count — equal while every 苔片 is a single day.
+ *
+ * @throws RangeError as `bucketSpansByDay`, and on a span wider than MAX_SPAN_MONTHS.
  */
-export function bucketByMonth(
-  timestamps: Iterable<number>,
-  tz: string = APP_TZ,
-): Map<MonthKey, number> {
+export function bucketSpansByMonth(spans: Iterable<DaySpan>): Map<MonthKey, number> {
   const counts = new Map<MonthKey, number>();
-  for (const epochMs of timestamps) {
-    const key = monthKey(epochMs, tz);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+  for (const span of spans) {
+    requireSpan(span);
+    for (const month of enumerateMonths(span.firstDay, span.lastDay)) {
+      counts.set(month, (counts.get(month) ?? 0) + 1);
+    }
   }
   return counts;
 }

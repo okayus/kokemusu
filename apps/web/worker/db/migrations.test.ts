@@ -24,12 +24,33 @@ const migrations = import.meta.glob("../../drizzle/*.sql", {
 const REBUILD_MARKERS = [/\bDROP\s+TABLE\b/i, /\b__new_/i, /\bPRAGMA\s+foreign_keys\s*=\s*OFF/i];
 
 /**
- * Every statement of a migration file, `;` and the drizzle breakpoint stripped.
+ * The one rebuild on record (ADR-0005): 0004 gave `post` its NOT NULL day axis
+ * — which SQLite cannot ADD in place — while the data was small. It is exempt
+ * from the marker check and pinned statement by statement below instead; the
+ * `post_tags` stash around its `DROP TABLE post` is what makes it survive D1.
+ * A second entry here is a design review, not a test fix.
+ */
+const REBUILDS_ON_RECORD = ["/0004_post_day_axis.sql"];
+
+const isRebuildOnRecord = (path: string) => REBUILDS_ON_RECORD.some((tail) => path.endsWith(tail));
+
+/**
+ * Every statement of a migration file: `--` comment lines and the drizzle
+ * breakpoint stripped, whitespace collapsed, the trailing `;` removed.
  */
 const statementsOf = (sql: string): string[] =>
   sql
     .split("--> statement-breakpoint")
-    .map((statement) => statement.trim().replace(/;$/, ""))
+    .map((chunk) =>
+      chunk
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("--"))
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/;$/, "")
+        .trim(),
+    )
     .filter((statement) => statement.length > 0);
 
 describe("drizzle migrations", () => {
@@ -37,10 +58,19 @@ describe("drizzle migrations", () => {
     expect(Object.keys(migrations).length).toBeGreaterThan(0);
   });
 
-  it.each(Object.keys(migrations).sort())("%s rebuilds no table", (path) => {
-    const sql = migrations[path] ?? "";
-    for (const marker of REBUILD_MARKERS) {
-      expect(sql, `${path} looks like a table rebuild (matched ${marker})`).not.toMatch(marker);
+  it.each(Object.keys(migrations).sort().filter((path) => !isRebuildOnRecord(path)))(
+    "%s rebuilds no table",
+    (path) => {
+      const sql = migrations[path] ?? "";
+      for (const marker of REBUILD_MARKERS) {
+        expect(sql, `${path} looks like a table rebuild (matched ${marker})`).not.toMatch(marker);
+      }
+    },
+  );
+
+  it("exempts only files that exist — a stale entry would hide a new rebuild behind a typo", () => {
+    for (const tail of REBUILDS_ON_RECORD) {
+      expect(Object.keys(migrations).some((path) => path.endsWith(tail)), tail).toBe(true);
     }
   });
 
@@ -61,5 +91,39 @@ describe("drizzle migrations", () => {
       "DROP INDEX `post_deleted_at_idx`",
       "ALTER TABLE `post` DROP COLUMN `deleted_at`",
     ]);
+  });
+
+  /**
+   * 0004 is the rebuild on record (ADR-0005), pinned in the order that keeps
+   * the data: the `post_tags` links are copied into a plain table BEFORE the
+   * `DROP TABLE post` that cascade-deletes them on D1, and put back AFTER the
+   * new `post` has taken the name (so the FK has its target) and its index.
+   * The copy into `__new_post` is where every existing 苔片 gets its day —
+   * `created_at` cut in Asia/Tokyo (+9h; no DST) for both `first_day` and
+   * `last_day`, and `kind` NULL (未分類). drizzle-kit itself emitted an
+   * `ALTER TABLE … ADD … NOT NULL`, which SQLite rejects without a default —
+   * the file is hand-written against the 0004 snapshot.
+   */
+  it("0004 stashes post_tags, rebuilds post with the day axis, restores the links, and nothing else", () => {
+    const path = Object.keys(migrations).find((p) => p.endsWith("/0004_post_day_axis.sql"));
+    expect(path, "0004_post_day_axis.sql is missing").toBeDefined();
+    const backfill = "date((`created_at` + 32400000) / 1000, 'unixepoch')";
+    expect(statementsOf(migrations[path ?? ""] ?? "")).toEqual([
+      "CREATE TABLE `post_tags_keep` AS SELECT * FROM `post_tags`",
+      "CREATE TABLE `__new_post` ( `id` text PRIMARY KEY NOT NULL, `user_id` text NOT NULL, `title` text, `body` text NOT NULL, `body_format` text DEFAULT 'markdown' NOT NULL, `first_day` text NOT NULL, `last_day` text NOT NULL, `kind` text, `created_at` integer NOT NULL, `updated_at` integer NOT NULL, FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade )",
+      "INSERT INTO `__new_post` (`id`, `user_id`, `title`, `body`, `body_format`, `first_day`, `last_day`, `kind`, `created_at`, `updated_at`) " +
+        `SELECT \`id\`, \`user_id\`, \`title\`, \`body\`, \`body_format\`, ${backfill}, ${backfill}, NULL, \`created_at\`, \`updated_at\` FROM \`post\``,
+      "DROP TABLE `post`",
+      "ALTER TABLE `__new_post` RENAME TO `post`",
+      "CREATE INDEX `post_user_id_first_day_created_at_idx` ON `post` (`user_id`,`first_day`,`created_at`)",
+      "INSERT OR IGNORE INTO `post_tags` (`post_id`, `tag_id`) SELECT `post_id`, `tag_id` FROM `post_tags_keep`",
+      "DROP TABLE `post_tags_keep`",
+    ]);
+  });
+
+  it("0004 runs no PRAGMA — D1 would not honour foreign_keys=OFF while a local SQLite would, and the file must do the same thing in both", () => {
+    const path = Object.keys(migrations).find((p) => p.endsWith("/0004_post_day_axis.sql"));
+    // Statements only: the file's header comment is allowed to say the word.
+    expect(statementsOf(migrations[path ?? ""] ?? "").join(" ")).not.toMatch(/PRAGMA/i);
   });
 });
