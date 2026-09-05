@@ -1,9 +1,10 @@
-import { and, countDistinct, desc, eq, gte, inArray, lt, or, type SQL } from "drizzle-orm";
+import { and, countDistinct, desc, eq, gte, inArray, lt, lte, or, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { decodeCursor, encodeCursor } from "../core/cursor";
 import { decryptBody, encryptBody, importBodyKey } from "../core/crypto";
-import { addDays, dayKey, dayStartMs, isDayKey, type DayKey } from "../core/day";
+import { dayKey, isDayKey, type DayKey } from "../core/day";
+import type { PostKind } from "../core/kind";
 import { MAX_TAGS_PER_POST, normalizeTagName, parseTagNames, parseTagsParam } from "../core/tag";
 import { createDb, type Db } from "../db";
 import { post, postTags, tag } from "../db/schema";
@@ -39,10 +40,12 @@ export const createPostSchema = z.object({
 //
 // The period (features.md §3): `?from=` / `?to=` are inclusive calendar days,
 // the 総草's own wire form — so 日・週・月・年 and a custom range are all one
-// shape, and the boundary is cut the one way every day is: core `dayKey` in
-// APP_TZ, never SQLite's UTC `date()`. Each half stands alone (`from` =
-// それ以降, `to` = それ以前); together they must not invert. Day keys compare
-// as strings (4-digit years — core/day.ts).
+// shape. A 苔片 is in the period when its days OVERLAP it (ADR-0005:
+// `first_day <= to AND last_day >= from`) — plain string comparison on the day
+// axis, no zone in the read. Each half stands alone (`from` = それ以降, `to` =
+// それ以前); together they must not invert. `9999-12-31` as `to` stays a 400:
+// the rule dates from the instant window that needed `to + 1`, and A1 changes
+// no behaviour on the wire.
 export const listPostsQuerySchema = z
   .object({
     limit: z.coerce.number().int().min(1).max(50).default(20),
@@ -56,28 +59,24 @@ export const listPostsQuerySchema = z
   .refine(
     (q) => q.from === undefined || q.to === undefined || q.from <= q.to,
     "from must not be after to",
-  );
-
-/** The `created_at` bounds of a day range — a side is undefined when its half is absent. */
-export type PeriodBounds = { startMs: number | undefined; endMs: number | undefined };
+  )
+  .refine((q) => q.to !== "9999-12-31", "to must be a day before the end of the calendar");
 
 /**
- * Resolve the inclusive day range into the half-open instant window the SQL
- * takes: `created_at >= dayStartMs(from)` and `< dayStartMs(addDays(to, 1))`
- * — the 総草's cut (stats.ts), so a 苔片 written at 00:30 JST on the 1st is
- * in the month that has begun here, not in UTC's previous one. Null on a
- * `to` at the end of the 4-digit calendar (`addDays(to, 1)` has no key), which
- * the route answers 400 to — the same line resolveWindow draws.
+ * The overlap of a 苔片's days with the period, as the SQL the feed ANDs onto
+ * its other filters: `last_day >= from` and `first_day <= to`, an absent half
+ * dropped (undefined when both are). Exported for the unit tests, which have
+ * no D1: they pin which column meets which bound — the mix-up ADR-0005 warned
+ * about — and e2e checks the rows.
  */
-export function resolvePeriod(query: {
+export function periodCondition(query: {
   from?: string | undefined;
   to?: string | undefined;
-}): PeriodBounds | null {
-  if (query.to === "9999-12-31") return null;
-  return {
-    startMs: query.from === undefined ? undefined : dayStartMs(query.from),
-    endMs: query.to === undefined ? undefined : dayStartMs(addDays(query.to, 1)),
-  };
+}): SQL | undefined {
+  return and(
+    query.from === undefined ? undefined : gte(post.lastDay, query.from),
+    query.to === undefined ? undefined : lte(post.firstDay, query.to),
+  );
 }
 
 // The :id of PATCH/DELETE. Bounded like tokens' id schema — the shape says
@@ -94,8 +93,13 @@ type PostItem = {
   bodyFormat: string;
   createdAt: number;
   updatedAt: number;
-  /** The 「日」 this 苔片 stacks into (CONTEXT.md), decided here in APP_TZ — the client only compares. */
-  day: DayKey;
+  /** First and last 「日」 this 苔片 was there (ADR-0005) — `YYYY-MM-DD` in APP_TZ, equal for a single day. */
+  firstDay: DayKey;
+  lastDay: DayKey;
+  /** The day it was written on, `dayKey(createdAt)`. 「いま積んだ」 = all three days equal; the client only compares. */
+  postedDay: DayKey;
+  /** 向き (core/kind.ts); null = 未分類. */
+  kind: PostKind | null;
   tags: TagSummary[];
 };
 
@@ -183,6 +187,10 @@ export const postRoutes = new Hono<Env>()
     const db = createDb(c.env.DB);
 
     const now = Date.now();
+    // The one place the zone enters (core/day.ts): a 苔片 stacked now lands on
+    // today's 「日」. Until A2 takes the days off the body, every 苔片 is a
+    // single day and it is this one; `kind` waits for B the same way.
+    const today = dayKey(now);
     const { newTags, resolved } = await resolveTagRows(db, userId, wanted, now);
 
     // Encrypt at the last moment before the write (ADR-0001); plaintext never
@@ -194,6 +202,9 @@ export const postRoutes = new Hono<Env>()
       title: titlePlain === null ? null : await encryptBody(titlePlain, key),
       body: await encryptBody(parsed.data.body, key),
       bodyFormat: "markdown",
+      firstDay: today,
+      lastDay: today,
+      kind: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -217,7 +228,10 @@ export const postRoutes = new Hono<Env>()
       bodyFormat: row.bodyFormat ?? "markdown",
       createdAt: now,
       updatedAt: now,
-      day: dayKey(now),
+      firstDay: today,
+      lastDay: today,
+      postedDay: today,
+      kind: null,
       tags: resolved,
     };
     return c.json(item, 201);
@@ -242,8 +256,6 @@ export const postRoutes = new Hono<Env>()
     const { limit } = parsed.data;
     const cursor = parsed.data.cursor === undefined ? null : decodeCursor(parsed.data.cursor);
     if (parsed.data.cursor !== undefined && cursor === null) return fail(c, "validation_error");
-    const period = resolvePeriod(parsed.data);
-    if (period === null) return fail(c, "validation_error");
 
     const userId = c.get("userId");
     const db = createDb(c.env.DB);
@@ -282,23 +294,27 @@ export const postRoutes = new Hono<Env>()
       tagSetCond = inArray(post.id, matched);
     }
 
-    // Keyset pagination on (created_at DESC, id DESC); `and()` drops the
-    // undefined cursor condition on the first page.
+    // Keyset pagination on (first_day DESC, created_at DESC, id DESC) — the
+    // 「日」 first (ADR-0005), so a 苔片 stacked on a past day sits on that day
+    // and a 続く苔片 at its first day, not at the top; within a day, the order
+    // written. `and()` drops the undefined cursor condition on the first page.
     const cursorCond = cursor
       ? or(
-          lt(post.createdAt, cursor.createdAt),
-          and(eq(post.createdAt, cursor.createdAt), lt(post.id, cursor.id)),
+          lt(post.firstDay, cursor.firstDay),
+          and(eq(post.firstDay, cursor.firstDay), lt(post.createdAt, cursor.createdAt)),
+          and(
+            eq(post.firstDay, cursor.firstDay),
+            eq(post.createdAt, cursor.createdAt),
+            lt(post.id, cursor.id),
+          ),
         )
       : undefined;
 
-    // The period is two more bounds on the very axis the cursor walks, so the
-    // two compose as plain AND on post(user_id, created_at) — a page under a
-    // period is the same page of the same order, minus the days outside it.
-    // Absent halves are undefined and `and()` drops them, like the cursor.
-    const periodCond = and(
-      period.startMs === undefined ? undefined : gte(post.createdAt, period.startMs),
-      period.endMs === undefined ? undefined : lt(post.createdAt, period.endMs),
-    );
+    // The period is an overlap on the very axis the cursor walks, so the two
+    // compose as plain AND on post(user_id, first_day, created_at) — a page
+    // under a period is the same page of the same order, minus the 苔片 whose
+    // days miss it. Absent halves are dropped inside, like the cursor's.
+    const periodCond = periodCondition(parsed.data);
 
     let query = db
       .select({
@@ -306,6 +322,9 @@ export const postRoutes = new Hono<Env>()
         title: post.title,
         body: post.body,
         bodyFormat: post.bodyFormat,
+        firstDay: post.firstDay,
+        lastDay: post.lastDay,
+        kind: post.kind,
         createdAt: post.createdAt,
         updatedAt: post.updatedAt,
       })
@@ -320,7 +339,7 @@ export const postRoutes = new Hono<Env>()
     }
     const rows = await query
       .where(and(eq(post.userId, userId), tagSetCond, periodCond, cursorCond))
-      .orderBy(desc(post.createdAt), desc(post.id))
+      .orderBy(desc(post.firstDay), desc(post.createdAt), desc(post.id))
       .limit(limit + 1);
 
     const hasMore = rows.length > limit;
@@ -340,7 +359,10 @@ export const postRoutes = new Hono<Env>()
         bodyFormat: r.bodyFormat,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
-        day: dayKey(r.createdAt),
+        firstDay: r.firstDay,
+        lastDay: r.lastDay,
+        postedDay: dayKey(r.createdAt),
+        kind: r.kind,
         tags: tagsByPost.get(r.id) ?? [],
       })),
     );
@@ -353,7 +375,9 @@ export const postRoutes = new Hono<Env>()
     return c.json({
       posts,
       nextCursor:
-        hasMore && last ? encodeCursor({ createdAt: last.createdAt, id: last.id }) : null,
+        hasMore && last
+          ? encodeCursor({ firstDay: last.firstDay, createdAt: last.createdAt, id: last.id })
+          : null,
       today: dayKey(Date.now()),
     });
   })
@@ -380,7 +404,14 @@ export const postRoutes = new Hono<Env>()
     // (tokens の流儀).
     const owned = (
       await db
-        .select({ id: post.id, bodyFormat: post.bodyFormat, createdAt: post.createdAt })
+        .select({
+          id: post.id,
+          bodyFormat: post.bodyFormat,
+          firstDay: post.firstDay,
+          lastDay: post.lastDay,
+          kind: post.kind,
+          createdAt: post.createdAt,
+        })
         .from(post)
         .where(and(eq(post.id, id.data), eq(post.userId, userId)))
         .limit(1)
@@ -416,7 +447,11 @@ export const postRoutes = new Hono<Env>()
       bodyFormat: owned.bodyFormat,
       createdAt: owned.createdAt,
       updatedAt: now,
-      day: dayKey(owned.createdAt),
+      // The days and 向き are not editable yet (A2 / B): the row keeps its own.
+      firstDay: owned.firstDay,
+      lastDay: owned.lastDay,
+      postedDay: dayKey(owned.createdAt),
+      kind: owned.kind,
       tags: resolved,
     };
     return c.json(item);

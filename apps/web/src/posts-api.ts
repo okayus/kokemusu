@@ -5,6 +5,9 @@ import { postJson, request } from "./api";
 
 export type TagSummary = { id: string; name: string };
 
+/** 向き (CONTEXT.md): インプット / アウトプット / 両方. Absent on the 苔片 = 未分類 (null). */
+export type PostKind = "input" | "output" | "both";
+
 export type PostItem = {
   id: string;
   title: string | null;
@@ -12,8 +15,12 @@ export type PostItem = {
   bodyFormat: string;
   createdAt: number;
   updatedAt: number;
-  /** The JST 「日」 this 苔片 stacks into (`YYYY-MM-DD`) — server-decided; the client only compares. */
-  day: string;
+  /** First and last JST 「日」 this 苔片 was there (`YYYY-MM-DD`, ADR-0005) — server-decided; equal for a single day. */
+  firstDay: string;
+  lastDay: string;
+  /** The JST day it was written on. 「いま積んだ」 = all three days equal — the client only compares. */
+  postedDay: string;
+  kind: PostKind | null;
   tags: TagSummary[];
 };
 

@@ -6,20 +6,23 @@
 
 ## フェーズ
 
-**Phase 2 — 可視化の柱 3 本 + 総草マスのタップ + 年表の軸ラベル（#40、本番デプロイ確認 2026-09-05）が本番稼働。Phase 1 の取りこぼしは空。** merge 前の回帰検知はコンテナ内 `pnpm e2e`（4 spec、`apps/web/e2e/README.md`。CI は spec の型検査のみ）、目視は使い捨て spec（log #38〜#40）。
+**Phase 2 — 可視化の柱 3 本 ＋ 書く面のダイアログ化（#41）まで本番稼働。「過去に積む・続く苔片・向き」は設計（#42）と A1 実装（#43）が PR 中（ADR-0005 / plans/day-axis-and-kind.md）。** 回帰検知は `pnpm e2e`（4 spec）、目視は使い捨て spec。
 
 ## 次の 3 手
 
-1. **Phase 2 の次の柱を決めて着手**: `origin/main` から切る（先に `git log --oneline origin/main..HEAD`、handoff commit は cherry-pick して同乗）。roadmap.md の残り（全文検索 / 累積・ストリーク・内訳 / タグ運用 / 振り返り / エクスポート）から `grill-with-docs` で 1 本選ぶ。PR は `--fill --title "<feat の subject>"`（log #39）。
-2. **skill の書き戻し**（okayus-skills#41 merge 後にまとめて）: PAT passkey-session 変種 + pepper fail-closed 変種 + drizzle batch `.as()` 罠（#32）+ 作業ブランチは main の squash 後から切る（#34）+ 公開リポの check-runs を素の curl で読む（#35）+ Markdown はトークン → フレームワーク要素（#36 / ADR-0004）+ 日窓 `?from=&to=` の 1 形（#37）+ 月バケットもコア・目視は使い捨て spec（#38）+ 総草のマスのボタン化（#39）+ 軸ラベルは px 幅で間引く・字幅は `getBBox` で検証（#40）。
-3. **小さな粗**（#40 の目視）: 深掘りピッカーを開くと「足す」が 2 行に折れる（`.tl-picker` が 11rem の石列に押される）。次の UI PR に同乗でよい。
+1. **A1 の着地（#43、`drizzle/0004` ＝ `post` の唯一の再構築 → 人間 merge）**: merge 前にホストで `wrangler d1 export kokemusu-db --remote` と post / post_tags の COUNT を控える → merge（Workers Builds が適用）→ COUNT 一致を確認（手順は #43 本文）。ローカルは `pnpm db:migrate`。#42 と #43 が両方 main に入ったら `git fetch --prune` → plans §A1-7（data-model.md / visualization.md の「A1 までは」注記を消す）を小 PR で。
+2. **B 向き**（plans §B、migration なし、`origin/main` から切る）: `kind` の radio（Compose / 編集）、カードの印、総草の色相（青緑 / 赤茶 / 緑 × 5 段階、`dataviz` で検証）、凡例・読み上げ・比率。core は日ごとの 入 / 出 を既に返す（wire に載せるだけ）。
+3. **A2 過去に積む・続く苔片**（plans §A2、migration なし）: `firstDay` / `lastDay` の検証（`first ≤ last ≤ today`。**古すぎる日も 400** — core の `enumerateMonths` は 1200 か月で throw）、「日を選ぶ」date 2 欄、カードの範囲 ＋「M/D に積む」、着地は「積みました ＋ その日に絞る」。
+
+その後: エクスポート（#41 の比較表の推し）→ skill 書き戻し（log #32〜#41 の罠 ＋ 0004（drizzle-kit が NOT NULL 追加を ALTER TABLE ADD で吐く））→ 累積グラフ。
 
 ## 詰まり・人手待ち
 
-- 本番実データの目視: #32〜#40 の UI 全部（§6 / 絞り込み 3 導線 / 編集・削除 / Markdown / 期間 / 月セグメント / マスのタップ / 軸ラベル。デプロイ確認済み、目視だけ残）。
-- okayus-skills#41（e2e 0.4.0 / sandbox 0.2.0 / passkey 0.2.1 の書き戻し）の内容確認と merge。
-- mazuoboeru 側の日次 push 実装（別リポ。`KOKEMUSU_PAT` secret と `KOKEMUSU_URL` var は **mazuoboeru の** wrangler に置く）。着地したらタイムライン + トークン最終使用（最大 1h 遅れ）を確認、二重投稿を観測したら `Idempotency-Key` の判断（ADR-0002）。
+- 本番実データの目視: #32〜#41 の UI 全部（デプロイ確認済み、目視だけ残）。
+- okayus-skills#41（e2e 0.4.0 / sandbox 0.2.0 / passkey 0.2.1）の内容確認と merge。
+- mazuoboeru 側の日次 push（別リポ。`KOKEMUSU_PAT` / `KOKEMUSU_URL` は mazuoboeru の wrangler に）。着地したら二重投稿を観測 → `Idempotency-Key`（ADR-0002）。A2 後は `firstDay: 昨日` と `kind: "input"` を送れる。
 
 ## 進行中 PR
 
-- なし。
+- **#42** 設計 docs（ADR-0005 ＋ CONTEXT.md ＋ plans ＋ features / data-model / visualization / security / roadmap）— `docs/adr/` を含むので人間 merge。
+- **#43** A1 実装（#42 と独立に merge 可）— `drizzle/0004` を含むので人間 merge、runbook は PR 本文。単体 317 / e2e 11/11 / 適用リハーサル済み。

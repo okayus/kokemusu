@@ -12,6 +12,10 @@
 //     place, so it is subtractive without being a rebuild (drop the index
 //     first: an indexed column cannot be dropped). `migrations.test.ts` is the
 //     guard — it fails on the rebuild markers in any generated file.
+//     The one exception on record is 0004 (ADR-0005): `post` gained its NOT
+//     NULL day axis while the data was small, with `post_tags` stashed in a
+//     plain table across the `DROP TABLE post` and restored after the rename.
+//     The guard exempts that file alone and pins its statement order instead.
 //  2. Timestamps are epoch ms in a plain `integer` (docs/data-model.md 規約),
 //     not Drizzle's `timestamp_ms` mode: the domain functions (`dayKey`) take
 //     numbers, and the wire format stays JSON-native.
@@ -22,6 +26,7 @@
 // left `post` in 0003 the other safe way (DROP INDEX → ALTER TABLE DROP COLUMN).
 
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { POST_KINDS } from "../core/kind";
 
 /** The single user of this instance. Passkey-only, so no password column. */
 export const user = sqliteTable("user", {
@@ -113,7 +118,15 @@ export const apiToken = sqliteTable(
   ],
 );
 
-/** 苔片 — one entry. Body and title are ciphertext; everything else is plaintext. */
+/**
+ * 苔片 — one entry. Body and title are ciphertext; everything else is plaintext.
+ *
+ * The axis every visualization stacks on is the 「日」 range `first_day` …
+ * `last_day` (ADR-0005), not `created_at`: a 苔片 can be stacked on a past day,
+ * or span the days it was there (続く苔片, CONTEXT.md). Both are JST calendar
+ * days as `YYYY-MM-DD` text, so comparing the strings IS comparing the days and
+ * the read side never converts a zone — `dayKey()` runs on the write side only.
+ */
 export const post = sqliteTable(
   "post",
   {
@@ -127,15 +140,30 @@ export const post = sqliteTable(
     body: text("body").notNull(),
     // Plaintext metadata describing how the DECRYPTED body should be read.
     bodyFormat: text("body_format").notNull().default("markdown"),
-    // Epoch ms. Plaintext on purpose — this is the axis every visualization is
-    // built on. The "day" it falls in is decided by `dayKey()` in Asia/Tokyo,
-    // never by SQLite's UTC-based `date()`.
+    // First and last 「日」, inclusive. A single-day 苔片 has them equal — never
+    // NULL, so no reader needs a COALESCE (the forgotten-`isNull(deleted_at)`
+    // class of bug ADR-0003 retired). Writers keep first_day <= last_day <= today.
+    firstDay: text("first_day").notNull(),
+    lastDay: text("last_day").notNull(),
+    // 向き (core/kind.ts): input / output / both. NULL = 未分類 — every row from
+    // before 0004, and any 苔片 stacked without one. The enum is TypeScript-only
+    // (no CHECK constraint), so widening it later is not a rebuild.
+    kind: text("kind", { enum: POST_KINDS }),
+    // Epoch ms of the moment the row was written (投稿した瞬間) — the same meaning
+    // as every other created_at, and the one column with a time of day in it.
+    // Not the axis: 0001–0003 read the day out of it with dayKey(); 0004 moved
+    // that day into first_day / last_day for good.
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
     // No `deleted_at`: deletion is physical (ADR-0003). 0001 carried the column
     // and its index; 0003 dropped both — see rule 1 at the top of this file.
   },
-  (t) => [index("post_user_id_created_at_idx").on(t.userId, t.createdAt)],
+  (t) => [
+    // The feed's order (first_day DESC, created_at DESC, id DESC) and the
+    // `first_day <= to` half of every period overlap. 0004 replaced
+    // post_user_id_created_at_idx with it.
+    index("post_user_id_first_day_created_at_idx").on(t.userId, t.firstDay, t.createdAt),
+  ],
 );
 
 /** A tag (石). `norm` absorbs the ways the same tag gets typed. */

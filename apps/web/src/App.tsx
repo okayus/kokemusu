@@ -350,7 +350,7 @@ function Garden(props: {
     // and the bar says where it went.
     const shown =
       postFilter.every((f) => created.tags.some((t) => t.id === f.id)) &&
-      dayInPeriod(created.day, postPeriod);
+      dayInPeriod(created.firstDay, postPeriod);
     if (shown) {
       setPosts((current) => [created, ...(current ?? [])]);
       // The dialog has closed and focus is back on its invoker — the bar, or a

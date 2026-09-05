@@ -6,6 +6,7 @@ import {
   gte,
   inArray,
   lt,
+  lte,
   max,
   min,
   ne,
@@ -16,16 +17,17 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   addDays,
-  bucketByDay,
-  bucketByMonth,
+  bucketSpansByDay,
+  bucketSpansByMonth,
   dayKey,
   dayOfWeek,
-  dayStartMs,
   enumerateDays,
   isDayKey,
   type DayKey,
+  type DaySpan,
   type MonthKey,
 } from "../core/day";
+import type { PostKind } from "../core/kind";
 import { parseTagsParam } from "../core/tag";
 import { createDb } from "../db";
 import { post, postTags, tag } from "../db/schema";
@@ -57,8 +59,10 @@ export const heatmapQuerySchema = z.object({
  * Defaults: `to` = today (APP_TZ), `from` = the Sunday opening `to`'s week,
  * 52 weeks earlier — 53 columns whose last one is the running week, exactly
  * the GitHub-style garden. Returns null on a window the route answers 400 to:
- * inverted, wider than MAX_WINDOW_DAYS, or touching the end of the 4-digit
- * calendar (`addDays(to, 1)` must stay on it).
+ * inverted, wider than MAX_WINDOW_DAYS, or ending on the last day of the
+ * 4-digit calendar — a rule from when the window was cut in instants and needed
+ * `to + 1`; nothing needs it since ADR-0005, but the wire has said 400 there
+ * since #37 and A1 changes no behaviour.
  */
 export function resolveWindow(
   query: { from?: string | undefined; to?: string | undefined },
@@ -79,15 +83,19 @@ export function resolveWindow(
 /** One cell on the wire: the day, its 苔片 count, and the 0..4 shade. */
 export type HeatmapDay = { day: DayKey; count: number; level: number };
 
-/** Fold raw `created_at` instants into the dense ascending series the SVG draws. */
-export function buildHeatmap(
-  timestamps: Iterable<number>,
-  from: DayKey,
-  to: DayKey,
-): HeatmapDay[] {
-  const counts = bucketByDay(timestamps);
+/** What the heatmap SQL hands back per 苔片 overlapping the window: its days and its 向き. */
+export type HeatmapSpan = DaySpan & { kind: PostKind | null };
+
+/**
+ * Fold the 苔片 spans into the dense ascending series the SVG draws — a 続く苔片
+ * lights each of its days inside the window (ADR-0005). The 入 / 出 tallies
+ * core computes alongside stay off the wire until the 総草 has a colour for
+ * them (plans/day-axis-and-kind.md §B).
+ */
+export function buildHeatmap(spans: Iterable<HeatmapSpan>, from: DayKey, to: DayKey): HeatmapDay[] {
+  const tallies = bucketSpansByDay(spans, from, to);
   return enumerateDays(from, to).map((day) => {
-    const count = counts.get(day) ?? 0;
+    const count = tallies.get(day)?.count ?? 0;
     return { day, count, level: Math.min(count, MAX_LEVEL) };
   });
 }
@@ -95,12 +103,12 @@ export function buildHeatmap(
 // ---------------------------------------------------------------------------
 // タグのタイムライン (visualization.md §8): rows of "first 苔片 → last 苔片" per
 // tag set. Like the heatmap, this whole route reads plaintext metadata only —
-// `created_at` and `post_tags` — so BODY_KEY never enters the path (ADR-0001)
-// and the 年表 draws even while the key is missing. Day and month bucketing
-// happen in core (`dayKey` / `monthKey`, Asia/Tokyo), never via SQLite's
-// UTC-based `date()` / `strftime()`; SQL only takes MIN/MAX/COUNT over the raw
-// epoch-ms axis for the span — safe because `dayKey` is monotonic — and hands
-// the raw instants over for the month segments (`monthCounts`).
+// `first_day` / `last_day` and `post_tags` — so BODY_KEY never enters the path
+// (ADR-0001) and the 年表 draws even while the key is missing. The axis is the
+// 「日」 range itself (ADR-0005): SQL takes MIN(first_day) / MAX(last_day) / COUNT
+// for the span — day keys order as strings, no zone in the read — and hands
+// each 苔片's two days over for the month segments, which core walks month by
+// month (`monthCounts`).
 
 // The three forms (docs/plans/tag-timeline.md): no param = one row per tag,
 // `?focus=` = that stone + stone×co-occurring-tag rows, `?tags=` = one AND row
@@ -136,12 +144,12 @@ export type RawTagSpan = {
   id: string;
   name: string;
   norm: string;
-  first: number | null;
-  last: number | null;
+  first: DayKey | null;
+  last: DayKey | null;
   count: number;
 };
 
-/** A per-tag span with the instants folded into JST days. */
+/** A per-tag span: the first and last 「日」 straight from the aggregate. */
 export type TagSpan = { tag: TimelineTag; firstDay: DayKey; lastDay: DayKey; count: number };
 
 /**
@@ -157,8 +165,8 @@ export function buildTagSpans(raws: RawTagSpan[]): TagSpan[] {
     spans.push({
       tag: { id: r.id, name: r.name },
       norm: r.norm,
-      firstDay: dayKey(r.first),
-      lastDay: dayKey(r.last),
+      firstDay: r.first,
+      lastDay: r.last,
       count: r.count,
     });
   }
@@ -177,30 +185,31 @@ export function buildTagSpans(raws: RawTagSpan[]): TagSpan[] {
 }
 
 /**
- * Fold instants into a row's `months` — its 活動月 with their counts, sparse
+ * Fold 苔片 spans into a row's `months` — its 活動月 with their counts, sparse
  * and ascending, so the client paints exactly these and nothing in between
  * (visualization.md §8: a single bar shows a gap as if it were one stretch).
- * Bucketed here for the same reason days are: a month is a zone fact, so SQL
- * hands over the raw `created_at` and never runs `strftime('%Y-%m', …)`.
+ * A 続く苔片 is in every month it touches, so the counts add up to AT LEAST the
+ * row's `count` — equal while every 苔片 is a single day (ADR-0005).
  */
-export function monthCounts(timestamps: Iterable<number>): MonthCount[] {
-  return [...bucketByMonth(timestamps)]
+export function monthCounts(spans: Iterable<DaySpan>): MonthCount[] {
+  return [...bucketSpansByMonth(spans)]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([month, count]) => ({ month, count }));
 }
 
-/** What the raw axis SQL hands back: one row per (苔片, tag) link. */
-export type AxisRow = { tagId: string; createdAt: number };
+/** What the raw axis SQL hands back: one row per (苔片, tag) link, with the 苔片's days. */
+export type AxisRow = DaySpan & { tagId: string };
 
 /** `monthCounts` per tag — for the forms whose rows are one per tag. */
 export function monthCountsByTag(rows: Iterable<AxisRow>): Map<string, MonthCount[]> {
-  const instants = new Map<string, number[]>();
+  const spans = new Map<string, DaySpan[]>();
   for (const r of rows) {
-    const list = instants.get(r.tagId);
-    if (list === undefined) instants.set(r.tagId, [r.createdAt]);
-    else list.push(r.createdAt);
+    const span = { firstDay: r.firstDay, lastDay: r.lastDay };
+    const list = spans.get(r.tagId);
+    if (list === undefined) spans.set(r.tagId, [span]);
+    else list.push(span);
   }
-  return new Map([...instants].map(([tagId, ts]) => [tagId, monthCounts(ts)]));
+  return new Map([...spans].map(([tagId, list]) => [tagId, monthCounts(list)]));
 }
 
 // ---------------------------------------------------------------------------
@@ -208,7 +217,7 @@ export function monthCountsByTag(rows: Iterable<AxisRow>): Map<string, MonthCoun
 // Node = tag, its count = 苔片 carrying it in the period (the stone's size —
 // §6's replacement for a per-tag heatmap); edge = two tags on the same 苔片,
 // its count = co-occurrence. Same plaintext-metadata-only diet as the rest of
-// this file: `post_tags` and `created_at`, never a body (ADR-0001).
+// this file: `post_tags` and `last_day`, never a body (ADR-0001).
 
 /** 今月 / 今年 / 全期間 — the three windows §6 offers. Absent = 全期間. */
 export const graphQuerySchema = z.object({
@@ -268,31 +277,22 @@ export const statsRoutes = new Hono<Env>()
     if (window === null) return fail(c, "validation_error");
     const { from, to } = window;
 
-    // Only the plaintext axis leaves D1: `created_at` inside the half-open
-    // window [dayStartMs(from), dayStartMs(addDays(to, 1))). No JOIN — every
-    // 苔片 counts, tagged or not. Bodies stay encrypted and untouched — which
-    // is why this route has no BODY_KEY gate (ADR-0001): the moss is drawable
-    // even while the key is missing.
+    // Only the plaintext axis leaves D1: the 苔片 whose days OVERLAP the window
+    // — `first_day <= to AND last_day >= from`, the one way every period in
+    // this app is cut (ADR-0005) — as their two days and 向き. No JOIN: every
+    // 苔片 counts, tagged or not. Bodies stay encrypted and untouched, which is
+    // why this route has no BODY_KEY gate (ADR-0001): the moss is drawable even
+    // while the key is missing.
     const rows = await createDb(c.env.DB)
-      .select({ createdAt: post.createdAt })
+      .select({ firstDay: post.firstDay, lastDay: post.lastDay, kind: post.kind })
       .from(post)
       .where(
-        and(
-          eq(post.userId, c.get("userId")),
-          gte(post.createdAt, dayStartMs(from)),
-          lt(post.createdAt, dayStartMs(addDays(to, 1))),
-        ),
+        and(eq(post.userId, c.get("userId")), lte(post.firstDay, to), gte(post.lastDay, from)),
       );
 
-    return c.json({
-      from,
-      to,
-      days: buildHeatmap(
-        rows.map((r) => r.createdAt),
-        from,
-        to,
-      ),
-    });
+    // `total` is the 苔片 overlapping the window — the caption's 「計 N 片」 —
+    // not the cells' sum, which a 続く苔片 would inflate by its length.
+    return c.json({ from, to, total: rows.length, days: buildHeatmap(rows, from, to) });
   })
   // --------------------------------------------- tag timeline (石の年表, §8)
   .get("/timeline", async (c) => {
@@ -313,15 +313,16 @@ export const statsRoutes = new Hono<Env>()
       id: tag.id,
       name: tag.name,
       norm: tag.norm,
-      first: min(post.createdAt),
-      last: max(post.createdAt),
+      first: min(post.firstDay),
+      last: max(post.lastDay),
       count: count(),
     };
     const ownPosts = eq(post.userId, userId);
-    // The raw axis for the month segments (§8): one row per (苔片, tag) link,
-    // bucketed into months in core. Each form batches it with its span SQL —
-    // one D1 round trip, one snapshot — so a row's months add up to its count.
-    const axisColumns = { tagId: postTags.tagId, createdAt: post.createdAt };
+    // The raw axis for the month segments (§8): one row per (苔片, tag) link
+    // with the 苔片's days, walked into months in core. Each form batches it
+    // with its span SQL — one D1 round trip, one snapshot — so a row's months
+    // cover exactly the 苔片 its count counts.
+    const axisColumns = { tagId: postTags.tagId, firstDay: post.firstDay, lastDay: post.lastDay };
 
     // ---- ?tags=t1,t2,…: the one AND row — posts carrying the whole set.
     if (parsed.data.tags !== undefined) {
@@ -339,11 +340,14 @@ export const statsRoutes = new Hono<Env>()
         .having(eq(countDistinct(postTags.tagId), ids.length));
       const inSet = and(ownPosts, inArray(post.id, matched));
       const aggQuery = db
-        .select({ first: min(post.createdAt), last: max(post.createdAt), count: count() })
+        .select({ first: min(post.firstDay), last: max(post.lastDay), count: count() })
         .from(post)
         .where(inSet);
       // The set's 苔片 themselves — no tag column needed, the one row is the set.
-      const axisQuery = db.select({ createdAt: post.createdAt }).from(post).where(inSet);
+      const axisQuery = db
+        .select({ firstDay: post.firstDay, lastDay: post.lastDay })
+        .from(post)
+        .where(inSet);
       // The user filter is belt and braces against echoing a foreign name:
       // count ≥ 1 below proves every id is a real tag on the user's own posts.
       const namedQuery = db
@@ -368,10 +372,10 @@ export const statsRoutes = new Hono<Env>()
 
       const row: TimelineRow = {
         tags: tagsInOrder,
-        firstDay: dayKey(agg.first),
-        lastDay: dayKey(agg.last),
+        firstDay: agg.first,
+        lastDay: agg.last,
         count: agg.count,
-        months: monthCounts(axis.map((r) => r.createdAt)),
+        months: monthCounts(axis),
       };
       return c.json({ today, rows: [row] });
     }
@@ -472,10 +476,13 @@ export const statsRoutes = new Hono<Env>()
     const userId = c.get("userId");
     const db = createDb(c.env.DB);
     const ownPosts = eq(post.userId, userId);
+    // 今月 / 今年 by overlap (ADR-0005): a 苔片 is in the period if it was still
+    // there on the period's first day — `last_day >= 初日`; no 苔片 ends after
+    // today, so that is the whole test.
     const inPeriod =
       period === "all"
         ? ownPosts
-        : and(ownPosts, gte(post.createdAt, dayStartMs(periodStartDay(period, Date.now()))));
+        : and(ownPosts, gte(post.lastDay, periodStartDay(period, Date.now())));
 
     // Per-stone counts, and the §6 self-join of data-model.md's 集計節:
     // `a.tag_id < b.tag_id` hands each pair exactly one row. Batched — two
