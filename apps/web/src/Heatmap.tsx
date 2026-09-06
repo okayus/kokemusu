@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { slashDay } from "./period";
-import { getHeatmap, type Heatmap } from "./stats-api";
+import { getHeatmap, type Heatmap, type HeatmapDay } from "./stats-api";
 
 // 総草 (docs/visualization.md §1): the one heatmap — the day's total activity,
 // weeks as columns, weekdays as rows (Sunday first, plans/vertical-slice.md),
-// five moss shades. It never splits by tag (2026-09-02 決定): per-tag devotion
-// is the graph's and the tag timeline's job, not another garden of grids.
-// Hand-written SVG on a fixed grid; the wrapper scrolls horizontally and
-// starts at the right edge, where today is. Every cell is a button: tapping
-// it lands on the post list narrowed to that one day.
+// five moss shades, and a hue for the day's 向き: 吸う (teal) when more of its
+// 苔片 face in than out, 出す (red-brown) the other way, moss green on a tie,
+// on 未分類 alone, and on nothing. It never splits by tag (2026-09-02 決定):
+// per-tag devotion is the graph's and the tag timeline's job, not another
+// garden of grids. Hand-written SVG on a fixed grid; the wrapper scrolls
+// horizontally and starts at the right edge, where today is. Every cell is a
+// button: tapping it lands on the post list narrowed to that one day.
 
 const CELL = 11;
 const GAP = 2; // dataviz: a 2px surface gap between fills
@@ -31,13 +33,50 @@ const weekdayOf = (day: string) =>
 
 const monthDay = (day: string) => `${+day.slice(5, 7)}/${+day.slice(8, 10)}`;
 
+/** Which way a day leans — the cell's hue (visualization.md §1). */
+export type Lean = "in" | "out";
+
+/**
+ * More 吸う than 出す is `in`, the reverse `out`; a tie, 未分類 alone and an
+ * empty day are null and stay moss green. Two 11px hues are all the grid can
+ * carry, so the counts themselves ride in the name and the tooltip.
+ */
+export function leanOf(input: number, output: number): Lean | null {
+  if (input > output) return "in";
+  if (output > input) return "out";
+  return null;
+}
+
+/** 「（インプット a・アウトプット b）」 — spelled out once some 苔片 of the day faces a way. */
+const breakdown = (cell: Pick<HeatmapDay, "input" | "output">) =>
+  cell.input + cell.output > 0 ? `（インプット ${cell.input}・アウトプット ${cell.output}）` : "";
+
+/**
+ * The caption's 「吸う x% · 出す y%」: each side over every 苔片 overlapping the
+ * window. `both` is on both sides and 未分類 is in the denominator, so the two
+ * neither add to 100 nor need to reach it — what they show is the lean
+ * (吸ってばかり / 出してばかり, CONTEXT.md 「向き」) and how much of the garden
+ * says which way it faces. Null while nothing does: a garden that never uses
+ * 向き shows no zeros.
+ */
+export function leanRatio(totals: {
+  total: number;
+  input: number;
+  output: number;
+}): string | null {
+  if (totals.total === 0 || totals.input + totals.output === 0) return null;
+  const pct = (n: number) => Math.round((n / totals.total) * 100);
+  return `吸う ${pct(totals.input)}% · 出す ${pct(totals.output)}%`;
+}
+
 /**
  * A cell's accessible name. The window is 53 weeks, so an M/D can occur twice
  * in it — the name carries the year, spelled the way the period chip will read
- * once the cell is tapped. The hover title stays short: the month labels are
- * in view there.
+ * once the cell is tapped, and the day's two sides when it has any (the hue in
+ * words). The hover title stays short: the month labels are in view there.
  */
-const cellName = (day: string, count: number) => `${slashDay(day)} · ${count} 件`;
+const cellName = (cell: HeatmapDay) =>
+  `${slashDay(cell.day)} · ${cell.count} 件${breakdown(cell)}`;
 
 /**
  * The keyboard walk over the dense day series (index = days from `from`):
@@ -81,8 +120,9 @@ export function HeatmapChart(props: {
   }));
   const weeks = cells.length === 0 ? 0 : (cells[cells.length - 1]?.col ?? 0) + 1;
   // The server's count of 苔片 overlapping the window — not the cells' sum,
-  // which a 続く苔片 would inflate by its length (ADR-0005).
+  // which a 続く苔片 would inflate by its length (ADR-0005) — and its 向き split.
   const total = data.total;
+  const ratio = leanRatio(data);
   const width = GUTTER_X + weeks * STEP + RING;
   const height = GUTTER_Y + 7 * STEP + RING;
 
@@ -120,7 +160,10 @@ export function HeatmapChart(props: {
     <figure className="heatmap">
       <figcaption className="heatmap-caption">
         <span>{label}</span>
-        <span className="heatmap-total">計 {total} 片</span>
+        <span className="heatmap-totals">
+          <span className="heatmap-total">計 {total} 片</span>
+          {ratio !== null && <span className="heatmap-lean">{ratio}</span>}
+        </span>
       </figcaption>
       <div className="heatmap-scroll" ref={scrollRef}>
         {/* A group, not an image: an image's children are presentational, and
@@ -130,7 +173,9 @@ export function HeatmapChart(props: {
           width={width}
           height={height}
           role="group"
-          aria-label={`${label}: ${data.from} から ${data.to} のヒートマップ、計 ${total} 片`}
+          aria-label={`${label}: ${data.from} から ${data.to} のヒートマップ、計 ${total} 片${
+            ratio === null ? "" : `、${ratio}`
+          }`}
         >
           {/* Axis labels are context for the eye; every cell names its own day. */}
           <g aria-hidden="true">
@@ -158,6 +203,7 @@ export function HeatmapChart(props: {
           </g>
           {cells.map((c, i) => {
             const tap = () => onDayTap(c.day);
+            const lean = leanOf(c.input, c.output);
             return (
               // No native button exists inside SVG, so this rebuilds one the way
               // the graph's stones do: role + tabindex + the native keyboard
@@ -166,11 +212,13 @@ export function HeatmapChart(props: {
               // plus the walk (walkTarget) that makes one tab stop enough.
               <rect
                 key={c.day}
-                className={`heatmap-cell l${c.level}${c.day === data.to ? " today" : ""}`}
+                className={`heatmap-cell l${c.level}${lean === null ? "" : ` ${lean}`}${
+                  c.day === data.to ? " today" : ""
+                }`}
                 data-day={c.day}
                 role="button"
                 tabIndex={c.day === tabDay ? 0 : -1}
-                aria-label={cellName(c.day, c.count)}
+                aria-label={cellName(c)}
                 x={GUTTER_X + c.col * STEP}
                 y={GUTTER_Y + c.row * STEP}
                 width={CELL}
@@ -197,7 +245,7 @@ export function HeatmapChart(props: {
                   if (e.key === " ") tap();
                 }}
               >
-                <title>{`${monthDay(c.day)} · ${c.count} 件`}</title>
+                <title>{`${monthDay(c.day)} · ${c.count} 件${breakdown(c)}`}</title>
               </rect>
             );
           })}
@@ -209,6 +257,15 @@ export function HeatmapChart(props: {
           <i key={level} className={`l${level}`} />
         ))}
         <span>多</span>
+        {/* The two hues, one swatch each, in the caption's order. */}
+        <span className="heatmap-legend-kind">
+          <i className="in" />
+          吸う
+        </span>
+        <span className="heatmap-legend-kind">
+          <i className="out" />
+          出す
+        </span>
       </div>
     </figure>
   );

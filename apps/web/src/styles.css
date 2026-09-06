@@ -23,6 +23,27 @@
   --moss-3: light-dark(#598c68, #5f9370);
   --moss-4: light-dark(#2f5c42, #8fc7a0);
 
+  /* 向きの色相（visualization.md §1、2026-09-06）: 吸う = 水を含んだ苔の青緑、
+     出す = 胞子体の赤茶。段 1..4 は上の --moss-* と OKLCH の L を段ごとに揃えた
+     （濃さ ＝ 件数 を色相をまたいで保つ。light L .84/.74/.59/.43、dark .37/.48/.62/.78）。
+     色相は OKLCH h 225（C .11）と h 55（C .12）— dataviz の validate_palette で
+     候補 h 195〜245 × h 15〜60 を総当たりし、moss との分離が最も大きい組。
+     段 0 は 0 件で向きが無いので緑のまま。
+     実測（dataviz、--pairs all、各段 × 両モード）: 単一色相・L 単調・隣接 ΔL ≥ .06 は PASS、
+     deutan の ΔE は 5.8〜7.6（最小 = dark 段 1 の 赤茶↔緑）、通常視の ΔE は 7.6〜11
+     （最小 = dark 段 1 の 青緑↔緑）。同じ L に縛るので categorical の門（8 / 15）には
+     届かない — 向きは言葉でも運ぶ（マスの読み上げとツールチップの内訳、カードの印、
+     キャプションの比率）。最も薄い段の対面コントラストは 1.5〜1.8:1 で --moss-1 と同じ
+     （ヒートマップの薄い端は退いてよい、が palette.md の扱い）。 */
+  --in-1: light-dark(#73d9ff, #00475c);
+  --in-2: light-dark(#4fb8dd, #006784);
+  --in-3: light-dark(#0d8baf, #1d92b7);
+  --in-4: light-dark(#005a73, #5ec6ec);
+  --out-1: light-dark(#ffb787, #643000);
+  --out-2: light-dark(#e3945c, #8e4700);
+  --out-3: light-dark(#b4692f, #bb7036);
+  --out-4: light-dark(#7c3d00, #f2a26a);
+
   accent-color: var(--moss);
 }
 
@@ -289,6 +310,48 @@ dialog.compose h2 {
   gap: 1rem;
 }
 
+/* 向き（features.md §1）: ネイティブ radio を 4 つ横に並べる。凡例は他の欄のラベルと
+   同じ見た目（上に置く）。丸の色は accent-color。 */
+.kind-field {
+  border: 0;
+  padding: 0;
+  margin: 0 0 1.25rem;
+  min-inline-size: 0;
+}
+
+.kind-field legend {
+  padding: 0;
+  font-weight: 600;
+  margin-block-end: 0.25rem;
+}
+
+.kind-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+}
+
+.kind-choices label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+/* テキストフィールド向けの全域 input 指定（幅 100%・48px）を丸に戻す（.tg-period と同じ）。 */
+.kind-choices input {
+  width: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  margin: 0;
+}
+
+.kind-choices label:has(input:checked) {
+  font-weight: 600;
+}
+
 /* ---- 苔（ヒートマップ） ---- */
 
 .heatmaps {
@@ -311,6 +374,15 @@ dialog.compose h2 {
   gap: 1rem;
   font-size: 0.85rem;
   margin-block-end: 0.35rem;
+}
+
+/* 計 N 片 と、向きがあれば 吸う x% · 出す y%（狭ければ折り返す）。 */
+.heatmap-totals {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0 0.6rem;
+  color: var(--quiet);
 }
 
 .heatmap-total {
@@ -351,6 +423,16 @@ dialog.compose h2 {
 .heatmap-cell.l3 { fill: var(--moss-3); }
 .heatmap-cell.l4 { fill: var(--moss-4); }
 
+/* 向きの色相（visualization.md §1）: 入 > 出 は吸う色、出 > 入 は出す色。同数・未分類・0 件は緑のまま。 */
+.heatmap-cell.in.l1 { fill: var(--in-1); }
+.heatmap-cell.in.l2 { fill: var(--in-2); }
+.heatmap-cell.in.l3 { fill: var(--in-3); }
+.heatmap-cell.in.l4 { fill: var(--in-4); }
+.heatmap-cell.out.l1 { fill: var(--out-1); }
+.heatmap-cell.out.l2 { fill: var(--out-2); }
+.heatmap-cell.out.l3 { fill: var(--out-3); }
+.heatmap-cell.out.l4 { fill: var(--out-4); }
+
 /* 今日のマスは常に見つけられるように縁取る。hover / focus の応答が後勝ち。 */
 .heatmap-cell.today {
   stroke: var(--quiet);
@@ -390,6 +472,17 @@ dialog.compose h2 {
 .heatmap-legend .l2 { background: var(--moss-2); }
 .heatmap-legend .l3 { background: var(--moss-3); }
 .heatmap-legend .l4 { background: var(--moss-4); }
+
+/* 2 色相の見本は 1 つずつ（段 3）。「多」から少し離す。 */
+.heatmap-legend-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-inline-start: 0.5rem;
+}
+
+.heatmap-legend .in { background: var(--in-3); }
+.heatmap-legend .out { background: var(--out-3); }
 
 /* ---- 石の年表（タグのタイムライン、visualization.md §8） ---- */
 
@@ -774,6 +867,46 @@ dialog.compose h2 {
   gap: 0.35rem;
   padding-block: 1rem;
   border-block-start: 1px solid var(--line);
+}
+
+/* 時刻と向きの印を 1 行に。 */
+.post-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.6rem;
+}
+
+/* 向きの印: 言葉が主、点は総草の色相の写し（両方 は半々）。 */
+.post-kind {
+  font-size: 0.75rem;
+  color: var(--quiet);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 0.55rem;
+  white-space: nowrap;
+}
+
+.post-kind::before {
+  content: "";
+  display: inline-block;
+  inline-size: 0.55em;
+  block-size: 0.55em;
+  border-radius: 50%;
+  margin-inline-end: 0.35em;
+  background: var(--moss-3);
+}
+
+.post-kind.input::before {
+  background: var(--in-3);
+}
+
+.post-kind.output::before {
+  background: var(--out-3);
+}
+
+.post-kind.both::before {
+  background: linear-gradient(90deg, var(--in-3) 50%, var(--out-3) 50%);
 }
 
 .post-title {

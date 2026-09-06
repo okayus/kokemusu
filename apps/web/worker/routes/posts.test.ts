@@ -157,6 +157,18 @@ describe("createPostSchema", () => {
     ).toBe(false);
     expect(createPostSchema.safeParse({ body: "x", tags: [""] }).success).toBe(false);
   });
+
+  it("takes a 向き as one of the three words, null or nothing for 未分類, and no other spelling", () => {
+    for (const kind of ["input", "output", "both", null]) {
+      const parsed = createPostSchema.safeParse({ body: "x", kind });
+      expect(parsed.success).toBe(true);
+      if (parsed.success) expect(parsed.data.kind).toBe(kind);
+    }
+    expect(createPostSchema.safeParse({ body: "x" }).success).toBe(true);
+    for (const kind of ["consume", "INPUT", "", 1, ["input"]]) {
+      expect(createPostSchema.safeParse({ body: "x", kind }).success).toBe(false);
+    }
+  });
 });
 
 describe("listPostsQuerySchema", () => {

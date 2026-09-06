@@ -2,15 +2,33 @@
 // this endpoint (ADR-0001), so the moss draws even while BODY_KEY is missing.
 import { request } from "./api";
 
-/** One cell: the JST day, its 苔片 count, and the server-decided 0..4 shade. */
-export type HeatmapDay = { day: string; count: number; level: number };
+/**
+ * One cell: the JST day, its 苔片 count, the server-decided 0..4 shade, and how
+ * many of the day's 苔片 face each way (`both` counts on both sides) — the
+ * cell's hue is decided by comparing the two (visualization.md §1).
+ */
+export type HeatmapDay = {
+  day: string;
+  count: number;
+  level: number;
+  input: number;
+  output: number;
+};
 
 /**
  * Dense ascending series over the resolved window (default: 53 weeks to today).
  * `total` = the 苔片 overlapping the window — the caption's 計 — which is not the
- * cells' sum once a 続く苔片 lights several days (ADR-0005).
+ * cells' sum once a 続く苔片 lights several days (ADR-0005); `input` / `output`
+ * count those same 苔片 by 向き, the caption's 「吸う x% · 出す y%」.
  */
-export type Heatmap = { from: string; to: string; total: number; days: HeatmapDay[] };
+export type Heatmap = {
+  from: string;
+  to: string;
+  total: number;
+  input: number;
+  output: number;
+  days: HeatmapDay[];
+};
 
 // No tag parameter on purpose: the heatmap is the 総草 alone (visualization.md
 // §1). Per-tag devotion belongs to the graph and the tag timeline (Phase 2).

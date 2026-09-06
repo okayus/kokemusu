@@ -7,7 +7,9 @@ type HeatmapWire = {
   from: string;
   to: string;
   total: number;
-  days: { day: string; count: number; level: number }[];
+  input: number;
+  output: number;
+  days: { day: string; count: number; level: number; input: number; output: number }[];
 };
 
 type PostsWire = { posts: { body: string; firstDay: string }[]; today: string };
@@ -71,7 +73,7 @@ test("register → post → today's moss darkens → reload → logout → login
   await expect(total).toHaveText("計 1 片");
   await expect(today).toHaveClass(/\bl1\b/);
   const heatmap = (await (await page.request.get("/api/stats/heatmap")).json()) as HeatmapWire;
-  expect(heatmap.days.at(-1)).toEqual({ day: heatmap.to, count: 1, level: 1 });
+  expect(heatmap.days.at(-1)).toEqual({ day: heatmap.to, count: 1, level: 1, input: 0, output: 0 });
   expect(heatmap.days.reduce((n, d) => n + d.count, 0)).toBe(1);
 
   // 石の年表 (visualization.md §8): the two stones appear as one row each, and
@@ -442,4 +444,45 @@ test("register → post → today's moss darkens → reload → logout → login
   expect(titled).toHaveLength(1);
   expect(titled[0]?.title).toMatch(/^k1\.[A-Za-z0-9_-]{16}\./);
   expect(titled[0]?.title).not.toContain("同じ石");
+
+  // 向き (plans/day-axis-and-kind.md §B): two 苔片 stacked as インプット make
+  // today's cell lean 吸う — its readout carries the two sides, the caption
+  // the window's ratio (5 苔片 overlap it, 2 face in), the wire both, the
+  // card a word, and D1 the column. Then 編集 back to 未分類 clears it (PATCH
+  // reads the whole form: an unpicked 向き is null), and the cell follows.
+  for (const text of ["読んだ 1", "読んだ 2"]) {
+    await stack.click();
+    await dialog.getByLabel("いまの苔片").fill(text);
+    await dialog.getByLabel("インプット", { exact: true }).check();
+    await dialog.getByRole("button", { name: "積む", exact: true }).click();
+    await expect(dialog).toBeHidden();
+  }
+  await expect(today).toHaveClass(/\bin\b/);
+  await expect(today).toHaveAttribute(
+    "aria-label",
+    `${slashed(todayKey)} · 4 件（インプット 2・アウトプット 0）`,
+  );
+  await expect(total).toHaveText("計 5 片");
+  await expect(page.locator(".heatmap-lean")).toHaveText("吸う 40% · 出す 0%");
+  const leaning = (await (await page.request.get("/api/stats/heatmap")).json()) as HeatmapWire;
+  expect(leaning.days.at(-1)).toEqual({ day: todayKey, count: 4, level: 4, input: 2, output: 0 });
+  expect([leaning.total, leaning.input, leaning.output]).toEqual([5, 2, 0]);
+  const read = timeline.locator("li.post").first();
+  await expect(read).toContainText("読んだ 2");
+  await expect(read.locator(".post-kind")).toHaveText("インプット");
+  expect(
+    queryRows<{ kind: string | null }>("SELECT kind FROM post WHERE kind IS NOT NULL"),
+  ).toEqual([{ kind: "input" }, { kind: "input" }]);
+
+  await read.getByRole("button", { name: "編集", exact: true }).click();
+  await read.getByLabel("未分類", { exact: true }).check();
+  await read.getByRole("button", { name: "保存" }).click();
+  await expect(read.locator(".post-kind")).toHaveCount(0);
+  await expect(today).toHaveAttribute(
+    "aria-label",
+    `${slashed(todayKey)} · 4 件（インプット 1・アウトプット 0）`,
+  );
+  await expect(page.locator(".heatmap-lean")).toHaveText("吸う 20% · 出す 0%");
+  const stillIn = queryRows<{ c: number }>("SELECT COUNT(*) AS c FROM post WHERE kind = 'input'");
+  expect(stillIn[0]?.c).toBe(1);
 });

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { decodeCursor, encodeCursor } from "../core/cursor";
 import { decryptBody, encryptBody, importBodyKey } from "../core/crypto";
 import { dayKey, isDayKey, type DayKey } from "../core/day";
-import type { PostKind } from "../core/kind";
+import { POST_KINDS, type PostKind } from "../core/kind";
 import { MAX_TAGS_PER_POST, normalizeTagName, parseTagNames, parseTagsParam } from "../core/tag";
 import { createDb, type Db } from "../db";
 import { post, postTags, tag } from "../db/schema";
@@ -31,6 +31,11 @@ export const createPostSchema = z.object({
   // Phase 2's PAT senders do. Blank collapses to "no heading" in the handler.
   title: z.string().max(MAX_TITLE_CHARS).optional(),
   tags: z.array(z.string().min(1).max(MAX_TAG_CHARS)).max(MAX_TAGS_PER_POST).optional(),
+  // 向き (core/kind.ts): one of the three, or nothing — absent and null both
+  // read as 未分類, so a sender that spells "no 向き" explicitly is not turned
+  // away. The same field on PATCH: the edit form sends the whole state, so an
+  // omitted 向き clears it, like an omitted title clears the heading.
+  kind: z.enum(POST_KINDS).nullable().optional(),
 });
 
 // The two tag filter forms: `?tag=` = one tag by (normalized) name —
@@ -189,8 +194,9 @@ export const postRoutes = new Hono<Env>()
     const now = Date.now();
     // The one place the zone enters (core/day.ts): a 苔片 stacked now lands on
     // today's 「日」. Until A2 takes the days off the body, every 苔片 is a
-    // single day and it is this one; `kind` waits for B the same way.
+    // single day and it is this one.
     const today = dayKey(now);
+    const kind = parsed.data.kind ?? null;
     const { newTags, resolved } = await resolveTagRows(db, userId, wanted, now);
 
     // Encrypt at the last moment before the write (ADR-0001); plaintext never
@@ -204,7 +210,7 @@ export const postRoutes = new Hono<Env>()
       bodyFormat: "markdown",
       firstDay: today,
       lastDay: today,
-      kind: null,
+      kind,
       createdAt: now,
       updatedAt: now,
     };
@@ -231,7 +237,7 @@ export const postRoutes = new Hono<Env>()
       firstDay: today,
       lastDay: today,
       postedDay: today,
-      kind: null,
+      kind,
       tags: resolved,
     };
     return c.json(item, 201);
@@ -409,7 +415,6 @@ export const postRoutes = new Hono<Env>()
           bodyFormat: post.bodyFormat,
           firstDay: post.firstDay,
           lastDay: post.lastDay,
-          kind: post.kind,
           createdAt: post.createdAt,
         })
         .from(post)
@@ -425,6 +430,7 @@ export const postRoutes = new Hono<Env>()
     const titlePlain = parsed.data.title?.trim() ? parsed.data.title.trim() : null;
     const encryptedTitle = titlePlain === null ? null : await encryptBody(titlePlain, key);
     const encryptedBody = await encryptBody(parsed.data.body, key);
+    const kind = parsed.data.kind ?? null;
 
     // One atomic batch: the row, any new stones, then the links replaced
     // wholesale — old links deleted BEFORE the inserts so a kept tag can't
@@ -433,7 +439,7 @@ export const postRoutes = new Hono<Env>()
     await db.batch([
       db
         .update(post)
-        .set({ title: encryptedTitle, body: encryptedBody, updatedAt: now })
+        .set({ title: encryptedTitle, body: encryptedBody, kind, updatedAt: now })
         .where(eq(post.id, owned.id)),
       ...newTags.map((t) => db.insert(tag).values(t)),
       db.delete(postTags).where(eq(postTags.postId, owned.id)),
@@ -447,11 +453,11 @@ export const postRoutes = new Hono<Env>()
       bodyFormat: owned.bodyFormat,
       createdAt: owned.createdAt,
       updatedAt: now,
-      // The days and 向き are not editable yet (A2 / B): the row keeps its own.
+      // The days are not editable yet (A2): the row keeps its own.
       firstDay: owned.firstDay,
       lastDay: owned.lastDay,
       postedDay: dayKey(owned.createdAt),
-      kind: owned.kind,
+      kind,
       tags: resolved,
     };
     return c.json(item);

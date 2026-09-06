@@ -2,11 +2,9 @@
 // suggestions. Bodies travel plaintext over the same-origin HTTPS request; the
 // Worker encrypts right before D1 (ADR-0001). Delete is physical (ADR-0003).
 import { postJson, request } from "./api";
+import type { PostKind } from "./kind";
 
 export type TagSummary = { id: string; name: string };
-
-/** 向き (CONTEXT.md): インプット / アウトプット / 両方. Absent on the 苔片 = 未分類 (null). */
-export type PostKind = "input" | "output" | "both";
 
 export type PostItem = {
   id: string;
@@ -20,6 +18,7 @@ export type PostItem = {
   lastDay: string;
   /** The JST day it was written on. 「いま積んだ」 = all three days equal — the client only compares. */
   postedDay: string;
+  /** 向き (kind.ts); null = 未分類. */
   kind: PostKind | null;
   tags: TagSummary[];
 };
@@ -27,20 +26,22 @@ export type PostItem = {
 /** `today` is server-decided (JST) like the 年表's axis edge — the anchor of the period presets. */
 export type Timeline = { posts: PostItem[]; nextCursor: string | null; today: string };
 
-// `title` = the optional 見出し (roadmap 決めること 7); omitted = none.
-export const createPost = (input: {
+/** What a write carries: the body, and the optional 見出し / stones / 向き. */
+export type PostInput = {
   body: string;
   tags?: string[];
+  // `title` = the optional 見出し (roadmap 決めること 7); omitted = none.
   title?: string;
-}): Promise<PostItem> => postJson("/api/posts", input);
+  // 向き — omitted or null = 未分類.
+  kind?: PostKind | null;
+};
+
+export const createPost = (input: PostInput): Promise<PostItem> => postJson("/api/posts", input);
 
 // Wholesale replacement of the editable fields — the edit form always sends
-// the complete new state, so an omitted/blank title clears the heading and
-// the tags array replaces the links.
-export const updatePost = (
-  id: string,
-  input: { body: string; title?: string; tags?: string[] },
-): Promise<PostItem> =>
+// the complete new state, so an omitted/blank title clears the heading, the
+// tags array replaces the links, and an omitted 向き clears it.
+export const updatePost = (id: string, input: PostInput): Promise<PostItem> =>
   request(`/api/posts/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },

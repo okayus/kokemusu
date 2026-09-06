@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { addDays } from "../core/day";
+import type { PostKind } from "../core/kind";
 import { app } from "../index";
 import { testEnv } from "../test-support";
 import {
   MAX_WINDOW_DAYS,
   buildGraph,
   buildHeatmap,
+  heatmapTotals,
   buildTagSpans,
   graphQuerySchema,
   heatmapQuerySchema,
@@ -134,13 +136,24 @@ describe("resolveWindow", () => {
 });
 
 describe("buildHeatmap", () => {
-  const on = (firstDay: string, lastDay = firstDay) => ({ firstDay, lastDay, kind: null });
+  const on = (firstDay: string, lastDay = firstDay, kind: PostKind | null = null) => ({
+    firstDay,
+    lastDay,
+    kind,
+  });
+  const cell = (day: string, count: number, input = 0, output = 0) => ({
+    day,
+    count,
+    level: Math.min(count, 4),
+    input,
+    output,
+  });
 
   it("lays out dense zeros when nothing grew", () => {
     expect(buildHeatmap([], "2026-09-01", "2026-09-03")).toEqual([
-      { day: "2026-09-01", count: 0, level: 0 },
-      { day: "2026-09-02", count: 0, level: 0 },
-      { day: "2026-09-03", count: 0, level: 0 },
+      cell("2026-09-01", 0),
+      cell("2026-09-02", 0),
+      cell("2026-09-03", 0),
     ]);
   });
 
@@ -148,19 +161,19 @@ describe("buildHeatmap", () => {
     expect(
       buildHeatmap([on("2026-09-02"), on("2026-09-03", "2026-09-05")], "2026-09-01", "2026-09-06"),
     ).toEqual([
-      { day: "2026-09-01", count: 0, level: 0 },
-      { day: "2026-09-02", count: 1, level: 1 },
-      { day: "2026-09-03", count: 1, level: 1 },
-      { day: "2026-09-04", count: 1, level: 1 },
-      { day: "2026-09-05", count: 1, level: 1 },
-      { day: "2026-09-06", count: 0, level: 0 },
+      cell("2026-09-01", 0),
+      cell("2026-09-02", 1),
+      cell("2026-09-03", 1),
+      cell("2026-09-04", 1),
+      cell("2026-09-05", 1),
+      cell("2026-09-06", 0),
     ]);
   });
 
   it("clips a span to the window — the moss shows only the days it can see", () => {
     expect(buildHeatmap([on("2026-08-20", "2026-09-10")], "2026-09-01", "2026-09-02")).toEqual([
-      { day: "2026-09-01", count: 1, level: 1 },
-      { day: "2026-09-02", count: 1, level: 1 },
+      cell("2026-09-01", 1),
+      cell("2026-09-02", 1),
     ]);
   });
 
@@ -176,9 +189,53 @@ describe("buildHeatmap", () => {
       [12, 4],
     ] as const) {
       expect(buildHeatmap(at(count), "2026-09-02", "2026-09-02")).toEqual([
-        { day: "2026-09-02", count, level },
+        { day: "2026-09-02", count, level, input: 0, output: 0 },
       ]);
     }
+  });
+
+  it("carries each day's 入 / 出 — `both` on both sides, 未分類 on neither — and a 続く苔片 faces its way on every day", () => {
+    const day = "2026-09-02";
+    const spans = [
+      on(day, day, "input"),
+      on(day, day, "output"),
+      on(day, day, "both"),
+      on(day),
+      on("2026-09-01", "2026-09-03", "input"),
+    ];
+    expect(buildHeatmap(spans, "2026-09-01", "2026-09-03")).toEqual([
+      cell("2026-09-01", 1, 1),
+      cell(day, 5, 3, 2),
+      cell("2026-09-03", 1, 1),
+    ]);
+  });
+});
+
+describe("heatmapTotals — the window's 苔片 by 向き, per 苔片 like `total`", () => {
+  const span = (kind: PostKind | null, firstDay = "2026-09-02", lastDay = firstDay) => ({
+    firstDay,
+    lastDay,
+    kind,
+  });
+
+  it("is all zeros for an empty window", () => {
+    expect(heatmapTotals([])).toEqual({ total: 0, input: 0, output: 0 });
+  });
+
+  it("counts `both` on both sides and 未分類 only in the total", () => {
+    expect(heatmapTotals([span("input"), span("output"), span("both"), span(null)])).toEqual({
+      total: 4,
+      input: 2,
+      output: 2,
+    });
+  });
+
+  it("counts a 続く苔片 once however many days it lights", () => {
+    expect(heatmapTotals([span("input", "2026-08-01", "2026-09-30")])).toEqual({
+      total: 1,
+      input: 1,
+      output: 0,
+    });
   });
 });
 
