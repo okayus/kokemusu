@@ -14,8 +14,7 @@ import {
   ComposeDialog,
   DaysDisclosure,
   KindField,
-  submitOnCmdEnter,
-  tagsField,
+  stoneNames,
   useComposeShortcut,
   type ComposeRequest,
   type DaysFields,
@@ -39,12 +38,13 @@ import {
   deletePost,
   listPosts,
   listTags,
-  splitTagField,
   updatePost,
   type PostItem,
   type TagSummary,
 } from "./posts-api";
+import { TagField } from "./TagField";
 import { TagGraphSection } from "./TagGraph";
+import { stonesOf, type TagsFields } from "./tags";
 import { rowKey, TagTimelineSection } from "./TagTimeline";
 import {
   createToken,
@@ -524,16 +524,10 @@ function Garden(props: {
 
   return (
     <>
-      {/* One completion list for every tag field — the dialog's and the edit
-          forms' — mounted with the garden rather than with the dialog. */}
-      <datalist id="tag-options">
-        {tagOptions.map((t) => (
-          <option key={t.id} value={t.name} />
-        ))}
-      </datalist>
       {props.compose !== null && (
         <ComposeDialog
           seedTags={props.compose.seedTags}
+          tagOptions={tagOptions}
           today={today}
           onCreated={handleCreated}
           onClose={props.onComposeClose}
@@ -625,9 +619,10 @@ function Garden(props: {
         <Timeline
           posts={posts}
           today={today}
+          tagOptions={tagOptions}
           filtered={narrowedBy.length > 0}
           onTagTap={(t) => showPosts([t])}
-          onSameStones={(tags) => props.onCompose({ seedTags: tagsField(tags) })}
+          onSameStones={(tags) => props.onCompose({ seedTags: stoneNames(tags) })}
           onUpdated={handleUpdated}
           onDeleted={handleDeleted}
           onSessionLost={props.onSessionLost}
@@ -718,6 +713,8 @@ function Timeline(props: {
   posts: PostItem[] | null;
   /** The feed's server-decided today — the ceiling of the edit forms' date fields. */
   today: string | null;
+  /** The garden's registered stones — the edit forms' tag suggestions. */
+  tagOptions: TagSummary[];
   filtered: boolean;
   onTagTap: (tag: TagSummary) => void;
   onSameStones: (tags: TagSummary[]) => void;
@@ -744,6 +741,7 @@ function Timeline(props: {
           key={p.id}
           post={p}
           today={props.today}
+          tagOptions={props.tagOptions}
           onTagTap={props.onTagTap}
           onSameStones={props.onSameStones}
           onUpdated={props.onUpdated}
@@ -764,6 +762,7 @@ function Timeline(props: {
 function PostEntry(props: {
   post: PostItem;
   today: string | null;
+  tagOptions: TagSummary[];
   onTagTap: (tag: TagSummary) => void;
   onSameStones: (tags: TagSummary[]) => void;
   onUpdated: (updated: PostItem) => void;
@@ -772,14 +771,15 @@ function PostEntry(props: {
 }) {
   const p = props.post;
   const [editing, setEditing] = useState(false);
-  // 編集中の本文と日だけ state（本文はプレビューが要り、日は 2 欄が互いを縛る）。
-  // タグは form のまま。「編集」を押した時点の値で毎回蒔き直すので、
-  // やめる ＝ 捨てる が保たれる。
+  // 編集中の本文・日・タグは state（本文はプレビューが要り、日は 2 欄が互いを縛り、
+  // タグはチップと候補を持つ）。向きだけ form のまま。「編集」を押した時点の値で
+  // 毎回蒔き直すので、やめる ＝ 捨てる が保たれる。
   const [editBody, setEditBody] = useState(p.body);
   const [editDays, setEditDays] = useState<DaysFields>({
     firstDay: p.firstDay,
     lastDay: p.lastDay,
   });
+  const [editTags, setEditTags] = useState<TagsFields>({ tags: stoneNames(p.tags), text: "" });
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -849,7 +849,8 @@ function PostEntry(props: {
             const fd = new FormData(e.currentTarget);
             void save({
               body: editBody,
-              tags: splitTagField(String(fd.get("tags") ?? "")),
+              // The text still typed in the tag field is a stone too (stonesOf).
+              tags: stonesOf(editTags),
               kind: parseKind(fd.get("kind")),
               days: editDays,
             });
@@ -874,19 +875,12 @@ function PostEntry(props: {
           {/* Uncontrolled like the other fields: the radio group is re-seeded
               from the 苔片 each time 編集 opens, so やめる discards. */}
           <KindField defaultValue={p.kind} />
-          <div className="field">
-            <label htmlFor={`edit-tags-${p.id}`}>タグ（コンマ区切り・任意）</label>
-            {/* list: the composer's datalist — one source of completion. */}
-            <input
-              id={`edit-tags-${p.id}`}
-              name="tags"
-              list="tag-options"
-              autoComplete="off"
-              maxLength={500}
-              defaultValue={p.tags.map((t) => t.name).join(", ")}
-              onKeyDown={submitOnCmdEnter}
-            />
-          </div>
+          <TagField
+            id={`edit-tags-${p.id}`}
+            options={props.tagOptions}
+            value={editTags}
+            onChange={setEditTags}
+          />
           {error && (
             <p role="alert" className="error">
               {error}
@@ -981,6 +975,7 @@ function PostEntry(props: {
           onClick={() => {
             setEditBody(p.body);
             setEditDays({ firstDay: p.firstDay, lastDay: p.lastDay });
+            setEditTags({ tags: stoneNames(p.tags), text: "" });
             setEditing(true);
           }}
         >

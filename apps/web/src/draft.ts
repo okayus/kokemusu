@@ -10,6 +10,7 @@
 // is wrapped and the composer works without it.
 
 import { parseKind, type PostKind } from "./kind";
+import { splitTagText } from "./tags";
 
 const KEY = "kokemusu.draft.v1";
 
@@ -21,7 +22,9 @@ const KEY = "kokemusu.draft.v1";
  */
 export type Draft = {
   body: string;
-  tags: string;
+  /** The stones chosen (chips, by name) and the text still typed in the tag field (tags.ts TagsFields, flattened). */
+  tags: string[];
+  tagText: string;
   kind: PostKind | null;
   firstDay: string;
   lastDay: string;
@@ -30,7 +33,8 @@ export type Draft = {
 /** A draft with nothing in it — what a fresh dialog starts from and what success leaves. */
 export const EMPTY_DRAFT: Draft = {
   body: "",
-  tags: "",
+  tags: [],
+  tagText: "",
   kind: null,
   firstDay: "",
   lastDay: "",
@@ -40,23 +44,39 @@ const stringOr = (value: unknown, fallback: string): string =>
   typeof value === "string" ? value : fallback;
 
 /**
+ * The stones as stored: an array of names since the chip field (2026-09-06),
+ * the one comma-separated string of the field before it — read with the same
+ * splitting that field applied on submit. Anything else is not a draft.
+ */
+const parseStones = (value: unknown): string[] | null =>
+  typeof value === "string"
+    ? splitTagText(value)
+    : Array.isArray(value) && value.every((v): v is string => typeof v === "string")
+      ? value
+      : null;
+
+/**
  * The stored JSON → a Draft, or null for anything that is not one. `kind`
- * joined the shape with the 向き radio and the days with 日を選ぶ (2026-09-06);
- * a draft saved before either lacks the field and reads as 未分類 / 今日. A
- * `title` — the 見出し the shape carried from 2026-09-05 until ADR-0006 retired
- * it — is not thrown away: whatever was typed there becomes the body's first
- * line, so a half-written 苔片 loses no words to the change.
+ * joined the shape with the 向き radio and the days with 日を選ぶ (2026-09-06),
+ * `tagText` with the chip field the same day; a draft saved before lacks the
+ * field and reads as 未分類 / 今日 / nothing typed. A `title` — the 見出し the
+ * shape carried from 2026-09-05 until ADR-0006 retired it — is not thrown
+ * away: whatever was typed there becomes the body's first line, so a
+ * half-written 苔片 loses no words to the change.
  */
 export function parseDraft(raw: string): Draft | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (typeof parsed !== "object" || parsed === null) return null;
-    const { title, body, tags, kind, firstDay, lastDay } = parsed as Record<string, unknown>;
-    if (typeof body !== "string" || typeof tags !== "string") return null;
+    const { title, body, tags, tagText, kind, firstDay, lastDay } = parsed as Record<string, unknown>;
+    if (typeof body !== "string") return null;
+    const stones = parseStones(tags);
+    if (stones === null) return null;
     const heading = stringOr(title, "").trim();
     return {
       body: heading === "" ? body : body === "" ? heading : `${heading}\n\n${body}`,
-      tags,
+      tags: stones,
+      tagText: stringOr(tagText, ""),
       kind: parseKind(kind),
       firstDay: stringOr(firstDay, ""),
       lastDay: stringOr(lastDay, ""),
@@ -68,7 +88,8 @@ export function parseDraft(raw: string): Draft | null {
 
 export const isEmptyDraft = (draft: Draft): boolean =>
   draft.body === "" &&
-  draft.tags === "" &&
+  draft.tags.length === 0 &&
+  draft.tagText === "" &&
   draft.kind === null &&
   draft.firstDay === "" &&
   draft.lastDay === "";

@@ -395,6 +395,127 @@ dialog.compose h2 {
   gap: 1rem;
 }
 
+/* ---- タグの欄（TagField.tsx、features.md §2）: 石のチップ ＋ 候補の combobox ---- */
+
+/* The box wears the input's dress (border, radius, 48px) and holds the chips
+   and the text on one wrapping line; the real <input> inside is bare. The
+   focus ring moves to the box (focus-within) so the whole field lights up. */
+.tag-field-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 48px;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  cursor: text;
+}
+
+.tag-field-box:focus-within {
+  outline: 3px solid var(--moss);
+  outline-offset: 2px;
+}
+
+.tag-field-box input {
+  flex: 1 1 8rem;
+  width: auto;
+  min-inline-size: 6rem;
+  min-height: 32px;
+  padding: 0.1rem 0.25rem;
+  border: 0;
+  border-radius: 0;
+}
+
+.tag-field-box input:focus-visible {
+  outline: none;
+}
+
+.tag-field-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* A chosen stone: the .tag-chip look, with its × inside the pill. */
+.tag-field-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  min-height: 28px;
+  padding: 0.1rem 0.2rem 0.1rem 0.6rem;
+  font-size: 0.75rem;
+  color: var(--moss);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.tag-field-chip button {
+  min-height: 24px;
+  min-width: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  font-size: 0.9rem;
+  line-height: 1;
+  color: inherit;
+}
+
+.tag-field-chip button:hover {
+  background: color-mix(in oklab, var(--moss) 15%, transparent);
+}
+
+/* The listbox: an overlay opening upward from the box (TagField.tsx explains
+   why not in the flow, and why up). Above the sticky bar (1) and the round
+   積む (2). Scrolls past ten or so rows. */
+.tag-field-anchor {
+  position: relative;
+}
+
+.tag-field-options {
+  position: absolute;
+  inset-block-end: 100%;
+  inset-inline: 0;
+  z-index: 3;
+  list-style: none;
+  margin: 0 0 0.25rem;
+  padding: 0.25rem;
+  max-block-size: 13rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--bg);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
+}
+
+.tag-field-options[hidden] {
+  display: none;
+}
+
+.tag-field-option {
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.tag-field-option[aria-selected="true"],
+.tag-field-option:hover {
+  background: color-mix(in oklab, var(--moss) 15%, transparent);
+}
+
+/* The row that makes a new stone reads as an offer, not a stone. */
+.tag-field-option.new {
+  color: var(--quiet);
+}
+
+.tag-field .hint {
+  margin-block: 0.35rem 0;
+}
+
 /* 向き（features.md §1）: ネイティブ radio を 4 つ横に並べる。凡例は他の欄のラベルと
    同じ見た目（上に置く）。丸の色は accent-color。 */
 .kind-field {

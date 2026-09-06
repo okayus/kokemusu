@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ComposeDialog, DaysDisclosure, isComposeShortcut, tagsField } from "./Compose";
+import { ComposeDialog, DaysDisclosure, isComposeShortcut, stoneNames } from "./Compose";
 
 describe("isComposeShortcut — `n` opens the dialog only when the key would otherwise do nothing", () => {
   const plain = {
@@ -31,15 +31,15 @@ describe("isComposeShortcut — `n` opens the dialog only when the key would oth
   });
 });
 
-describe("tagsField", () => {
-  it("spells the stones the way the edit form does", () => {
+describe("stoneNames", () => {
+  it("is the stones by name, in the 苔片's order", () => {
     expect(
-      tagsField([
+      stoneNames([
         { id: "a", name: "typescript" },
         { id: "b", name: "読書" },
       ]),
-    ).toBe("typescript, 読書");
-    expect(tagsField([])).toBe("");
+    ).toEqual(["typescript", "読書"]);
+    expect(stoneNames([])).toEqual([]);
   });
 });
 
@@ -51,10 +51,11 @@ describe("ComposeDialog", () => {
   // No localStorage in Node: loadDraft reads null, so the fields start from the
   // props alone. Effects (showModal, focus) don't run under
   // renderToStaticMarkup — this is about what the form is seeded with.
-  const render = (seedTags: string | null, today: string | null = "2026-09-06") =>
+  const render = (seedTags: string[] | null, today: string | null = "2026-09-06") =>
     renderToStaticMarkup(
       <ComposeDialog
         seedTags={seedTags}
+        tagOptions={[]}
         today={today}
         onCreated={() => {}}
         onClose={() => {}}
@@ -62,17 +63,21 @@ describe("ComposeDialog", () => {
       />,
     );
 
-  it("seeds the tag field from 同じ石に積む and nothing else", () => {
-    const html = render("typescript, 読書");
-    expect(html).toContain('value="typescript, 読書"');
+  it("seeds the tag field from 同じ石に積む — the stones as chips, no text — and nothing else", () => {
+    const html = render(["typescript", "読書"]);
+    expect(html.match(/<li class="tag-field-chip">/g)).toHaveLength(2);
+    expect(html).toContain("<span>typescript</span>");
+    expect(html).toContain("<span>読書</span>");
+    expect(html).toContain('aria-label="「typescript」を外す"');
+    expect(inputTag(html, "post-tags")).toContain('value=""');
     // The body starts empty — only the stones travel (CONTEXT.md).
     expect(html).toMatch(/<textarea[^>]*id="post-body"[^>]*><\/textarea>/);
   });
 
-  it("starts empty without a seed", () => {
+  it("starts empty without a seed — a combobox with no chips", () => {
     const html = render(null);
-    expect(html).toContain('id="post-tags"');
-    expect(html).not.toContain('value="typescript');
+    expect(inputTag(html, "post-tags")).toContain('role="combobox"');
+    expect(html).not.toContain("tag-field-chip");
   });
 
   it("offers the 向き as native radios — the three words and 未分類, which is checked until a draft says otherwise", () => {
