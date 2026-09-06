@@ -201,9 +201,10 @@ function AuthedView(props: {
   onSessionLost: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
-  // The 積む dialog's request lives here because two places raise it: the bar's
-  // 積む and the `n` key (resume the draft as it is) up here, and a 苔片's
-  // 同じ石に積む (that 苔片's stones seeded) down in the feed. Garden renders it.
+  // The 積む dialog's request lives here because two places raise it: the round
+  // 積む at the bottom-right corner and the `n` key (resume the draft as it is)
+  // up here, and a 苔片's 同じ石に積む (that 苔片's stones seeded) down in the
+  // feed. Garden renders it.
   const [compose, setCompose] = useState<ComposeRequest | null>(null);
   // The receipt after a post — 「積みました」, and where it went when the feed
   // cannot show it — hangs from the sticky bar so it is in view wherever the
@@ -223,9 +224,6 @@ function AuthedView(props: {
       <header className="bar">
         <h1>苔むす</h1>
         <div className="bar-actions">
-          <button type="button" className="primary" onClick={openCompose}>
-            積む
-          </button>
           <button
             type="button"
             onClick={() => {
@@ -253,6 +251,21 @@ function AuthedView(props: {
           )}
         </p>
       </header>
+      {/* 積む, the round button fixed to the bottom-right corner (features.md
+          §1): one tap from wherever the reader has scrolled to, under the thumb
+          on a phone. Icon-only, so the name is on the button itself; styles.css
+          hides it while a dialog is up. */}
+      <button type="button" className="fab" aria-label="積む" title="積む" onClick={openCompose}>
+        <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false">
+          <path
+            d="M12 5v14M5 12h14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+          />
+        </svg>
+      </button>
       <p className="quiet">{props.user.displayName} の庭。</p>
       {error && (
         <p role="alert" className="error">
