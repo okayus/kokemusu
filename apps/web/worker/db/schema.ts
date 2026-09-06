@@ -23,7 +23,9 @@
 // Deliberately NOT here — all leaf tables, addable later without a rebuild:
 // `tag_alias` (Phase 2), `attachment` (Phase 4). `api_token` joined in 0002
 // exactly that way (additive: one CREATE TABLE + two indexes); `deleted_at`
-// left `post` in 0003 the other safe way (DROP INDEX → ALTER TABLE DROP COLUMN).
+// left `post` in 0003 the other safe way (DROP INDEX → ALTER TABLE DROP COLUMN),
+// and `title` (the 見出し, retired by ADR-0006) in 0005 the same way — no index
+// covered it, so the one DROP COLUMN was the whole migration.
 
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { POST_KINDS } from "../core/kind";
@@ -119,7 +121,7 @@ export const apiToken = sqliteTable(
 );
 
 /**
- * 苔片 — one entry. Body and title are ciphertext; everything else is plaintext.
+ * 苔片 — one entry. The body is ciphertext; everything else is plaintext.
  *
  * The axis every visualization stacks on is the 「日」 range `first_day` …
  * `last_day` (ADR-0005), not `created_at`: a 苔片 can be stacked on a past day,
@@ -134,8 +136,6 @@ export const post = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    // Optional heading, same envelope and key as the body. null = no heading.
-    title: text("title"),
     // `k<keyId>.<iv>.<ciphertext>` (ADR-0001). Plaintext never reaches D1.
     body: text("body").notNull(),
     // Plaintext metadata describing how the DECRYPTED body should be read.
@@ -157,6 +157,8 @@ export const post = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
     // No `deleted_at`: deletion is physical (ADR-0003). 0001 carried the column
     // and its index; 0003 dropped both — see rule 1 at the top of this file.
+    // No `title` either: ADR-0006 retired the 見出し and 0005 dropped it the
+    // same way (0001–0004 carried it, encrypted like the body).
   },
   (t) => [
     // The feed's order (first_day DESC, created_at DESC, id DESC) and the

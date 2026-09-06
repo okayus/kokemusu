@@ -20,7 +20,6 @@ const KEY = "kokemusu.draft.v1";
  * the dialog comes back.
  */
 export type Draft = {
-  title: string;
   body: string;
   tags: string;
   kind: PostKind | null;
@@ -30,7 +29,6 @@ export type Draft = {
 
 /** A draft with nothing in it — what a fresh dialog starts from and what success leaves. */
 export const EMPTY_DRAFT: Draft = {
-  title: "",
   body: "",
   tags: "",
   kind: null,
@@ -42,10 +40,12 @@ const stringOr = (value: unknown, fallback: string): string =>
   typeof value === "string" ? value : fallback;
 
 /**
- * The stored JSON → a Draft, or null for anything that is not one. `title`
- * joined the shape with the 見出し toggle (2026-09-05), `kind` with the 向き
- * radio and the days with 日を選ぶ (2026-09-06); a draft saved before any of
- * them lacks the field and reads as 見出しなし / 未分類 / 今日.
+ * The stored JSON → a Draft, or null for anything that is not one. `kind`
+ * joined the shape with the 向き radio and the days with 日を選ぶ (2026-09-06);
+ * a draft saved before either lacks the field and reads as 未分類 / 今日. A
+ * `title` — the 見出し the shape carried from 2026-09-05 until ADR-0006 retired
+ * it — is not thrown away: whatever was typed there becomes the body's first
+ * line, so a half-written 苔片 loses no words to the change.
  */
 export function parseDraft(raw: string): Draft | null {
   try {
@@ -53,9 +53,9 @@ export function parseDraft(raw: string): Draft | null {
     if (typeof parsed !== "object" || parsed === null) return null;
     const { title, body, tags, kind, firstDay, lastDay } = parsed as Record<string, unknown>;
     if (typeof body !== "string" || typeof tags !== "string") return null;
+    const heading = stringOr(title, "").trim();
     return {
-      title: stringOr(title, ""),
-      body,
+      body: heading === "" ? body : body === "" ? heading : `${heading}\n\n${body}`,
       tags,
       kind: parseKind(kind),
       firstDay: stringOr(firstDay, ""),
@@ -67,7 +67,6 @@ export function parseDraft(raw: string): Draft | null {
 }
 
 export const isEmptyDraft = (draft: Draft): boolean =>
-  draft.title === "" &&
   draft.body === "" &&
   draft.tags === "" &&
   draft.kind === null &&

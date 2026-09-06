@@ -156,11 +156,10 @@ test("register → post → today's moss darkens → reload → logout → login
 
   // At rest it is a `k1.<iv>.<ciphertext>` envelope (ADR-0001), never the text —
   // the DoD 5 check, read from the sqlite itself rather than through the API.
-  const stored = queryRows<{ body: string; title: string | null }>("SELECT body, title FROM post");
+  const stored = queryRows<{ body: string }>("SELECT body FROM post");
   expect(stored).toHaveLength(1);
   expect(stored[0]?.body).toMatch(/^k1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,}$/);
   expect(stored[0]?.body).not.toContain("苔片");
-  expect(stored[0]?.title).toBeNull();
 
   // Persisted — and decrypted on the way back.
   await page.reload();
@@ -433,32 +432,22 @@ test("register → post → today's moss darkens → reload → logout → login
   await expect(timeline.locator("li.post").first()).toContainText("今日の苔片");
 
   // 同じ石に積む (CONTEXT.md): the survivor's stones seed the tag field and the
-  // body starts empty; the new 苔片 lands at the head of the feed carrying them —
-  // and a 見出し from the toggle, encrypted at rest like the body.
+  // body starts empty; the new 苔片 lands at the head of the feed carrying them.
   const survivor = timeline.locator("li.post").nth(1);
   await expect(survivor.getByText(body, { exact: true })).toBeVisible();
   await survivor.getByRole("button", { name: "同じ石に積む" }).click();
   await expect(dialog.getByLabel("タグ（コンマ区切り・任意）")).toHaveValue("e2e, 苔");
   await expect(dialog.getByLabel("いまの苔片")).toHaveValue("");
-  await dialog.getByText("見出しを付ける").click();
-  await dialog.getByLabel("見出し（任意）").fill("同じ石");
   await dialog.getByLabel("いまの苔片").fill("同じ石に積んだ苔片");
   await dialog.getByRole("button", { name: "積む", exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(receipt).toHaveText("積みました");
   const stacked = timeline.locator("li.post").first();
   await expect(stacked).toContainText("同じ石に積んだ苔片");
-  await expect(stacked.locator(".post-title")).toHaveText("同じ石");
   await expect(stacked.locator(".post-tags .tag-chip")).toHaveText(["e2e", "苔"]);
   await expect(stacked).toBeInViewport();
   await expect(timeline.locator("li.post")).toHaveCount(3);
   await expect(total).toHaveText("計 3 片");
-  const titled = queryRows<{ title: string | null }>(
-    "SELECT title FROM post WHERE title IS NOT NULL",
-  );
-  expect(titled).toHaveLength(1);
-  expect(titled[0]?.title).toMatch(/^k1\.[A-Za-z0-9_-]{16}\./);
-  expect(titled[0]?.title).not.toContain("同じ石");
 
   // 向き (plans/day-axis-and-kind.md §B): two 苔片 stacked as インプット make
   // today's cell lean 吸う — its readout carries the two sides, the caption

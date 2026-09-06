@@ -1,5 +1,5 @@
-// Body encryption at the app layer (ADR-0001): AES-256-GCM over the post body
-// (and title), envelope `k1.<iv base64url>.<ciphertext base64url>`. Pure
+// Body encryption at the app layer (ADR-0001): AES-256-GCM over the post body,
+// envelope `k1.<iv base64url>.<ciphertext base64url>`. Pure
 // functions only — the key arrives as an argument (the boundary imports it from
 // the BODY_KEY secret once), nothing here reads env, touches D1, or logs.
 //

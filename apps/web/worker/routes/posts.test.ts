@@ -132,8 +132,10 @@ describe("createPostSchema", () => {
     expect(
       createPostSchema.safeParse({
         body: "本文",
-        title: "見出し",
         tags: ["typescript", "苔"],
+        kind: "input",
+        firstDay: "2026-09-01",
+        lastDay: "2026-09-05",
       }).success,
     ).toBe(true);
   });
@@ -146,8 +148,12 @@ describe("createPostSchema", () => {
 
   it("rejects oversized fields", () => {
     expect(createPostSchema.safeParse({ body: "x".repeat(20_001) }).success).toBe(false);
-    expect(createPostSchema.safeParse({ body: "x", title: "t".repeat(201) }).success).toBe(false);
     expect(createPostSchema.safeParse({ body: "x", tags: ["y".repeat(101)] }).success).toBe(false);
+  });
+
+  it("refuses a key it does not name — the retired 見出し included — rather than dropping it (ADR-0006)", () => {
+    expect(createPostSchema.safeParse({ body: "x", title: "見出し" }).success).toBe(false);
+    expect(createPostSchema.safeParse({ body: "x", extra: 1 }).success).toBe(false);
   });
 
   it("rejects too many tags and an empty tag string", () => {
