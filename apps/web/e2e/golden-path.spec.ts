@@ -6,10 +6,11 @@ import { enableVirtualAuthenticator } from "./helpers/webauthn";
 type HeatmapWire = {
   from: string;
   to: string;
+  total: number;
   days: { day: string; count: number; level: number }[];
 };
 
-type PostsWire = { posts: { body: string; day: string }[]; today: string };
+type PostsWire = { posts: { body: string; firstDay: string }[]; today: string };
 
 /** A `YYYY-MM-DD` key moved by whole days — civil math on the UTC carrier, like the app's own. */
 const shiftDay = (day: string, days: number) =>
@@ -308,12 +309,16 @@ test("register → post → today's moss darkens → reload → logout → login
     await page.request.get("/api/posts", { params: { from: todayKey, to: todayKey } })
   ).json()) as PostsWire;
   expect(byDay.today).toBe(todayKey);
-  expect(byDay.posts.map((p) => [p.body, p.day])).toEqual([[body, todayKey]]);
+  expect(byDay.posts.map((p) => [p.body, p.firstDay])).toEqual([[body, todayKey]]);
 
-  // Move the survivor back one day AT REST (the API can only stack "now"): the
-  // same day window empties while yesterday's holds it — the JST cut of
-  // `created_at`, against the real sqlite — and each half stands alone.
-  executeSql("UPDATE post SET created_at = created_at - 86400000");
+  // Move the survivor back one day AT REST (the API can only stack "now" until
+  // A2): its 「日」 is `first_day` / `last_day` (ADR-0005), so the same-day
+  // window empties while yesterday's holds it — the overlap, against the real
+  // sqlite — and each half stands alone. `date()` on a day string has no zone
+  // in it, and SET reads the old row, so each column is shifted on its own.
+  executeSql(
+    "UPDATE post SET first_day = date(first_day, '-1 day'), last_day = date(last_day, '-1 day')",
+  );
   const yesterday = shiftDay(todayKey, -1);
   const countIn = async (params: Record<string, string>) =>
     ((await (await page.request.get("/api/posts", { params })).json()) as PostsWire).posts.length;

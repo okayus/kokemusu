@@ -80,7 +80,9 @@ export function HeatmapChart(props: {
     row: (offset + i) % 7,
   }));
   const weeks = cells.length === 0 ? 0 : (cells[cells.length - 1]?.col ?? 0) + 1;
-  const total = data.days.reduce((sum, d) => sum + d.count, 0);
+  // The server's count of 苔片 overlapping the window — not the cells' sum,
+  // which a 続く苔片 would inflate by its length (ADR-0005).
+  const total = data.total;
   const width = GUTTER_X + weeks * STEP + RING;
   const height = GUTTER_Y + 7 * STEP + RING;
 
