@@ -36,7 +36,7 @@ DoD: 既存の e2e 11/11 が**そのまま**通る（`created_at` をずらす�
    （文字列の日付に対する `date()` は TZ 無関係）。
 7. docs: data-model.md / visualization.md の「A1 までは」注記を消す。✅ 後続の docs PR で。
 
-## B — 向き（migration なし。auto-merge 可）— ✅ 2026-09-06
+## B — 向き（migration なし。auto-merge 可）— ✅ 2026-09-06 #46
 
 DoD: 3 択で積んだ苔片の色が総草に出る（e2e 1 手: input を 2 枚 → 今日のマスの読み上げに「インプット 2」、キャプションに比率）。
 実装メモ: radio は 4 つ（未分類 が戻す手段）。色相は OKLCH で `--moss-*` と段ごとに同じ L、h 225 / h 55（`styles.css` に dataviz の実測）。
