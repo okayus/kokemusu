@@ -186,6 +186,12 @@ type DaysFieldProps = DaysFields & {
   today: string | null;
   /** What the fields mean here: 積む and 直す read a blank pair differently. */
   hint: string;
+  /**
+   * 見える見出し。フォームに直に置くときは 向き / タグ と並ぶ見出しとして渡す。
+   * 省略すると visually-hidden の「積む日」— 畳める `<details>` の中では summary が
+   * 名を持つので、見出しは読み上げにだけ要る。
+   */
+  legend?: string;
   onChange: (next: DaysFields) => void;
 };
 
@@ -206,7 +212,11 @@ export function DaysField(props: DaysFieldProps) {
   const hintId = `${props.idPrefix}-days-hint`;
   return (
     <fieldset className="days-field">
-      <legend className="visually-hidden">積む日</legend>
+      {props.legend === undefined ? (
+        <legend className="visually-hidden">積む日</legend>
+      ) : (
+        <legend>{props.legend}</legend>
+      )}
       <div className="days-field-part">
         <label htmlFor={firstId}>いつ</label>
         <input
@@ -243,12 +253,11 @@ export function DaysField(props: DaysFieldProps) {
 }
 
 /**
- * `DaysField` folded into a `<details>` 「日を選ぶ」 — closed is the everyday
- * face (a 苔片 is today's unless said otherwise). Folded with days chosen, the
- * summary names them: a day must not ride along unseen. Shared by the composer
- * (starts open when a resumed
- * draft carries days) and the edit form (starts closed, the 苔片's days in the
- * summary; opening it is how a 続く苔片 is lengthened).
+ * `DaysField` folded into a `<details>` 「日を選ぶ」. The edit form's face: a 苔片
+ * already has its days, and 直す is usually about the words — folded, the
+ * summary names the days so none of them ride along unseen, and opening it is
+ * how a 続く苔片 is lengthened. The composer shows the fields unfolded instead
+ * (2026-09-06): there, the day is part of writing the 苔片, not a correction.
  */
 export function DaysDisclosure(props: DaysFieldProps & { defaultOpen?: boolean }) {
   const { defaultOpen, ...field } = props;
@@ -298,8 +307,6 @@ export function ComposeDialog(props: {
     const draft = loadDraft() ?? EMPTY_DRAFT;
     return props.seedTags === null ? draft : { ...draft, tags: props.seedTags, tagText: "" };
   });
-  // 日を選ぶ is folded away by default, unfolded when a draft already carries days.
-  const daysChosen = fields.firstDay !== "" || fields.lastDay !== "";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
@@ -309,7 +316,8 @@ export function ComposeDialog(props: {
 
   useEffect(() => {
     dialogRef.current?.showModal();
-    // showModal's own pick would be the first focusable — the 日を選ぶ summary.
+    // The body is first in the form, so showModal would land here anyway — say
+    // it out loud rather than lean on the field order.
     bodyRef.current?.focus();
   }, []);
 
@@ -377,18 +385,6 @@ export function ComposeDialog(props: {
         }}
       >
         <h2 id={headingId}>積む</h2>
-        {/* 日を選ぶ (features.md §1): closed = today. `today` is the feed's; while
-            it is still unknown the fields carry no ceiling and the server's
-            check (400) is the only one — a moment at most. */}
-        <DaysDisclosure
-          idPrefix="post"
-          firstDay={fields.firstDay}
-          lastDay={fields.lastDay}
-          today={props.today}
-          hint={COMPOSE_DAYS_HINT}
-          defaultOpen={daysChosen}
-          onChange={(next) => update(next)}
-        />
         <BodyField
           id="post-body"
           label="いまの苔片"
@@ -403,6 +399,19 @@ export function ComposeDialog(props: {
           options={props.tagOptions}
           value={{ tags: fields.tags, text: fields.tagText }}
           onChange={(next) => update({ tags: next.tags, tagText: next.text })}
+        />
+        {/* 積む日 (features.md §1): last, under the stones, and always in view —
+            blank is today, so the everyday 苔片 walks past it. `today` is the
+            feed's; while it is still unknown the fields carry no ceiling and the
+            server's check (400) is the only one — a moment at most. */}
+        <DaysField
+          idPrefix="post"
+          firstDay={fields.firstDay}
+          lastDay={fields.lastDay}
+          today={props.today}
+          hint={COMPOSE_DAYS_HINT}
+          legend="積む日（任意）"
+          onChange={(next) => update(next)}
         />
         {error && (
           <p role="alert" className="error">

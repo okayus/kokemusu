@@ -90,11 +90,11 @@ describe("ComposeDialog", () => {
     for (const label of ["インプット", "アウトプット", "両方", "未分類"]) expect(html).toContain(label);
   });
 
-  it("folds 日を選ぶ away — two native date fields, empty, both capped at the feed's today and floored 1200 months back", () => {
+  it("shows 積む日 unfolded — two native date fields, empty, both capped at the feed's today and floored 1200 months back", () => {
     const html = render(null);
-    expect(html).toContain('<details class="compose-days"><summary>日を選ぶ</summary>');
-    expect(html).not.toMatch(/<details class="compose-days" open/);
-    expect(html).toContain("<legend class=\"visually-hidden\">積む日</legend>");
+    // No fold in the composer (2026-09-06): the fields are simply in the form.
+    expect(html).not.toContain("compose-days");
+    expect(html).toContain("<legend>積む日（任意）</legend>");
     // Neither field has a value; each names the other's bound through min/max.
     for (const [id, name] of [
       ["post-first-day", "firstDay"],
@@ -111,6 +111,23 @@ describe("ComposeDialog", () => {
     expect(html).toContain('<label for="post-first-day">いつ</label>');
     expect(html).toContain('<label for="post-last-day">〜いつまで</label>');
     expect(html).toContain("空のままなら今日に。");
+  });
+
+  it("orders the fields 本文 → 向き → タグ → 積む日, the days last (2026-09-06)", () => {
+    const html = render(null);
+    const at = (needle: string) => {
+      const i = html.indexOf(needle);
+      expect(i, needle).toBeGreaterThan(-1);
+      return i;
+    };
+    const order = [
+      "いまの苔片",
+      "向き（任意）",
+      "タグ（任意）",
+      "積む日（任意）",
+      "composer-actions",
+    ];
+    expect(order.map(at)).toEqual([...order.map(at)].sort((a, b) => a - b));
   });
 
   it("carries no ceiling while today is still unknown — the server's check is the only one for that moment", () => {
@@ -131,7 +148,7 @@ describe("ComposeDialog", () => {
   });
 });
 
-describe("DaysDisclosure — the fold's summary names the days while folded", () => {
+describe("DaysDisclosure — the edit form's fold, whose summary names the days while folded", () => {
   const render = (firstDay: string, lastDay: string, defaultOpen = false) =>
     renderToStaticMarkup(
       <DaysDisclosure
@@ -153,6 +170,10 @@ describe("DaysDisclosure — the fold's summary names the days while folded", ()
     );
     // One field alone is that single day.
     expect(render("", "2026-09-05")).toContain("<summary>日: 2026/09/05</summary>");
+  });
+
+  it("hides the group's legend — the summary is the name here, but a reader still gets one", () => {
+    expect(render("", "")).toContain('<legend class="visually-hidden">積む日</legend>');
   });
 
   it("reads 日を選ぶ while open, whatever is chosen — the fields are in view", () => {

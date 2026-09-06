@@ -14,7 +14,7 @@
 
 - DB スキーマとマイグレーション（[data-model.md](data-model.md)）。実スキーマ投入前に `cloudflare-d1-drizzle-migration` 必読。
 - 投稿 CRUD（作成・編集・削除 [物理削除、[ADR-0003](adr/0003-post-delete-is-physical.md)]、Markdown 描画 [[ADR-0004](adr/0004-markdown-renders-to-react-elements.md)]。任意の `title` は 2026-09-06 に廃止 — [ADR-0006](adr/0006-no-post-title.md)）。
-- タグ付与・補完、多対多。
+- タグ付与・多対多、✅ **補完**（2026-09-06 に石のチップ ＋ 候補の combobox へ — [features.md](features.md) §2）。
 - タイムライン（新着順、タグ絞り込み、期間）。
 - **総草ヒートマップ**（可視化1種。タグ別ヒートマップは作らない — [visualization.md](visualization.md) §1、2026-09-02）。
 - **パスキー認証（single-user）**: `INITIAL_REGISTRATION_TOKEN` で一度だけ登録を開けて閉じる、端末 2 台登録、リカバリ runbook。安全な Cookie/セッション、HTTPS/HSTS、CSP、認証 route のレート制限（`cloudflare-workers-bot-scan-defense`）。
