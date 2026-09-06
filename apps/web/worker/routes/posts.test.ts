@@ -1,13 +1,8 @@
+import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
 import { app } from "../index";
 import { TEST_ORIGIN, testEnv } from "../test-support";
-import { createPostSchema, listPostsQuerySchema, resolvePeriod } from "./posts";
-
-const HOUR = 3_600_000;
-
-/** The instant a JST wall-clock reading names. JST is UTC+9 flat — no DST, ever. */
-const jst = (y: number, mo: number, d: number, h = 0, mi = 0) =>
-  Date.UTC(y, mo - 1, d, h, mi) - 9 * HOUR;
+import { createPostSchema, listPostsQuerySchema, periodCondition } from "./posts";
 
 // The Node harness has no D1 (test-support.ts), so these route tests stay on
 // the paths that fail BEFORE the database: mount order, CSRF, the session
@@ -231,33 +226,33 @@ describe("listPostsQuerySchema", () => {
       listPostsQuerySchema.safeParse({ from: "2026-09-30", to: "2026-09-01" }).success,
     ).toBe(false);
   });
+
+  it("rejects the last day of the 4-digit calendar as `to` — the wire has said 400 there since #37", () => {
+    expect(listPostsQuerySchema.safeParse({ to: "9999-12-31" }).success).toBe(false);
+    expect(listPostsQuerySchema.safeParse({ from: "9999-12-31" }).success).toBe(true);
+  });
 });
 
-describe("resolvePeriod — inclusive JST days become a half-open created_at window", () => {
-  it("cuts both ends at JST midnight: the day after `to` is excluded from its first ms", () => {
-    const bounds = resolvePeriod({ from: "2026-09-01", to: "2026-09-30" });
-    expect(bounds).toEqual({ startMs: jst(2026, 9, 1), endMs: jst(2026, 10, 1) });
-    // 00:30 JST on the 1st is still Aug 31 in UTC — SQLite's date() would file
-    // it under August; this window opened 30 minutes before it.
-    const firstNight = jst(2026, 9, 1, 0, 30);
-    expect(new Date(firstNight).toISOString()).toBe("2026-08-31T15:30:00.000Z");
-    expect(bounds?.startMs).toBeLessThanOrEqual(firstNight);
+describe("periodCondition — the period is an overlap on the day axis (ADR-0005)", () => {
+  const render = (query: { from?: string; to?: string }) => {
+    const cond = periodCondition(query);
+    return cond === undefined ? undefined : new SQLiteSyncDialect().sqlToQuery(cond);
+  };
+
+  it("meets `from` with last_day and `to` with first_day — a 苔片 there on any day of the period is in", () => {
+    const q = render({ from: "2026-09-01", to: "2026-09-30" });
+    expect(q?.sql).toMatch(/"last_day" >= \?/);
+    expect(q?.sql).toMatch(/"first_day" <= \?/);
+    expect(q?.params).toEqual(["2026-09-01", "2026-09-30"]);
   });
 
-  it("leaves an absent half unbounded", () => {
-    expect(resolvePeriod({ from: "2026-09-01" })).toEqual({
-      startMs: jst(2026, 9, 1),
-      endMs: undefined,
-    });
-    expect(resolvePeriod({ to: "2026-09-01" })).toEqual({
-      startMs: undefined,
-      endMs: jst(2026, 9, 2),
-    });
-    expect(resolvePeriod({})).toEqual({ startMs: undefined, endMs: undefined });
-  });
-
-  it("refuses the last day of the 4-digit calendar — the day after it has no key", () => {
-    expect(resolvePeriod({ to: "9999-12-31" })).toBeNull();
-    expect(resolvePeriod({ from: "9999-12-31" })).not.toBeNull();
+  it("leaves an absent half unbounded, and is no condition at all when both are absent", () => {
+    const fromOnly = render({ from: "2026-09-01" });
+    expect(fromOnly?.sql).toContain("last_day");
+    expect(fromOnly?.sql).not.toContain("first_day");
+    const toOnly = render({ to: "2026-09-30" });
+    expect(toOnly?.sql).toContain("first_day");
+    expect(toOnly?.sql).not.toContain("last_day");
+    expect(render({})).toBeUndefined();
   });
 });

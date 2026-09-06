@@ -134,6 +134,8 @@ describe("resolveWindow", () => {
 });
 
 describe("buildHeatmap", () => {
+  const on = (firstDay: string, lastDay = firstDay) => ({ firstDay, lastDay, kind: null });
+
   it("lays out dense zeros when nothing grew", () => {
     expect(buildHeatmap([], "2026-09-01", "2026-09-03")).toEqual([
       { day: "2026-09-01", count: 0, level: 0 },
@@ -142,26 +144,28 @@ describe("buildHeatmap", () => {
     ]);
   });
 
-  it("buckets instants into JST days, not UTC ones", () => {
-    // 08:00 JST is still the previous day on the UTC calendar.
-    const morning = jst(2026, 9, 2, 8, 0);
-    expect(new Date(morning).toISOString()).toBe("2026-09-01T23:00:00.000Z");
-    expect(buildHeatmap([morning], "2026-09-01", "2026-09-02")).toEqual([
+  it("lights the days the 苔片 were there — a 続く苔片 on each of its days, once (ADR-0005)", () => {
+    expect(
+      buildHeatmap([on("2026-09-02"), on("2026-09-03", "2026-09-05")], "2026-09-01", "2026-09-06"),
+    ).toEqual([
       { day: "2026-09-01", count: 0, level: 0 },
       { day: "2026-09-02", count: 1, level: 1 },
+      { day: "2026-09-03", count: 1, level: 1 },
+      { day: "2026-09-04", count: 1, level: 1 },
+      { day: "2026-09-05", count: 1, level: 1 },
+      { day: "2026-09-06", count: 0, level: 0 },
     ]);
   });
 
-  it("counts JST midnight as the opening of its day", () => {
-    const midnight = jst(2026, 9, 2);
-    expect(buildHeatmap([midnight, midnight - 1], "2026-09-01", "2026-09-02")).toEqual([
+  it("clips a span to the window — the moss shows only the days it can see", () => {
+    expect(buildHeatmap([on("2026-08-20", "2026-09-10")], "2026-09-01", "2026-09-02")).toEqual([
       { day: "2026-09-01", count: 1, level: 1 },
       { day: "2026-09-02", count: 1, level: 1 },
     ]);
   });
 
   it("darkens one step per 苔片 and saturates at level 4", () => {
-    const at = (n: number) => Array.from({ length: n }, (_, i) => jst(2026, 9, 2, 10, 0, i));
+    const at = (n: number) => Array.from({ length: n }, () => on("2026-09-02"));
     for (const [count, level] of [
       [0, 0],
       [1, 1],
@@ -201,17 +205,17 @@ describe("timelineQuerySchema — the three forms and nothing between", () => {
 // moved to core when posts' filter started sharing it (2026-09-03).
 
 describe("buildTagSpans", () => {
-  const raw = (
-    id: string,
-    norm: string,
-    first: number | null,
-    last: number | null,
-    count = 1,
-  ) => ({ id, name: id.toUpperCase(), norm, first, last, count });
+  const raw = (id: string, norm: string, first: string | null, last: string | null, count = 1) => ({
+    id,
+    name: id.toUpperCase(),
+    norm,
+    first,
+    last,
+    count,
+  });
 
-  it("folds instants into JST days — a JST morning stays on its JST day", () => {
-    // 08:00 JST is still the previous day on the UTC calendar.
-    const spans = buildTagSpans([raw("ts", "ts", jst(2026, 9, 2, 8, 0), jst(2026, 9, 3, 23, 59), 4)]);
+  it("takes the aggregate's days as they are — MIN(first_day) / MAX(last_day) are already 「日」", () => {
+    const spans = buildTagSpans([raw("ts", "ts", "2026-09-02", "2026-09-03", 4)]);
     expect(spans).toEqual([
       { tag: { id: "ts", name: "TS" }, firstDay: "2026-09-02", lastDay: "2026-09-03", count: 4 },
     ]);
@@ -219,11 +223,11 @@ describe("buildTagSpans", () => {
 
   it("orders as a 年表: first day ascending, same-day ties by norm", () => {
     const spans = buildTagSpans([
-      raw("b", "beta", jst(2026, 9, 2, 20), jst(2026, 9, 2, 20)),
-      raw("c", "gamma", jst(2026, 9, 3), jst(2026, 9, 3)),
-      // Later instant than "b" but the same JST day — norm decides, so the
-      // order can't jitter with the time of day a stone was first used.
-      raw("a", "alpha", jst(2026, 9, 2, 23), jst(2026, 9, 2, 23)),
+      raw("b", "beta", "2026-09-02", "2026-09-02"),
+      raw("c", "gamma", "2026-09-03", "2026-09-03"),
+      // Same first day as "b" — norm decides, so the order can't jitter with
+      // which stone happened to be written first that day.
+      raw("a", "alpha", "2026-09-02", "2026-09-05"),
     ]);
     expect(spans.map((s) => s.tag.id)).toEqual(["a", "b", "c"]);
   });
@@ -231,23 +235,27 @@ describe("buildTagSpans", () => {
   it("skips a null aggregate row instead of crashing the whole 年表", () => {
     const spans = buildTagSpans([
       raw("dead", "dead", null, null, 0),
-      raw("ok", "ok", jst(2026, 9, 2), jst(2026, 9, 2)),
+      raw("ok", "ok", "2026-09-02", "2026-09-02"),
     ]);
     expect(spans.map((s) => s.tag.id)).toEqual(["ok"]);
   });
 });
 
-describe("monthCounts — a row's 活動月: JST months, sparse and ascending", () => {
-  it("files a JST morning on the 1st under the new month, not the UTC calendar's old one", () => {
-    const morning = jst(2026, 9, 1, 8, 0);
-    expect(new Date(morning).toISOString()).toBe("2026-08-31T23:00:00.000Z");
-    expect(monthCounts([morning])).toEqual([{ month: "2026-09", count: 1 }]);
-  });
+describe("monthCounts — a row's 活動月: the months of the day axis, sparse and ascending", () => {
+  const on = (firstDay: string, lastDay = firstDay) => ({ firstDay, lastDay });
 
   it("lists only months with a 苔片, oldest first, whatever order the rows came in", () => {
-    expect(monthCounts([jst(2026, 3, 20), jst(2026, 1, 5), jst(2026, 3, 2)])).toEqual([
+    expect(monthCounts([on("2026-03-20"), on("2026-01-05"), on("2026-03-02")])).toEqual([
       { month: "2026-01", count: 1 },
       { month: "2026-03", count: 2 },
+    ]);
+  });
+
+  it("counts a 続く苔片 in every month it touches — the months then add up to more than the 苔片", () => {
+    expect(monthCounts([on("2026-08-30", "2026-10-02")])).toEqual([
+      { month: "2026-08", count: 1 },
+      { month: "2026-09", count: 1 },
+      { month: "2026-10", count: 1 },
     ]);
   });
 
@@ -259,9 +267,9 @@ describe("monthCounts — a row's 活動月: JST months, sparse and ascending", 
 describe("monthCountsByTag — the same fold per stone", () => {
   it("groups the axis rows by tag, each list sparse and ascending", () => {
     const byTag = monthCountsByTag([
-      { tagId: "ts", createdAt: jst(2026, 9, 2) },
-      { tagId: "moss", createdAt: jst(2026, 9, 2) },
-      { tagId: "ts", createdAt: jst(2026, 7, 1) },
+      { tagId: "ts", firstDay: "2026-09-02", lastDay: "2026-09-02" },
+      { tagId: "moss", firstDay: "2026-09-02", lastDay: "2026-09-02" },
+      { tagId: "ts", firstDay: "2026-07-01", lastDay: "2026-07-01" },
     ]);
     expect(byTag.get("ts")).toEqual([
       { month: "2026-07", count: 1 },

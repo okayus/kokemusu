@@ -5,8 +5,12 @@ import { request } from "./api";
 /** One cell: the JST day, its 苔片 count, and the server-decided 0..4 shade. */
 export type HeatmapDay = { day: string; count: number; level: number };
 
-/** Dense ascending series over the resolved window (default: 53 weeks to today). */
-export type Heatmap = { from: string; to: string; days: HeatmapDay[] };
+/**
+ * Dense ascending series over the resolved window (default: 53 weeks to today).
+ * `total` = the 苔片 overlapping the window — the caption's 計 — which is not the
+ * cells' sum once a 続く苔片 lights several days (ADR-0005).
+ */
+export type Heatmap = { from: string; to: string; total: number; days: HeatmapDay[] };
 
 // No tag parameter on purpose: the heatmap is the 総草 alone (visualization.md
 // §1). Per-tag devotion belongs to the graph and the tag timeline (Phase 2).

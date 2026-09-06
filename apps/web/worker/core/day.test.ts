@@ -2,16 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   APP_TZ,
   addDays,
-  bucketByDay,
-  bucketByMonth,
+  bucketSpansByDay,
+  bucketSpansByMonth,
   dayKey,
   dayOfWeek,
-  dayStartMs,
   enumerateDays,
+  enumerateMonths,
   isDayKey,
-  monthKey,
+  monthOf,
   parseDayKey,
 } from "./day";
+import type { PostKind } from "./kind";
 
 const HOUR = 3_600_000;
 
@@ -30,8 +31,8 @@ describe("dayKey cuts the day in Asia/Tokyo", () => {
   });
 
   it("08:59 JST is today — the UTC calendar still says yesterday", () => {
-    // The bug this module exists to prevent: SQLite's date() would file this
-    // 苔片 under 2026-08-22 and light the wrong cell.
+    // The bug this module exists to prevent: SQLite's date() would stack this
+    // 苔片 on 2026-08-22, and the 総草 would light the wrong cell.
     const morning = jst(2026, 8, 23, 8, 59);
     expect(new Date(morning).toISOString()).toBe("2026-08-22T23:59:00.000Z");
     expect(dayKey(morning)).toBe("2026-08-23");
@@ -66,6 +67,13 @@ describe("dayKey cuts the day in Asia/Tokyo", () => {
     expect(dayKey(t, "America/New_York")).toBe("2026-08-22"); // UTC-4 that day
     expect(dayKey(utc(2026, 8, 22, 18, 15), "Asia/Kathmandu")).toBe("2026-08-23"); // UTC+05:45
     expect(dayKey(utc(2026, 8, 22, 18, 14), "Asia/Kathmandu")).toBe("2026-08-22");
+  });
+
+  it("follows DST where a zone has it — the same UTC hour is a different local day", () => {
+    const ny = "America/New_York";
+    // 04:30Z is 00:30 EDT (summer) but 23:30 EST the evening before (winter).
+    expect(dayKey(utc(2026, 7, 15, 4, 30), ny)).toBe("2026-07-15");
+    expect(dayKey(utc(2026, 1, 15, 4, 30), ny)).toBe("2026-01-14");
   });
 
   it("handles the epoch and instants before it", () => {
@@ -105,50 +113,6 @@ describe("parseDayKey / isDayKey", () => {
     for (const raw of ["", "2026-9-1", "26-09-01", "2026-09-01T00:00", " 2026-09-01", "2026/09/01"]) {
       expect(isDayKey(raw)).toBe(false);
     }
-  });
-});
-
-describe("dayStartMs is the inverse of dayKey", () => {
-  it("opens the JST day 9 hours before UTC midnight", () => {
-    expect(dayStartMs("2026-08-23")).toBe(utc(2026, 8, 22, 15));
-    expect(dayStartMs("2026-08-23", "UTC")).toBe(utc(2026, 8, 23));
-    expect(dayStartMs("2026-08-23", "Asia/Kathmandu")).toBe(utc(2026, 8, 22, 18, 15));
-  });
-
-  it("round-trips every day across a month and a leap February", () => {
-    for (const day of [...enumerateDays("2026-08-20", "2026-09-05"), ...enumerateDays("2024-02-26", "2024-03-02")]) {
-      expect(dayKey(dayStartMs(day))).toBe(day);
-      // The half-open window the heatmap query uses: [start, nextStart).
-      expect(dayKey(dayStartMs(addDays(day, 1)) - 1)).toBe(day);
-    }
-  });
-
-  it("follows DST where a zone has it — a 23-hour and a 25-hour day", () => {
-    const ny = "America/New_York";
-    const springForward = dayStartMs("2026-03-09", ny) - dayStartMs("2026-03-08", ny);
-    const fallBack = dayStartMs("2026-11-02", ny) - dayStartMs("2026-11-01", ny);
-    expect(springForward).toBe(23 * HOUR);
-    expect(fallBack).toBe(25 * HOUR);
-    expect(dayKey(dayStartMs("2026-03-08", ny), ny)).toBe("2026-03-08");
-    expect(dayKey(dayStartMs("2026-11-01", ny), ny)).toBe("2026-11-01");
-  });
-
-  it("opens the day at the jump when a zone skips local midnight", () => {
-    // Santiago goes 2026-09-05 24:00 -> 2026-09-06 01:00, so that day has no
-    // 00:00 at all. The day still has to begin somewhere: at the transition.
-    const scl = "America/Santiago";
-    const start = dayStartMs("2026-09-06", scl);
-    expect(start).toBe(utc(2026, 9, 6, 4)); // the jump itself: 01:00 local
-    // It really is the day's first instant — one ms earlier is the day before,
-    // and the day that lost the hour is 23 hours long.
-    expect(dayKey(start, scl)).toBe("2026-09-06");
-    expect(dayKey(start - 1, scl)).toBe("2026-09-05");
-    expect(dayStartMs("2026-09-07", scl) - start).toBe(23 * HOUR);
-  });
-
-  it("throws on a key that is not a day", () => {
-    expect(() => dayStartMs("2026-02-29")).toThrow(RangeError);
-    expect(() => dayStartMs("today")).toThrow(RangeError);
   });
 });
 
@@ -218,50 +182,125 @@ describe("enumerateDays lays out the grid", () => {
   });
 });
 
-describe("bucketByDay folds 苔片 onto the day axis", () => {
+describe("monthOf cuts a day to its month", () => {
+  it("is the key's first seven characters — the calendar is already the zone's", () => {
+    expect(monthOf("2026-09-01")).toBe("2026-09");
+    expect(monthOf("2026-12-31")).toBe("2026-12");
+  });
+
+  it("rejects a key that is not a day", () => {
+    expect(() => monthOf("2026-09")).toThrow(RangeError);
+    expect(() => monthOf("2026-02-30")).toThrow(RangeError);
+  });
+});
+
+describe("enumerateMonths lists the months a span touches", () => {
+  it("is inclusive on both ends and ascending, across a year end", () => {
+    expect(enumerateMonths("2026-09-15", "2026-09-20")).toEqual(["2026-09"]);
+    expect(enumerateMonths("2026-11-30", "2027-02-01")).toEqual([
+      "2026-11",
+      "2026-12",
+      "2027-01",
+      "2027-02",
+    ]);
+  });
+
+  it("treats an inverted pair as empty, and refuses an absurd span", () => {
+    expect(enumerateMonths("2026-09-02", "2026-08-31")).toEqual([]);
+    expect(() => enumerateMonths("0001-01-01", "2026-09-06")).toThrow(RangeError);
+  });
+
+  it("rejects a malformed key", () => {
+    expect(() => enumerateMonths("2026-09", "2026-10-01")).toThrow(RangeError);
+  });
+});
+
+describe("bucketSpansByDay folds 苔片 onto the day axis", () => {
+  const span = (firstDay: string, lastDay: string, kind: PostKind | null = null) => ({
+    firstDay,
+    lastDay,
+    kind,
+  });
+  const tally = (count: number, input = 0, output = 0) => ({ count, input, output });
+
   it("counts nothing as nothing", () => {
-    expect(bucketByDay([])).toEqual(new Map());
+    expect(bucketSpansByDay([], "2026-09-01", "2026-09-03")).toEqual(new Map());
   });
 
-  it("two 苔片 on different UTC days land on one JST cell", () => {
-    const counts = bucketByDay([jst(2026, 8, 23, 8, 59), jst(2026, 8, 23, 23, 59)]);
-    expect(counts).toEqual(new Map([["2026-08-23", 2]]));
-  });
-
-  it("two 苔片 on one UTC day land on different JST cells", () => {
-    const evening = jst(2026, 8, 22, 23, 30); // 14:30 UTC on the 22nd
-    const morning = jst(2026, 8, 23, 8, 30); // 23:30 UTC on the 22nd
-    expect(new Date(evening).toISOString().slice(0, 10)).toBe(
-      new Date(morning).toISOString().slice(0, 10),
+  it("a single-day 苔片 lights its one day; two on one day are two", () => {
+    const tallies = bucketSpansByDay(
+      [span("2026-08-23", "2026-08-23"), span("2026-08-23", "2026-08-23"), span("2026-08-25", "2026-08-25")],
+      "2026-08-22",
+      "2026-08-25",
     );
-    expect(bucketByDay([evening, morning])).toEqual(
+    expect(tallies).toEqual(
       new Map([
-        ["2026-08-22", 1],
-        ["2026-08-23", 1],
+        ["2026-08-23", tally(2)],
+        ["2026-08-25", tally(1)],
       ]),
     );
   });
 
-  it("keeps the same 苔片 on the zone it is given", () => {
-    const morning = [jst(2026, 8, 23, 8, 59)];
-    expect(bucketByDay(morning)).toEqual(new Map([["2026-08-23", 1]]));
-    expect(bucketByDay(morning, "UTC")).toEqual(new Map([["2026-08-22", 1]]));
+  it("a 続く苔片 lights every day it was there, once each — one 片 on each day, not one 片 per day", () => {
+    const tallies = bucketSpansByDay([span("2026-08-30", "2026-09-02")], "2026-08-01", "2026-09-30");
+    expect([...tallies.keys()]).toEqual(["2026-08-30", "2026-08-31", "2026-09-01", "2026-09-02"]);
+    for (const t of tallies.values()) expect(t).toEqual(tally(1));
   });
 
-  it("throws on a broken timestamp instead of miscounting", () => {
-    expect(() => bucketByDay([jst(2026, 8, 23), Number.NaN])).toThrow(RangeError);
+  it("clips to the window: the part outside costs nothing, and a span wholly outside is nothing", () => {
+    const tallies = bucketSpansByDay(
+      [
+        span("2026-08-20", "2026-09-10"), // straddles both edges
+        span("2026-07-01", "2026-08-31"), // ends on the first day of the window
+        span("2026-09-03", "2026-09-30"), // starts after it
+        span("2026-01-01", "2026-01-31"), // nowhere near
+      ],
+      "2026-08-31",
+      "2026-09-02",
+    );
+    expect(tallies).toEqual(
+      new Map([
+        ["2026-08-31", tally(2)],
+        ["2026-09-01", tally(1)],
+        ["2026-09-02", tally(1)],
+      ]),
+    );
   });
 
-  it("draws the heatmap: sparse counts laid on a dense grid", () => {
-    const counts = bucketByDay([
-      jst(2026, 8, 22, 23, 10),
-      jst(2026, 8, 23, 8, 59),
-      jst(2026, 8, 23, 23, 59),
-      jst(2026, 8, 25, 0, 0),
-    ]);
+  it("tallies the two sides of 向き: input and both are 吸う, output and both are 出す, 未分類 is neither", () => {
+    const day = "2026-09-02";
+    const tallies = bucketSpansByDay(
+      [span(day, day, "input"), span(day, day, "output"), span(day, day, "both"), span(day, day, null)],
+      day,
+      day,
+    );
+    expect(tallies.get(day)).toEqual(tally(4, 2, 2));
+  });
+
+  it("throws on an inverted span or a malformed key instead of miscounting", () => {
+    expect(() => bucketSpansByDay([span("2026-09-02", "2026-09-01")], "2026-09-01", "2026-09-02")).toThrow(
+      RangeError,
+    );
+    expect(() => bucketSpansByDay([span("2026-9-2", "2026-09-02")], "2026-09-01", "2026-09-02")).toThrow(
+      RangeError,
+    );
+    expect(() => bucketSpansByDay([], "2026-09-01", "2026-09-31")).toThrow(RangeError);
+  });
+
+  it("draws the heatmap: sparse tallies laid on a dense grid", () => {
+    const tallies = bucketSpansByDay(
+      [
+        span("2026-08-22", "2026-08-22"),
+        span("2026-08-23", "2026-08-23"),
+        span("2026-08-23", "2026-08-23"),
+        span("2026-08-25", "2026-08-25"),
+      ],
+      "2026-08-22",
+      "2026-08-25",
+    );
     const series = enumerateDays("2026-08-22", "2026-08-25").map((day) => ({
       day,
-      count: counts.get(day) ?? 0,
+      count: tallies.get(day)?.count ?? 0,
     }));
     expect(series).toEqual([
       { day: "2026-08-22", count: 1 },
@@ -272,32 +311,16 @@ describe("bucketByDay folds 苔片 onto the day axis", () => {
   });
 });
 
-describe("monthKey / bucketByMonth fold 苔片 onto the month axis", () => {
-  it("is the day's YYYY-MM — a JST morning on the 1st is the new month, not UTC's old one", () => {
-    const morning = jst(2026, 9, 1, 8, 0);
-    expect(new Date(morning).toISOString()).toBe("2026-08-31T23:00:00.000Z");
-    expect(monthKey(morning)).toBe("2026-09");
-    expect(monthKey(morning - 9 * HOUR)).toBe("2026-08");
-  });
+describe("bucketSpansByMonth folds 苔片 onto the month axis", () => {
+  const span = (firstDay: string, lastDay: string) => ({ firstDay, lastDay });
 
-  it("crosses the year on the JST boundary", () => {
-    expect(monthKey(jst(2027, 1, 1, 0, 0))).toBe("2027-01");
-    expect(monthKey(jst(2027, 1, 1, 0, 0) - 1)).toBe("2026-12");
-  });
-
-  it("honours the zone it is given, like dayKey", () => {
-    const t = utc(2026, 8, 31, 23, 30);
-    expect(monthKey(t, "UTC")).toBe("2026-08");
-    expect(monthKey(t, APP_TZ)).toBe("2026-09");
-  });
-
-  it("counts per JST month, and nothing for nothing", () => {
-    expect(bucketByMonth([])).toEqual(new Map());
-    const counts = bucketByMonth([
-      jst(2026, 8, 31, 23, 59),
-      jst(2026, 9, 1, 0, 0),
-      jst(2026, 9, 15, 12, 0),
-      jst(2026, 11, 3, 8, 0),
+  it("counts per month, in ascending order of first appearance, and nothing for nothing", () => {
+    expect(bucketSpansByMonth([])).toEqual(new Map());
+    const counts = bucketSpansByMonth([
+      span("2026-08-31", "2026-08-31"),
+      span("2026-09-01", "2026-09-01"),
+      span("2026-09-15", "2026-09-15"),
+      span("2026-11-03", "2026-11-03"),
     ]);
     expect([...counts]).toEqual([
       ["2026-08", 1],
@@ -306,7 +329,17 @@ describe("monthKey / bucketByMonth fold 苔片 onto the month axis", () => {
     ]);
   });
 
-  it("throws on a broken timestamp instead of miscounting", () => {
-    expect(() => bucketByMonth([Number.NaN])).toThrow(RangeError);
+  it("a 続く苔片 across months counts once in each — the months add up to more than the 苔片", () => {
+    const counts = bucketSpansByMonth([span("2026-08-30", "2026-10-02"), span("2026-09-10", "2026-09-10")]);
+    expect([...counts]).toEqual([
+      ["2026-08", 1],
+      ["2026-09", 2],
+      ["2026-10", 1],
+    ]);
+    expect([...counts.values()].reduce((a, b) => a + b, 0)).toBeGreaterThan(2);
+  });
+
+  it("throws on an inverted span instead of miscounting", () => {
+    expect(() => bucketSpansByMonth([span("2026-10-01", "2026-09-30")])).toThrow(RangeError);
   });
 });
