@@ -3,6 +3,11 @@
 SQLite / D1 前提。1インスタンス＝1ユーザーだが、認証情報のためにユーザーレコードは持つ。
 本文とメタデータを分離できる設計にしておく（暗号化と可視化の両立 → [security.md](security.md)）。
 
+2026-09-06 更新: **苔片の軸を「日」の範囲に**（[ADR-0005](adr/0005-post-axis-is-day-range.md)。未実装 ——
+[plans/day-axis-and-kind.md](plans/day-axis-and-kind.md) の A1 で `post` を 1 回だけ再構築）: `first_day` / `last_day`（日本時間の
+`YYYY-MM-DD`、NOT NULL）が可視化・絞り込み・並びの軸になり、`created_at` は「投稿した瞬間」に戻る。**`kind`**（向き、NULLABLE）を
+同じ再構築に同乗させる。
+
 2026-09-03 更新: **`api_token` を実装**（`drizzle/0002_api_token.sql`。葉テーブルの追加のみ = 既存テーブル再構築なしを
 生成 SQL とテスト `migrations.test.ts` の両方で確認）。`PAT_PEPPER` は fail closed —— 未設定なら発行が 503・Bearer 検証は
 全部不一致になるので、「pepper 未設定のまま発行 → 後から設定して全滅」は起こり得ない。
@@ -20,7 +25,9 @@ SQLite / D1 前提。1インスタンス＝1ユーザーだが、認証情報の
 
 - **id**: `text`、`crypto.randomUUID()`。例外は `credential.id`（WebAuthn の credential ID そのもの）。
 - **日時**: `integer` の epoch ms で統一（passkey skill の ISO `TEXT` は苔むすでは epoch ms に読み替える。PAT skill は epoch ms）。
-- **子テーブルは `user` に `ON DELETE CASCADE`**。⚠️ D1 は `PRAGMA foreign_keys=OFF` を無視するので、親テーブル（`user` / `post`）を**再構築する**マイグレ（NULL→NOT NULL、型変更、rename）は子行を cascade delete する罠（`cloudflare-d1-drizzle-migration`）。`user` の列は最初に決めきり、後から触らない。
+  **「日」は `text` の `YYYY-MM-DD`（日本時間）** —— 苔片が積み上がる軸 `post.first_day` / `last_day` は瞬間ではなく日なので、
+  文字列比較がそのまま時系列比較になる（[ADR-0005](adr/0005-post-axis-is-day-range.md)）。
+- **子テーブルは `user` に `ON DELETE CASCADE`**。⚠️ D1 は `PRAGMA foreign_keys=OFF` を無視するので、親テーブル（`user` / `post`）を**再構築する**マイグレ（NULL→NOT NULL、型変更、rename）は子行を cascade delete する罠（`cloudflare-d1-drizzle-migration`）。`user` の列は最初に決めきり、後から触らない。`post` は ADR-0005 で **1 回だけ**再構築する（`0004`、`post_tags` を退避して復元。データが少ないうちに）。
 - **本文と title は暗号文、それ以外は平文**（[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。暗号文は `k<鍵ID>.<iv>.<暗号文>` の封筒で、鍵 `BODY_KEY` は Worker Secret。集計・可視化は平文のメタデータだけで成立する。
 - 純粋関数で扱える形を優先（ストリーク計算・日付バケット化などは SQL でなくコアで。置き場所は当面 `apps/web/worker/core/`、共有する相手ができたら `packages/core` に切る）。
 
@@ -98,15 +105,19 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 | title | text? | **任意の見出し**の暗号文（本文と同じ封筒・同じ鍵）。手動でも API でも付けられる（例: mazuoboeru の日次投稿「まず覚える 2026-08-22」）。null = 見出しなし |
 | body | text | 本文（Markdown）の**暗号文** `k<鍵ID>.<iv>.<暗号文>`。平文は D1 に入らない（ADR-0001）。鍵の世代は封筒の `k<鍵ID>` で見分ける |
 | body_format | text | `markdown`（将来 `plain` 等）。平文メタデータ |
-| created_at | integer | epoch ms。**平文メタデータ**（可視化の軸） |
+| first_day | text | **積み上がる最初の「日」**（`YYYY-MM-DD`、日本時間）。**平文メタデータ ＝ 可視化・絞り込み・並びの軸**（[ADR-0005](adr/0005-post-axis-is-day-range.md)）。いま積んだ苔片は `dayKey(created_at)`、過去に積む苔片はリクエストの日 |
+| last_day | text | **最後の「日」**。単日は `first_day` と同じ値（NULL にしない ＝ COALESCE 不要）。`first_day ≤ last_day ≤ 今日`。続く苔片（[CONTEXT.md](../CONTEXT.md)）は `first_day < last_day` |
+| kind | text? | **向き**（[CONTEXT.md](../CONTEXT.md)）: `input` / `output` / `both`。null ＝ 未分類（既存行・付けなかった苔片）。平文メタデータ（総草の色相） |
+| created_at | integer | epoch ms。**投稿した瞬間**（他テーブルと同じ意味）。時刻を持つ唯一の列で、§5 の時間帯分布の出どころ。画面が時刻を出すのは `first_day = last_day = dayKey(created_at)` の苔片だけ |
 | updated_at | integer | |
 
 > `deleted_at` は無い。[ADR-0003](adr/0003-post-delete-is-physical.md)（削除は物理削除）で書き手が消え、
 > `0003_drop_post_deleted_at` が `DROP INDEX` → `ALTER TABLE ... DROP COLUMN` の 2 文で列ごと落とした
 > （`CREATE TABLE` 無し ＝ `post` の再構築は起きていない）。
 
-> ✅ **集計の「日」= `Asia/Tokyo` で切る**（2026-08-23）。`created_at` は epoch ms（UTC の一瞬）で保存し、
-> 「その日」はコアの定数 `APP_TZ = "Asia/Tokyo"` を使う純粋関数 `dayKey()` で決める。**`user` に TZ 列は持たない** ——
+> ✅ **集計の「日」= `Asia/Tokyo` で切る**（2026-08-23）。2026-09-06 からは**書く側で切って `first_day` / `last_day` に保存する**
+> （いま積む = コアの定数 `APP_TZ` を使う純粋関数 `dayKey(Date.now())`、過去に積む = リクエストの日を検証して保存）。
+> 読む側は文字列比較だけで、読み時の TZ 変換は無い（[ADR-0005](adr/0005-post-axis-is-day-range.md)）。**`user` に TZ 列は持たない** ——
 > 見る場所で過去のマスが動かないことを優先し、設定化が要るようになったら NULLABLE 列か API パラメータで足す
 > （どちらもテーブル再構築を伴わない）。週の開始曜日も当面は日曜固定。
 
@@ -147,26 +158,29 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 
 ## 集計（可視化用クエリの素）
 
-これらは **メタデータ（created_at, tag）だけ** で計算でき、本文暗号化と両立する。
+これらは **メタデータ（first_day / last_day / kind, tag）だけ** で計算でき、本文暗号化と両立する。
+軸は「日」の範囲（[ADR-0005](adr/0005-post-axis-is-day-range.md)、2026-09-06。A1 が着地するまでコードは `created_at` を
+読み時に `dayKey()` で切っている）。期間はどこでも**重なり**で引く: `first_day <= to AND last_day >= from`。
 
 - **総草 日次ヒートマップ**（ヒートマップはタグで分けない、[visualization.md](visualization.md) §1）:
-  `post` を期間で絞って `created_at` だけ取り（JOIN 不要＝タグ無しの苔片も入る）、
-  **`Asia/Tokyo` の「日」へのバケット化はコアの純粋関数 `dayKey()`** で行う（SQLite の `date()` は UTC 基準なので
-  朝 9 時前の苔片が前日にずれる。オフセット加算での回避は TZ を変えたときに壊れる）。
+  `post` を窓との重なりで絞って `first_day` / `last_day` / `kind` を取り（JOIN 不要＝タグ無しの苔片も入る）、
+  コアの純粋関数で窓との交差の各日に +1（続く苔片は在った各日に数える）。日ごとに 入（`input` + `both`）と
+  出（`output` + `both`）も数えて色相にする。「計 N 片」は窓に重なる苔片の数（マスの合計ではない）。
+  読み時の TZ 変換は無い（SQLite の `date()` / `strftime()` は UTC 基準 —— そもそも日は書く側でしか切らない）。
 - **タグのタイムライン（打ち込み期間）**: `post_tags` JOIN `post` を `tag_id` で GROUP BY し
-  `MIN(created_at)` / `MAX(created_at)` / `COUNT(*)`（[visualization.md](visualization.md) §8）。
+  `MIN(first_day)` / `MAX(last_day)` / `COUNT(*)`（[visualization.md](visualization.md) §8）。
   - **組み合わせ行（タグ集合 AND、n ≧ 2）**: `pt.tag_id IN (:t1 … :tn)` で引き、post ごとに
     `HAVING COUNT(DISTINCT pt.tag_id) = n` で「全部付いた苔片」に絞り、外側で MIN/MAX/COUNT。
   - **フォーカス（1 タグで絞った共起タグ別の内訳）**: 共起クエリと同じ自己 JOIN を
     `a.tag_id = :focus` で絞って `b.tag_id` で GROUP BY し、各共起タグの MIN/MAX/COUNT を一括で取る。
-  - **活動月（月セグメント棒）**: 同じ JOIN から `created_at` を生のまま取り（SQL は MIN/MAX/COUNT のまま。
-    `strftime('%Y-%m', …)` は UTC 基準なので使わない）、コアの `bucketByMonth()`（`dayKey` の `YYYY-MM`）で
-    月に束ねる。span の集計と同じ batch（＝同じスナップショット）で読むので、行の件数と月ごとの件数の和が一致する。
+  - **活動月（月セグメント棒）**: 同じ JOIN から `first_day` / `last_day` を取り、コアで最初の月〜最後の月を列挙して
+    各月に +1（続く苔片は触れる各月に 1 → **`months` の和は `count` 以上**。単日だけなら等しい）。
+    span の集計と同じ batch（＝同じスナップショット）で読む。
 - **累積（積み上げ）**: 上記を日付昇順で累積和。
 - **ストリーク**: タグ別に投稿のある日付集合を取り、連続日数を計算（純粋関数でやる）。
-- **内訳**: 期間内のタグ別件数。
-- **時間帯/曜日分布**: `created_at` から hour / weekday を取り集計。
-- **タグ共起（タグ関係グラフ）**: `post_tags a JOIN post_tags b ON a.post_id = b.post_id AND a.tag_id < b.tag_id` を `(a.tag_id, b.tag_id)` で GROUP BY → 共起回数＝エッジの重み。ノードの大きさはタグ別件数。期間は `post.created_at` で絞る（[visualization.md](visualization.md) §6）。
+- **内訳**: 期間内のタグ別件数。向きの比率（吸う／出す）も同じ材料。
+- **時間帯/曜日分布**: `created_at`（投稿した瞬間 —— 時刻を持つ唯一の列）から hour / weekday を取り集計。
+- **タグ共起（タグ関係グラフ）**: `post_tags a JOIN post_tags b ON a.post_id = b.post_id AND a.tag_id < b.tag_id` を `(a.tag_id, b.tag_id)` で GROUP BY → 共起回数＝エッジの重み。ノードの大きさはタグ別件数（続く苔片も 1）。期間は重なりで絞る（`last_day >= 期間の初日`。去年始まって今年まで続く苔片は「今年」に入る — [visualization.md](visualization.md) §6）。
 
 > パフォーマンス: 1ユーザーの個人日記規模なら素朴な集計で十分。必要になったら日次集計テーブル（マテビュー的な `daily_tag_count`）を足す。
 
@@ -181,9 +195,16 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 NULLABLE 列の追加は安全。**列の drop も安全** ── SQLite は再構築せずその場で落とす（索引付きの列は落とせないので
 `DROP INDEX` が先）。`0003` が `post.deleted_at` をそう消し、`post_tags` の行は 1 行も減っていない。
 
+**`0004`（A1、予定）＝ `post` の唯一の再構築**（[ADR-0005](adr/0005-post-axis-is-day-range.md)）: `first_day` / `last_day`（NOT NULL）と
+`kind`（NULLABLE、同乗）を足す。NOT NULL 追加は drizzle-kit が `__new_post` ＋ `DROP TABLE post` を生成し、D1 は
+`PRAGMA foreign_keys=OFF` を無視するので **`post_tags` が cascade で消える** → migration の中で一時表に退避して復元し、
+`cloudflare-d1-drizzle-migration` の runbook（事前 export・事後の `post` / `post_tags` 行数）を踏む。既存行の backfill は
+`date((created_at + 32400000) / 1000, 'unixepoch')` の 1 回限り（Tokyo に DST が無いので正しい。恒常コードでは使わない）。
+
 ## インデックス（目安）
 
-- `post(user_id, created_at)` ── タイムライン・期間絞り込み。
+- `post(user_id, first_day, created_at)` ── 一覧の並び `(first_day DESC, created_at DESC, id DESC)`・期間絞り込み（重なりの片側）。
+  ADR-0005。A1 までは `post(user_id, created_at)`。
 - `post_tags(tag_id)` ── 多対多の逆方向（共起クエリもこれで足りる）。
   **`post_tags(post_id)` は張らない** ── PK `(post_id, tag_id)` が作る暗黙の index
   `sqlite_autoindex_post_tags_1` が `WHERE post_id = ?` を covering index で捌く（`0001` 適用後の
