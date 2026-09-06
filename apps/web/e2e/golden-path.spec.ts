@@ -514,14 +514,13 @@ test("register → post → today's moss darkens → reload → logout → login
   const stillIn = queryRows<{ c: number }>("SELECT COUNT(*) AS c FROM post WHERE kind = 'input'");
   expect(stillIn[0]?.c).toBe(1);
 
-  // 過去に積む (plans/day-axis-and-kind.md §A2, ADR-0005): 日を選ぶ in the
-  // dialog, いつ alone = that one past day. The 苔片 is not at the head, so the
+  // 過去に積む (plans/day-axis-and-kind.md §A2, ADR-0005): 積む日 sits under the
+  // stones in the dialog, unfolded; いつ alone = that one past day. The 苔片 is not at the head, so the
   // feed stays put and is never narrowed on its own — the receipt offers the
   // narrowing as a button (features.md §1) — while yesterday's cell darkens by
   // one (the survivor is there already) and the window counts one more. Its
   // card shows the day and 「M/D に積む」, no time.
   await stack.click();
-  await dialog.getByText("日を選ぶ", { exact: true }).click();
   await dialog.getByLabel("いつ", { exact: true }).fill(yesterday);
   await dialog.getByLabel("いまの苔片").fill("昨日の苔片");
   await dialog.getByRole("button", { name: "積む", exact: true }).click();
@@ -559,7 +558,6 @@ test("register → post → today's moss darkens → reload → logout → login
   // window holds it — the overlap, on the wire and on screen. The dialog
   // started clean: the past day was spent with the post, nothing carried over.
   await stack.click();
-  await dialog.getByText("日を選ぶ", { exact: true }).click();
   await expect(dialog.getByLabel("いつ", { exact: true })).toHaveValue("");
   await dialog.getByLabel("いつ", { exact: true }).fill(yesterday);
   await dialog.getByLabel("〜いつまで").fill(todayKey);
@@ -613,7 +611,6 @@ test("register → post → today's moss darkens → reload → logout → login
   // later いつ is the field's own rangeOverflow — the submit is blocked, the
   // dialog stays, nothing is stacked (the same guard as 期間で絞る's).
   await stack.click();
-  await dialog.getByText("日を選ぶ", { exact: true }).click();
   await dialog.getByLabel("〜いつまで").fill(yesterday);
   const firstDayField = dialog.getByLabel("いつ", { exact: true });
   await firstDayField.fill(todayKey);
