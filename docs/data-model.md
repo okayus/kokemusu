@@ -3,10 +3,11 @@
 SQLite / D1 前提。1インスタンス＝1ユーザーだが、認証情報のためにユーザーレコードは持つ。
 本文とメタデータを分離できる設計にしておく（暗号化と可視化の両立 → [security.md](security.md)）。
 
-2026-09-06 更新: **苔片の軸を「日」の範囲に**（[ADR-0005](adr/0005-post-axis-is-day-range.md)。未実装 ——
-[plans/day-axis-and-kind.md](plans/day-axis-and-kind.md) の A1 で `post` を 1 回だけ再構築）: `first_day` / `last_day`（日本時間の
-`YYYY-MM-DD`、NOT NULL）が可視化・絞り込み・並びの軸になり、`created_at` は「投稿した瞬間」に戻る。**`kind`**（向き、NULLABLE）を
-同じ再構築に同乗させる。
+2026-09-06 更新: **苔片の軸を「日」の範囲に**（[ADR-0005](adr/0005-post-axis-is-day-range.md)。✅ 同日 merge #43 の
+`drizzle/0004_post_day_axis.sql` が `post` を 1 回だけ再構築し、本番 D1 にも適用済み）: `first_day` / `last_day`（日本時間の
+`YYYY-MM-DD`、NOT NULL）が可視化・絞り込み・並びの軸で、`created_at` は「投稿した瞬間」。**`kind`**（向き、NULLABLE）は
+同じ再構築で列だけ同乗した（全行 NULL）。書く側が `kind` を受けるのは [plans/day-axis-and-kind.md](plans/day-axis-and-kind.md) の B、
+過去の日に積む・続く苔片を作るのは A2 —— どちらも未実装で、いまは create が `first_day = last_day = 今日` を入れる。
 
 2026-09-03 更新: **`api_token` を実装**（`drizzle/0002_api_token.sql`。葉テーブルの追加のみ = 既存テーブル再構築なしを
 生成 SQL とテスト `migrations.test.ts` の両方で確認）。`PAT_PEPPER` は fail closed —— 未設定なら発行が 503・Bearer 検証は
@@ -27,7 +28,7 @@ SQLite / D1 前提。1インスタンス＝1ユーザーだが、認証情報の
 - **日時**: `integer` の epoch ms で統一（passkey skill の ISO `TEXT` は苔むすでは epoch ms に読み替える。PAT skill は epoch ms）。
   **「日」は `text` の `YYYY-MM-DD`（日本時間）** —— 苔片が積み上がる軸 `post.first_day` / `last_day` は瞬間ではなく日なので、
   文字列比較がそのまま時系列比較になる（[ADR-0005](adr/0005-post-axis-is-day-range.md)）。
-- **子テーブルは `user` に `ON DELETE CASCADE`**。⚠️ D1 は `PRAGMA foreign_keys=OFF` を無視するので、親テーブル（`user` / `post`）を**再構築する**マイグレ（NULL→NOT NULL、型変更、rename）は子行を cascade delete する罠（`cloudflare-d1-drizzle-migration`）。`user` の列は最初に決めきり、後から触らない。`post` は ADR-0005 で **1 回だけ**再構築する（`0004`、`post_tags` を退避して復元。データが少ないうちに）。
+- **子テーブルは `user` に `ON DELETE CASCADE`**。⚠️ D1 は `PRAGMA foreign_keys=OFF` を無視するので、親テーブル（`user` / `post`）を**再構築する**マイグレ（NULL→NOT NULL、型変更、rename）は子行を cascade delete する罠（`cloudflare-d1-drizzle-migration`）。`user` の列は最初に決めきり、後から触らない。`post` は ADR-0005 で **1 回だけ**再構築した（`0004`、2026-09-06。`post_tags` を退避して復元。データが少ないうちに済ませた）。
 - **本文と title は暗号文、それ以外は平文**（[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。暗号文は `k<鍵ID>.<iv>.<暗号文>` の封筒で、鍵 `BODY_KEY` は Worker Secret。集計・可視化は平文のメタデータだけで成立する。
 - 純粋関数で扱える形を優先（ストリーク計算・日付バケット化などは SQL でなくコアで。置き場所は当面 `apps/web/worker/core/`、共有する相手ができたら `packages/core` に切る）。
 
@@ -159,8 +160,9 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 ## 集計（可視化用クエリの素）
 
 これらは **メタデータ（first_day / last_day / kind, tag）だけ** で計算でき、本文暗号化と両立する。
-軸は「日」の範囲（[ADR-0005](adr/0005-post-axis-is-day-range.md)、2026-09-06。A1 が着地するまでコードは `created_at` を
-読み時に `dayKey()` で切っている）。期間はどこでも**重なり**で引く: `first_day <= to AND last_day >= from`。
+軸は「日」の範囲（[ADR-0005](adr/0005-post-axis-is-day-range.md)、2026-09-06 merge #43 で実装済み。`created_at` を
+読み時に日へ切るコードは無い —— `dayKey()` は書く側の create と「今日」・`postedDay` の算出だけ）。期間はどこでも**重なり**で引く:
+`first_day <= to AND last_day >= from`。
 
 - **総草 日次ヒートマップ**（ヒートマップはタグで分けない、[visualization.md](visualization.md) §1）:
   `post` を窓との重なりで絞って `first_day` / `last_day` / `kind` を取り（JOIN 不要＝タグ無しの苔片も入る）、
@@ -195,16 +197,20 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 NULLABLE 列の追加は安全。**列の drop も安全** ── SQLite は再構築せずその場で落とす（索引付きの列は落とせないので
 `DROP INDEX` が先）。`0003` が `post.deleted_at` をそう消し、`post_tags` の行は 1 行も減っていない。
 
-**`0004`（A1、予定）＝ `post` の唯一の再構築**（[ADR-0005](adr/0005-post-axis-is-day-range.md)）: `first_day` / `last_day`（NOT NULL）と
-`kind`（NULLABLE、同乗）を足す。NOT NULL 追加は drizzle-kit が `__new_post` ＋ `DROP TABLE post` を生成し、D1 は
-`PRAGMA foreign_keys=OFF` を無視するので **`post_tags` が cascade で消える** → migration の中で一時表に退避して復元し、
-`cloudflare-d1-drizzle-migration` の runbook（事前 export・事後の `post` / `post_tags` 行数）を踏む。既存行の backfill は
-`date((created_at + 32400000) / 1000, 'unixepoch')` の 1 回限り（Tokyo に DST が無いので正しい。恒常コードでは使わない）。
+✅ **`0004_post_day_axis.sql`（A1、2026-09-06 merge #43 で本番 D1 に適用）＝ `post` の唯一の再構築**（[ADR-0005](adr/0005-post-axis-is-day-range.md)）:
+`first_day` / `last_day`（NOT NULL）と `kind`（NULLABLE、同乗）を足した。drizzle-kit 0.31 は NOT NULL 列の追加を
+`ALTER TABLE post ADD first_day text NOT NULL` で吐く（SQLite は default 無しの NOT NULL 追加を拒む）ので、再構築 SQL は drizzle-kit の型どおりに
+**手書き**した: `post_tags_keep` に退避 → `__new_post` へ backfill → `DROP TABLE post` / RENAME / index → `INSERT OR IGNORE` で `post_tags` を復元 →
+`post_tags_keep` を落とす。退避が要るのは D1 が `PRAGMA foreign_keys=OFF` を無視して **`post_tags` を cascade で消す**から（ローカル SQLite は
+PRAGMA を尊重するので挙動が割れる → PRAGMA は書かない）。`migrations.test.ts` の再構築マーカー検査はこの 1 本だけ免除し、文の並びを固定。
+backfill は `date((created_at + 32400000) / 1000, 'unixepoch')` の 1 回限り（Tokyo に DST が無いので正しい。恒常コードでは使わない）。
+リハーサルは `.wrangler/e2e` の写し（親子行のある fixture）に `--persist-to` で当てて行数不変を確認、本番は `cloudflare-d1-drizzle-migration` の
+runbook（merge 前に export → Workers Builds が適用 → 事後に `post` / `post_tags` の COUNT 一致）で。
 
 ## インデックス（目安）
 
 - `post(user_id, first_day, created_at)` ── 一覧の並び `(first_day DESC, created_at DESC, id DESC)`・期間絞り込み（重なりの片側）。
-  ADR-0005。A1 までは `post(user_id, created_at)`。
+  ADR-0005。`0004` の再構築で旧 `post(user_id, created_at)` から張り替えた。
 - `post_tags(tag_id)` ── 多対多の逆方向（共起クエリもこれで足りる）。
   **`post_tags(post_id)` は張らない** ── PK `(post_id, tag_id)` が作る暗黙の index
   `sqlite_autoindex_post_tags_1` が `WHERE post_id = ?` を covering index で捌く（`0001` 適用後の

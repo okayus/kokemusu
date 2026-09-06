@@ -15,7 +15,7 @@
   - 一覧のカーソル: `{ firstDay, createdAt, id }`（`decodeCursor` の検証に `isDayKey`）。並びは `(first_day DESC, created_at DESC, id DESC)`。
   - 期間はどこでも重なり: `first_day <= to AND last_day >= from`。
 
-## A1 — 軸を「日」に（振る舞いを変えない refactor。migration あり ＝ 人間 merge）
+## A1 — 軸を「日」に（振る舞いを変えない refactor。migration あり ＝ 人間 merge）— ✅ 2026-09-06 merge #43、`0004` 本番適用
 
 DoD: 既存の e2e 11/11 が**そのまま**通る（`created_at` をずらす細工だけ `first_day` / `last_day` の UPDATE に）。続く苔片の読み側は単体で固定。
 
@@ -34,7 +34,7 @@ DoD: 既存の e2e 11/11 が**そのまま**通る（`created_at` をずらす�
    応答に `firstDay` / `lastDay` / `postedDay` / `kind`（`day` は削除 → `src/posts-api.ts`、`App.tsx` の `dayInPeriod(created.day, …)` を `firstDay` に）。
 6. e2e: `UPDATE post SET created_at = created_at - 86400000` → `UPDATE post SET first_day = date(first_day, '-1 day'), last_day = first_day`
    （文字列の日付に対する `date()` は TZ 無関係）。
-7. docs: data-model.md / visualization.md の「A1 までは」注記を消す。
+7. docs: data-model.md / visualization.md の「A1 までは」注記を消す。✅ 後続の docs PR で。
 
 ## B — 向き（migration なし。auto-merge 可）
 
