@@ -1,7 +1,8 @@
 // 積む — the composer as a dialog (features.md §1, 2026-09-05). It left the top
-// of the page so the page could be for looking back; it opens from the bar's
-// 積む, from the `n` key, or from a 苔片's 同じ石に積む (CONTEXT.md), which seeds
-// the tag field with that 苔片's stones and nothing else.
+// of the page so the page could be for looking back; it opens from the round
+// 積む fixed to the bottom-right corner, from the `n` key, or from a 苔片's
+// 同じ石に積む (CONTEXT.md), which seeds the tag field with that 苔片's stones
+// and nothing else.
 //
 // Everything typed — the 見出し, the body, the 向き, the days, the stones — is
 // 退避 to the draft on each keystroke (draft.ts), so closing the dialog — Esc,

@@ -49,10 +49,11 @@ test("register → post → today's moss darkens → reload → logout → login
   await page.reload();
   await expect(garden).toBeVisible();
 
-  // The composer is a dialog (features.md §1): 積む in the sticky bar opens it,
+  // The composer is a dialog (features.md §1): the round 積む fixed to the
+  // bottom-right corner opens it (icon-only, so its name is asserted here),
   // the fields live inside, and success closes it (the dialog is unmounted).
   const bar = page.locator("header.bar");
-  const stack = bar.getByRole("button", { name: "積む", exact: true });
+  const stack = page.getByRole("button", { name: "積む", exact: true }).and(page.locator(".fab"));
   const dialog = page.getByRole("dialog");
   const body = `e2e の苔片 ${Date.now()}`;
   await stack.click();

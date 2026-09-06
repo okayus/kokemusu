@@ -78,19 +78,22 @@ body {
   white-space: nowrap !important;
 }
 
+/* The bottom padding is taller than the round 積む (.fab) that floats over the
+   corner: the last 苔片's actions must never end up under it. */
 .shell {
   max-width: 34rem;
   margin-inline: auto;
-  padding: 2.5rem 1.25rem 5rem;
+  padding: 2.5rem 1.25rem 6.5rem;
 }
 
 .hero {
   margin-block-end: 2rem;
 }
 
-/* The bar stays put (sticky): 積む is one tap from anywhere on the page, and the
-   receipt after a post (.bar-notice) is in view wherever the reader was. It
-   covers the shell's side padding too, so nothing scrolls past at its edges. */
+/* The bar stays put (sticky) for the receipt after a post (.bar-notice): it is
+   in view wherever the reader was. It covers the shell's side padding too, so
+   nothing scrolls past at its edges. (積む left the bar for the round button at
+   the bottom-right corner, .fab.) */
 .bar {
   position: sticky;
   inset-block-start: 0;
@@ -151,6 +154,38 @@ body {
   border-radius: 999px;
   color: inherit;
   white-space: nowrap;
+}
+
+/* ---- 積む（右下の丸いボタン） ---- */
+
+/* The one pointer way in to 積む (features.md §1): a round button fixed to the
+   bottom-right corner — under the thumb on a phone, and in view wherever the
+   reader has scrolled to. The keyboard way in is the `n` key (Compose.tsx).
+   Above the sticky bar (z-index 1); a dialog is in the top layer above both. */
+.fab {
+  position: fixed;
+  inset-block-end: max(1.25rem, env(safe-area-inset-bottom));
+  inset-inline-end: max(1.25rem, env(safe-area-inset-right));
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 3.5rem;
+  block-size: 3.5rem;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--moss);
+  color: var(--moss-ink);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.3);
+}
+
+/* A modal owns the screen: a button showing through the backdrop invites a tap
+   that cannot land. visibility (not display) also takes it out of the
+   accessibility tree while it cannot be pressed. */
+.shell:has(dialog[open]) .fab {
+  visibility: hidden;
 }
 
 /* 導線と着地の scrollIntoView は sticky なバーの下に頭を出す。 */
