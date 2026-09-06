@@ -3,6 +3,10 @@
 SQLite / D1 前提。1インスタンス＝1ユーザーだが、認証情報のためにユーザーレコードは持つ。
 本文とメタデータを分離できる設計にしておく（暗号化と可視化の両立 → [security.md](security.md)）。
 
+2026-09-06 更新（同日、後）: **`post.title` を削除**（[ADR-0006](adr/0006-no-post-title.md)。`drizzle/0005_drop_post_title.sql` は
+`ALTER TABLE post DROP COLUMN title` の 1 文 —— 0003 と同じ引き算で再構築ではない。index は無かったので DROP INDEX も無い）。
+暗号文の列は `body` だけになり、create / PATCH の body は `title` を含む知らないキーを 400 で拒む。
+
 2026-09-06 更新: **苔片の軸を「日」の範囲に**（[ADR-0005](adr/0005-post-axis-is-day-range.md)。✅ 同日 merge #43 の
 `drizzle/0004_post_day_axis.sql` が `post` を 1 回だけ再構築し、本番 D1 にも適用済み）: `first_day` / `last_day`（日本時間の
 `YYYY-MM-DD`、NOT NULL）が可視化・絞り込み・並びの軸で、`created_at` は「投稿した瞬間」。**`kind`**（向き、NULLABLE）は
@@ -32,7 +36,7 @@ SQLite / D1 前提。1インスタンス＝1ユーザーだが、認証情報の
   **「日」は `text` の `YYYY-MM-DD`（日本時間）** —— 苔片が積み上がる軸 `post.first_day` / `last_day` は瞬間ではなく日なので、
   文字列比較がそのまま時系列比較になる（[ADR-0005](adr/0005-post-axis-is-day-range.md)）。
 - **子テーブルは `user` に `ON DELETE CASCADE`**。⚠️ D1 は `PRAGMA foreign_keys=OFF` を無視するので、親テーブル（`user` / `post`）を**再構築する**マイグレ（NULL→NOT NULL、型変更、rename）は子行を cascade delete する罠（`cloudflare-d1-drizzle-migration`）。`user` の列は最初に決めきり、後から触らない。`post` は ADR-0005 で **1 回だけ**再構築した（`0004`、2026-09-06。`post_tags` を退避して復元。データが少ないうちに済ませた）。
-- **本文と title は暗号文、それ以外は平文**（[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。暗号文は `k<鍵ID>.<iv>.<暗号文>` の封筒で、鍵 `BODY_KEY` は Worker Secret。集計・可視化は平文のメタデータだけで成立する。
+- **本文は暗号文、それ以外は平文**（[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。暗号文は `k<鍵ID>.<iv>.<暗号文>` の封筒で、鍵 `BODY_KEY` は Worker Secret。集計・可視化は平文のメタデータだけで成立する。
 - 純粋関数で扱える形を優先（ストリーク計算・日付バケット化などは SQL でなくコアで。置き場所は当面 `apps/web/worker/core/`、共有する相手ができたら `packages/core` に切る）。
 
 ## エンティティ概観
@@ -106,7 +110,6 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 | --- | --- | --- |
 | id | text (uuid) | PK |
 | user_id | text | FK → user |
-| title | text? | **任意の見出し**の暗号文（本文と同じ封筒・同じ鍵）。手動でも API でも付けられる（例: mazuoboeru の日次投稿「まず覚える 2026-08-22」）。null = 見出しなし |
 | body | text | 本文（Markdown）の**暗号文** `k<鍵ID>.<iv>.<暗号文>`。平文は D1 に入らない（ADR-0001）。鍵の世代は封筒の `k<鍵ID>` で見分ける |
 | body_format | text | `markdown`（将来 `plain` 等）。平文メタデータ |
 | first_day | text | **積み上がる最初の「日」**（`YYYY-MM-DD`、日本時間）。**平文メタデータ ＝ 可視化・絞り込み・並びの軸**（[ADR-0005](adr/0005-post-axis-is-day-range.md)）。いま積んだ苔片は `dayKey(created_at)`、過去に積む苔片はリクエストの日 |

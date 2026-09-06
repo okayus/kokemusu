@@ -8,7 +8,6 @@ export type TagSummary = { id: string; name: string };
 
 export type PostItem = {
   id: string;
-  title: string | null;
   body: string;
   bodyFormat: string;
   createdAt: number;
@@ -26,12 +25,13 @@ export type PostItem = {
 /** `today` is server-decided (JST) like the 年表's axis edge — the anchor of the period presets. */
 export type Timeline = { posts: PostItem[]; nextCursor: string | null; today: string };
 
-/** What a write carries: the body, and the optional 見出し / stones / 向き / days. */
+/**
+ * What a write carries: the body, and the optional stones / 向き / days — and
+ * nothing else: the server refuses a key it does not name (ADR-0006).
+ */
 export type PostInput = {
   body: string;
   tags?: string[];
-  // `title` = the optional 見出し (roadmap 決めること 7); omitted = none.
-  title?: string;
   // 向き — omitted or null = 未分類.
   kind?: PostKind | null;
   // The days to stack on (`YYYY-MM-DD`, ADR-0005): a past day, or a range that
@@ -44,8 +44,8 @@ export type PostInput = {
 export const createPost = (input: PostInput): Promise<PostItem> => postJson("/api/posts", input);
 
 // Wholesale replacement of the editable fields — the edit form always sends
-// the complete new state, so an omitted/blank title clears the heading, the
-// tags array replaces the links, and an omitted 向き clears it.
+// the complete new state, so the tags array replaces the links and an omitted
+// 向き clears it.
 export const updatePost = (id: string, input: PostInput): Promise<PostItem> =>
   request(`/api/posts/${encodeURIComponent(id)}`, {
     method: "PATCH",

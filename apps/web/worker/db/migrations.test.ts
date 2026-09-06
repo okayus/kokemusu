@@ -18,7 +18,7 @@ const migrations = import.meta.glob("../../drizzle/*.sql", {
  *
  * If this fails, the fix is almost never "edit the allowlist". It is to reshape
  * the change into one SQLite can do in place — a NULLABLE column, a new leaf
- * table, an index, or a column drop (0003). A genuine rebuild means running the
+ * table, an index, or a column drop (0003, 0005). A genuine rebuild means running the
  * skill's backup → apply → row-count runbook by hand and recording it here.
  */
 const REBUILD_MARKERS = [/\bDROP\s+TABLE\b/i, /\b__new_/i, /\bPRAGMA\s+foreign_keys\s*=\s*OFF/i];
@@ -75,8 +75,9 @@ describe("drizzle migrations", () => {
   });
 
   /**
-   * 0003 is the one subtractive migration: ADR-0003 made deletion physical, so
-   * `post.deleted_at` became a column nothing ever writes and 0003 removed it.
+   * 0003 is the first subtractive migration (0005 below is the second): ADR-0003
+   * made deletion physical, so `post.deleted_at` became a column nothing ever
+   * writes and 0003 removed it.
    * SQLite drops a column in place — no rebuild — but only while no index
    * covers it, which is why `DROP INDEX` has to come first. Any third statement
    * (a `CREATE TABLE` above all) would mean drizzle-kit fell back to a rebuild,
@@ -90,6 +91,20 @@ describe("drizzle migrations", () => {
     expect(statementsOf(migrations[path ?? ""] ?? "")).toEqual([
       "DROP INDEX `post_deleted_at_idx`",
       "ALTER TABLE `post` DROP COLUMN `deleted_at`",
+    ]);
+  });
+
+  /**
+   * 0005 is the second subtractive one: ADR-0006 retired the 見出し, so
+   * `post.title` became a column nothing reads or writes and 0005 removes it.
+   * No index ever covered it, so the DROP COLUMN stands alone — a second
+   * statement would mean drizzle-kit fell back to a rebuild (see 0003 above).
+   */
+  it("0005 drops the title column and nothing else", () => {
+    const path = Object.keys(migrations).find((p) => p.endsWith("/0005_drop_post_title.sql"));
+    expect(path, "0005_drop_post_title.sql is missing").toBeDefined();
+    expect(statementsOf(migrations[path ?? ""] ?? "")).toEqual([
+      "ALTER TABLE `post` DROP COLUMN `title`",
     ]);
   });
 

@@ -339,20 +339,19 @@ dialog.compose h2 {
   }
 }
 
-/* The two folds above the body — 見出しを付ける and 日を選ぶ (features.md §1):
-   quiet summaries, and the summary names what is inside while folded. */
-.compose-title,
+/* The fold above the body — 日を選ぶ (features.md §1): a quiet summary that
+   names what is inside while folded. */
 .compose-days {
   margin-block-end: 0.75rem;
 }
 
-:is(.compose-title, .compose-days) > summary {
+.compose-days > summary {
   font-size: 0.85rem;
   color: var(--quiet);
   cursor: pointer;
 }
 
-:is(.compose-title, .compose-days)[open] > summary {
+.compose-days[open] > summary {
   margin-block-end: 0.5rem;
 }
 
@@ -1003,10 +1002,6 @@ dialog.compose h2 {
 
 .post-kind.both::before {
   background: linear-gradient(90deg, var(--in-3) 50%, var(--out-3) 50%);
-}
-
-.post-title {
-  display: block;
 }
 
 /* 本文は Markdown（markdown.tsx）。間隔は .post の gap が持つので詰めて置く。 */

@@ -13,7 +13,7 @@
 最初の縦切り「投稿 → タグ → ヒートマップに 1 マス点く」は **完了（2026-09-02、DoD 1〜5 全通過。[log.md](log.md)。plans/vertical-slice.md は削除済み＝ git 履歴）**。e2e（PR6、#26）も 2026-09-02 に完了。タグ絞り込み UI（チップ / §8 フォーカス / §6 橋 の 3 導線、`?tags=` AND を posts にも）は 2026-09-03 に完了。投稿の編集・削除（物理削除 — [ADR-0003](adr/0003-post-delete-is-physical.md)）は 2026-09-04 に完了（#34）。Markdown 描画（サニタイザではなく React 要素へ — [ADR-0004](adr/0004-markdown-renders-to-react-elements.md)）も 2026-09-04 に完了。期間絞り込み UI（`?from=`/`?to=` ＋ 今日 / 今週 / 今月 / 今年 ＋ カスタム範囲）も 2026-09-05 に完了 — **Phase 1 の取りこぼしは無し**。
 
 - DB スキーマとマイグレーション（[data-model.md](data-model.md)）。実スキーマ投入前に `cloudflare-d1-drizzle-migration` 必読。
-- 投稿 CRUD（作成・編集・削除 [物理削除、[ADR-0003](adr/0003-post-delete-is-physical.md)]、Markdown 描画 [[ADR-0004](adr/0004-markdown-renders-to-react-elements.md)]、任意の `title`）。
+- 投稿 CRUD（作成・編集・削除 [物理削除、[ADR-0003](adr/0003-post-delete-is-physical.md)]、Markdown 描画 [[ADR-0004](adr/0004-markdown-renders-to-react-elements.md)]。任意の `title` は 2026-09-06 に廃止 — [ADR-0006](adr/0006-no-post-title.md)）。
 - タグ付与・補完、多対多。
 - タイムライン（新着順、タグ絞り込み、期間）。
 - **総草ヒートマップ**（可視化1種。タグ別ヒートマップは作らない — [visualization.md](visualization.md) §1、2026-09-02）。
@@ -27,8 +27,9 @@
 - 全文検索。
 - ✅ **タグ関係グラフ**（#32、2026-09-03。共起ネットワーク。石＝タグが投稿数で育つ、[visualization.md](visualization.md) §6）。
 - ✅ **タグのタイムライン**（#30、2026-09-03。最初〜最後の苔片の期間、[visualization.md](visualization.md) §8）。
-- ✅ **書く面をダイアログへ、トップは振り返りに**（2026-09-05。sticky ヘッダーの「積む」/ `n` で開くネイティブ `<dialog>`、
-  見出しトグル、苔片の「同じ石に積む」— [features.md](features.md) §1 / §3、[CONTEXT.md](../CONTEXT.md)）。
+- ✅ **書く面をダイアログへ、トップは振り返りに**（2026-09-05。「積む」/ `n` で開くネイティブ `<dialog>`、
+  苔片の「同じ石に積む」— [features.md](features.md) §1 / §3、[CONTEXT.md](../CONTEXT.md)。2026-09-06 に「積む」は sticky ヘッダーから
+  右下の丸いボタンへ、同乗した見出しトグルは [ADR-0006](adr/0006-no-post-title.md) で廃止）。
 - **過去に積む・続く苔片・向き**（2026-09-06 決定、[ADR-0005](adr/0005-post-axis-is-day-range.md)。順番は
   A1 軸を「日」に ✅ #43 → B 向き ✅ #46 → A2 過去に積む・続く苔片 ✅ #47。計画は完了したので plans から削除、経緯は log）。
 - 累積（積み上げ）グラフ、ストリーク、内訳・時間帯分布。
@@ -62,7 +63,7 @@
    その場合もログインの origin は `workers.dev` のまま（RP_ID は origin の登録可能サフィックスである必要があるため）。
    どうしても移るなら「`RP_ID`/`ORIGIN` 変更 → 既存パスキー無効 → `INITIAL_REGISTRATION_TOKEN` 再発行 → 端末 2 台を再登録」で、
    **既存の `user` 行に `credential` を足す**（新しい user を作らない = 苔片が孤児にならない）。
-2. ~~**暗号化レベル**~~ → ✅ **(B) アプリ層の本文暗号化を Phase 1 から、鍵は Worker Secret。(C) は不採用**（2026-08-23、[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。全文検索は復号して走査。`title` も本文と同じく暗号化。
+2. ~~**暗号化レベル**~~ → ✅ **(B) アプリ層の本文暗号化を Phase 1 から、鍵は Worker Secret。(C) は不採用**（2026-08-23、[ADR-0001](adr/0001-body-encrypted-at-app-layer.md)）。全文検索は復号して走査。`title` も本文と同じく暗号化（→ `title` は 2026-09-06 に廃止、[ADR-0006](adr/0006-no-post-title.md)）。
 3. ~~**認証方式**~~ → ✅ **パスキーのみ（single-user。パスワード / TOTP は作らない）＋ API は PAT**（2026-08-22）。リカバリ = 端末 2 台登録 ＋ 自分（操作者）が `INITIAL_REGISTRATION_TOKEN` を再発行して新しいパスキーを登録する runbook。
 4. ~~**UI トーン**~~ → ✅ **ミニマル ＋ 苔の言葉と色**（2026-08-23）。骨格は実用ミニマルのまま、苔らしさは用語（苔片）・
    空状態のコピー・苔の配色トークン（ライト/ダーク）で出す。動きは「投稿後にマスが濃くなる」1 箇所だけ。情緒の主役は Phase 4 の苔の庭ビュー。
@@ -70,6 +71,8 @@
 6. ~~**タグの構造**~~ → ✅ **フラット確定。表記ゆれは `tag.norm`（`trim` ＋ NFKC ＋ 小文字化、`(user_id, norm)` で一意）で吸収**
    （2026-08-23）。階層は作らない —— タグ同士の関係は共起グラフで見る（[visualization.md](visualization.md) §6）。
 7. ~~**`post.title` の位置づけ**~~ → ✅ **任意の見出し。手動でも API でも付けられ、UI は既定で隠す**（フォームは本文 1 欄のまま、ショートカット / トグルで見出し欄を出す。タイムラインは見出しのある苔片だけ本文の上に小さく表示。検索は見出しも復号走査に含める。暗号化は本文と同じ鍵）（2026-08-23）。
+   → **2026-09-06 に撤回: 見出しは持たない**（[ADR-0006](adr/0006-no-post-title.md)。Twitter のように本文に石を付けるだけ。
+   列は `0005` で削除、API の `title` は 400、用語集からも消した）。
 8. ~~**mazuoboeru 連携の形**~~ → ✅ **(i) 自分専用**（mazuoboeru の Worker Secret に苔むすの PAT を 1 本、Cron が日次 push）。受け側は汎用のまま＝送り側を知らない設計を [ADR-0002](adr/0002-api-posting-via-receiver-side-pat.md) に記録。per-user (ii) は他の mazuoboeru ユーザが苔むすをセルフホストしたら mazuoboeru 側だけで足す（2026-08-23）。
 
 9. ~~**集計の「日」**~~ → ✅ **`Asia/Tokyo` 定数で切る**（2026-08-23、[data-model.md](data-model.md)）。`user` に TZ 列は持たず、

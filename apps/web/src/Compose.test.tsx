@@ -115,12 +115,12 @@ describe("ComposeDialog", () => {
     expect(html).not.toContain('max="');
   });
 
-  it("is a light-dismissable modal named 積む, with the 見出し folded and 閉じる (not やめる)", () => {
+  it("is a light-dismissable modal named 積む with 閉じる (not やめる), and no 見出し field (ADR-0006)", () => {
     const html = render(null);
     expect(html).toContain('closedby="any"');
     expect(html).toMatch(/<h2 id="[^"]+">積む<\/h2>/);
-    expect(html).toContain("見出しを付ける");
-    expect(html).not.toMatch(/<details class="compose-title" open/);
+    expect(html).not.toContain("見出しを付ける");
+    expect(html).not.toContain('name="title"');
     expect(html).toContain(">閉じる</button>");
     expect(html).not.toContain("やめる");
   });

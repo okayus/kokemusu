@@ -16,25 +16,25 @@ import type { Env } from "../types";
 // a diary, small enough that an encrypted body stays a modest TEXT value.
 // (MAX_TAGS_PER_POST lives in core/tag.ts — the `?tags=` set shares the cap.)
 const MAX_BODY_CHARS = 20_000;
-const MAX_TITLE_CHARS = 200;
 const MAX_TAG_CHARS = 100;
 
 // Exported for direct unit tests: the D1-free test harness cannot get past
 // sessionMiddleware, so validation is exercised on the schema itself.
-export const createPostSchema = z.object({
+//
+// strictObject: a key the shape does not name is a 400, never silently dropped
+// (ADR-0006) — a sender still sending the retired `title` is told so, where
+// zod's default would have swallowed its heading without a word back.
+export const createPostSchema = z.strictObject({
   body: z
     .string()
     .min(1)
     .max(MAX_BODY_CHARS)
     .refine((s) => s.trim().length > 0, "body must not be blank"),
-  // Optional heading (docs/data-model.md): the composer never sends it, but
-  // Phase 2's PAT senders do. Blank collapses to "no heading" in the handler.
-  title: z.string().max(MAX_TITLE_CHARS).optional(),
   tags: z.array(z.string().min(1).max(MAX_TAG_CHARS)).max(MAX_TAGS_PER_POST).optional(),
   // 向き (core/kind.ts): one of the three, or nothing — absent and null both
   // read as 未分類, so a sender that spells "no 向き" explicitly is not turned
   // away. The same field on PATCH: the edit form sends the whole state, so an
-  // omitted 向き clears it, like an omitted title clears the heading.
+  // omitted 向き clears it.
   kind: z.enum(POST_KINDS).nullable().optional(),
   // The days to stack on (ADR-0005, features.md §1): calendar days here, the
   // order and the bounds in the handler, which knows today — `firstDay ≤
@@ -102,7 +102,6 @@ type TagSummary = { id: string; name: string };
 /** The one wire shape for a 苔片 — POST returns it, GET returns a page of it. */
 type PostItem = {
   id: string;
-  title: string | null;
   body: string;
   bodyFormat: string;
   createdAt: number;
@@ -215,11 +214,9 @@ export const postRoutes = new Hono<Env>()
 
     // Encrypt at the last moment before the write (ADR-0001); plaintext never
     // rides on an error either — every failure below is a bare 500.
-    const titlePlain = parsed.data.title?.trim() ? parsed.data.title.trim() : null;
     const row: typeof post.$inferInsert = {
       id: crypto.randomUUID(),
       userId,
-      title: titlePlain === null ? null : await encryptBody(titlePlain, key),
       body: await encryptBody(parsed.data.body, key),
       bodyFormat: "markdown",
       firstDay,
@@ -243,7 +240,6 @@ export const postRoutes = new Hono<Env>()
 
     const item: PostItem = {
       id: row.id,
-      title: titlePlain,
       body: parsed.data.body,
       bodyFormat: row.bodyFormat ?? "markdown",
       createdAt: now,
@@ -339,7 +335,6 @@ export const postRoutes = new Hono<Env>()
     let query = db
       .select({
         id: post.id,
-        title: post.title,
         body: post.body,
         bodyFormat: post.bodyFormat,
         firstDay: post.firstDay,
@@ -374,7 +369,6 @@ export const postRoutes = new Hono<Env>()
     const posts: PostItem[] = await Promise.all(
       page.map(async (r) => ({
         id: r.id,
-        title: r.title === null ? null : await decryptBody(r.title, key),
         body: await decryptBody(r.body, key),
         bodyFormat: r.bodyFormat,
         createdAt: r.createdAt,
@@ -405,7 +399,7 @@ export const postRoutes = new Hono<Env>()
   // Session-only like the timeline: editing starts from reading what you
   // wrote, and a post:write PAT has no business rewriting history (403). The
   // wire shape is the composer's (createPostSchema) — the edit form mirrors
-  // it — and the write is wholesale: title/body re-encrypted, links replaced.
+  // it — and the write is wholesale: the body re-encrypted, links replaced.
   .patch("/:id", requireSession, async (c) => {
     const key = await getBodyKey(c.env);
     if (!key) return fail(c, "encryption_not_configured");
@@ -449,8 +443,6 @@ export const postRoutes = new Hono<Env>()
     const { newTags, resolved } = await resolveTagRows(db, userId, wanted, now);
 
     // Encrypt at the last moment, like create — plaintext never rides an error.
-    const titlePlain = parsed.data.title?.trim() ? parsed.data.title.trim() : null;
-    const encryptedTitle = titlePlain === null ? null : await encryptBody(titlePlain, key);
     const encryptedBody = await encryptBody(parsed.data.body, key);
     const kind = parsed.data.kind ?? null;
 
@@ -461,7 +453,7 @@ export const postRoutes = new Hono<Env>()
     await db.batch([
       db
         .update(post)
-        .set({ title: encryptedTitle, body: encryptedBody, firstDay, lastDay, kind, updatedAt: now })
+        .set({ body: encryptedBody, firstDay, lastDay, kind, updatedAt: now })
         .where(eq(post.id, owned.id)),
       ...newTags.map((t) => db.insert(tag).values(t)),
       db.delete(postTags).where(eq(postTags.postId, owned.id)),
@@ -470,7 +462,6 @@ export const postRoutes = new Hono<Env>()
 
     const item: PostItem = {
       id: owned.id,
-      title: titlePlain,
       body: parsed.data.body,
       bodyFormat: owned.bodyFormat,
       createdAt: owned.createdAt,

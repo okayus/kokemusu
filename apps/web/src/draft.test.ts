@@ -6,7 +6,6 @@ describe("parseDraft", () => {
     expect(
       parseDraft(
         JSON.stringify({
-          title: "見出し",
           body: "本文",
           tags: "a, b",
           kind: "input",
@@ -15,7 +14,6 @@ describe("parseDraft", () => {
         }),
       ),
     ).toEqual({
-      title: "見出し",
       body: "本文",
       tags: "a, b",
       kind: "input",
@@ -24,11 +22,18 @@ describe("parseDraft", () => {
     });
   });
 
-  it("reads a draft saved before the 見出し toggle, the 向き radio and 日を選ぶ as 見出しなし・未分類・今日", () => {
+  it("reads a draft saved before the 向き radio and 日を選ぶ as 未分類・今日", () => {
     expect(parseDraft(JSON.stringify({ body: "本文", tags: "" }))).toEqual({
       ...EMPTY_DRAFT,
       body: "本文",
     });
+  });
+
+  it("folds the 見出し of a draft saved before ADR-0006 into the body's first line rather than dropping it", () => {
+    expect(parseDraft(JSON.stringify({ title: "題", body: "本文", tags: "" }))?.body).toBe("題\n\n本文");
+    expect(parseDraft(JSON.stringify({ title: "題", body: "", tags: "" }))?.body).toBe("題");
+    expect(parseDraft(JSON.stringify({ title: "  ", body: "本文", tags: "" }))?.body).toBe("本文");
+    expect(parseDraft(JSON.stringify({ title: 1, body: "本文", tags: "" }))?.body).toBe("本文");
   });
 
   it("reads a 向き it does not know as 未分類 rather than dropping the draft", () => {
@@ -54,7 +59,6 @@ describe("parseDraft", () => {
 describe("isEmptyDraft", () => {
   it("is empty only when every field is — a 向き or a day alone is worth resuming", () => {
     expect(isEmptyDraft(EMPTY_DRAFT)).toBe(true);
-    expect(isEmptyDraft({ ...EMPTY_DRAFT, title: "x" })).toBe(false);
     expect(isEmptyDraft({ ...EMPTY_DRAFT, tags: "a" })).toBe(false);
     expect(isEmptyDraft({ ...EMPTY_DRAFT, kind: "output" })).toBe(false);
     expect(isEmptyDraft({ ...EMPTY_DRAFT, firstDay: "2026-09-01" })).toBe(false);

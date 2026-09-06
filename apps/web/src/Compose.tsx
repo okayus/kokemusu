@@ -4,7 +4,7 @@
 // 同じ石に積む (CONTEXT.md), which seeds the tag field with that 苔片's stones
 // and nothing else.
 //
-// Everything typed — the 見出し, the body, the 向き, the days, the stones — is
+// Everything typed — the body, the 向き, the days, the stones — is
 // 退避 to the draft on each keystroke (draft.ts), so closing the dialog — Esc,
 // the backdrop, a back gesture, 閉じる — saves rather than discards and the next
 // open resumes. Success closes it and spends the draft whole: no implicit
@@ -250,8 +250,8 @@ export function DaysField(props: DaysFieldProps) {
 /**
  * `DaysField` folded into a `<details>` 「日を選ぶ」 — closed is the everyday
  * face (a 苔片 is today's unless said otherwise). Folded with days chosen, the
- * summary names them, as the 見出し toggle shows a hidden heading: a day must
- * not ride along unseen. Shared by the composer (starts open when a resumed
+ * summary names them: a day must not ride along unseen. Shared by the composer
+ * (starts open when a resumed
  * draft carries days) and the edit form (starts closed, the 苔片's days in the
  * summary; opening it is how a 続く苔片 is lengthened).
  */
@@ -301,9 +301,7 @@ export function ComposeDialog(props: {
     const draft = loadDraft() ?? EMPTY_DRAFT;
     return props.seedTags === null ? draft : { ...draft, tags: props.seedTags };
   });
-  // The 見出し toggle (roadmap 決めること 7) and 日を選ぶ: one field each, folded
-  // away by default, unfolded when a draft already carries something there.
-  const [titleOpen, setTitleOpen] = useState(fields.title !== "");
+  // 日を選ぶ is folded away by default, unfolded when a draft already carries days.
   const daysChosen = fields.firstDay !== "" || fields.lastDay !== "";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -314,7 +312,7 @@ export function ComposeDialog(props: {
 
   useEffect(() => {
     dialogRef.current?.showModal();
-    // showModal's own pick would be the first focusable — the 見出し summary.
+    // showModal's own pick would be the first focusable — the 日を選ぶ summary.
     bodyRef.current?.focus();
   }, []);
 
@@ -342,11 +340,9 @@ export function ComposeDialog(props: {
     setBusy(true);
     setError(null);
     try {
-      const heading = fields.title.trim();
       const created = await createPost({
         body: fields.body,
         tags: splitTagField(fields.tags),
-        ...(heading ? { title: heading } : {}),
         kind: fields.kind,
         ...stackDaysInput(fields.firstDay, fields.lastDay),
       });
@@ -383,29 +379,6 @@ export function ComposeDialog(props: {
         }}
       >
         <h2 id={headingId}>積む</h2>
-        <details
-          className="compose-title"
-          open={titleOpen}
-          onToggle={(e) => setTitleOpen(e.currentTarget.open)}
-        >
-          {/* Folded with a heading inside, the summary shows it — a hidden
-              heading must not ride along unseen. */}
-          <summary>
-            {titleOpen || fields.title === "" ? "見出しを付ける" : `見出し: ${fields.title}`}
-          </summary>
-          <div className="field">
-            <label htmlFor="post-title">見出し（任意）</label>
-            <input
-              id="post-title"
-              name="title"
-              maxLength={200}
-              autoComplete="off"
-              value={fields.title}
-              onChange={(e) => update({ title: e.target.value })}
-              onKeyDown={submitOnCmdEnter}
-            />
-          </div>
-        </details>
         {/* 日を選ぶ (features.md §1): closed = today. `today` is the feed's; while
             it is still unknown the fields carry no ceiling and the server's
             check (400) is the only one — a moment at most. */}

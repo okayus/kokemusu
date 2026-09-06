@@ -757,8 +757,8 @@ function Timeline(props: {
 
 /**
  * One 苔片: the read view with 編集/削除, or the inline edit form (the
- * composer's mirror — same fields plus the optional heading, uncontrolled so
- * やめる simply discards). Delete confirms through a native <dialog> showing
+ * composer's mirror — the same fields, uncontrolled so やめる simply
+ * discards). Delete confirms through a native <dialog> showing
  * what dies; the deletion is physical and unrecoverable from the UI (ADR-0003).
  */
 function PostEntry(props: {
@@ -773,7 +773,7 @@ function PostEntry(props: {
   const p = props.post;
   const [editing, setEditing] = useState(false);
   // 編集中の本文と日だけ state（本文はプレビューが要り、日は 2 欄が互いを縛る）。
-  // 見出しとタグは form のまま。「編集」を押した時点の値で毎回蒔き直すので、
+  // タグは form のまま。「編集」を押した時点の値で毎回蒔き直すので、
   // やめる ＝ 捨てる が保たれる。
   const [editBody, setEditBody] = useState(p.body);
   const [editDays, setEditDays] = useState<DaysFields>({
@@ -799,7 +799,6 @@ function PostEntry(props: {
   };
 
   const save = async (input: {
-    title: string;
     body: string;
     tags: string[];
     kind: PostKind | null;
@@ -813,7 +812,6 @@ function PostEntry(props: {
       // row's own — the days only move when the form says where to.
       const updated = await updatePost(p.id, {
         body: input.body,
-        ...(input.title ? { title: input.title } : {}),
         tags: input.tags,
         kind: input.kind,
         ...stackDaysInput(input.days.firstDay, input.days.lastDay),
@@ -850,7 +848,6 @@ function PostEntry(props: {
             e.preventDefault();
             const fd = new FormData(e.currentTarget);
             void save({
-              title: String(fd.get("title") ?? "").trim(),
               body: editBody,
               tags: splitTagField(String(fd.get("tags") ?? "")),
               kind: parseKind(fd.get("kind")),
@@ -858,17 +855,6 @@ function PostEntry(props: {
             });
           }}
         >
-          <div className="field">
-            <label htmlFor={`edit-title-${p.id}`}>見出し（任意）</label>
-            <input
-              id={`edit-title-${p.id}`}
-              name="title"
-              maxLength={200}
-              autoComplete="off"
-              defaultValue={p.title ?? ""}
-              onKeyDown={submitOnCmdEnter}
-            />
-          </div>
           {/* The 苔片's days, folded — the summary names them; opening is how a
               続く苔片 is lengthened (CONTEXT.md: まだ続くものは後で伸ばす). */}
           <DaysDisclosure
@@ -958,7 +944,6 @@ function PostEntry(props: {
           <span className={`post-kind ${p.kind}`}>{KIND_LABELS[p.kind]}</span>
         )}
       </div>
-      {p.title !== null && <strong className="post-title">{p.title}</strong>}
       {/* 本文は Markdown。描画器は HTML 文字列を作らない（markdown.tsx / ADR-0004）。 */}
       <Markdown source={p.body} className="post-body md" />
       {p.tags.length > 0 && (
@@ -1025,7 +1010,6 @@ function PostEntry(props: {
             <strong>この苔片を削除します。</strong>元に戻せません。
           </p>
           <blockquote className="confirm-preview">
-            {p.title !== null && <strong>{p.title}</strong>}
             {p.body.length > 120 ? `${p.body.slice(0, 120)}…` : p.body}
           </blockquote>
           <form method="dialog" className="confirm-actions">
