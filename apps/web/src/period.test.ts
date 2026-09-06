@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  dayInPeriod,
   periodFromFields,
   periodKey,
   periodLabel,
   presetPeriod,
+  spanInPeriod,
   type Period,
 } from "./period";
 
@@ -88,24 +88,35 @@ describe("periodLabel — the chip names the unit when the range is one", () => 
   });
 });
 
-describe("dayInPeriod — both ends inclusive, an absent end is open", () => {
+describe("spanInPeriod — overlap, both ends inclusive, an absent end is open", () => {
   const sept: Period = { from: "2026-09-01", to: "2026-09-30" };
+  const day = (d: string) => ({ firstDay: d, lastDay: d });
 
-  it("no period admits every day", () => {
-    expect(dayInPeriod("1999-01-01", null)).toBe(true);
+  it("no period admits every 苔片", () => {
+    expect(spanInPeriod(day("1999-01-01"), null)).toBe(true);
   });
 
-  it("the edges are in, the neighbours are out", () => {
-    expect(dayInPeriod("2026-09-01", sept)).toBe(true);
-    expect(dayInPeriod("2026-09-30", sept)).toBe(true);
-    expect(dayInPeriod("2026-08-31", sept)).toBe(false);
-    expect(dayInPeriod("2026-10-01", sept)).toBe(false);
+  it("a single day: the edges are in, the neighbours are out", () => {
+    expect(spanInPeriod(day("2026-09-01"), sept)).toBe(true);
+    expect(spanInPeriod(day("2026-09-30"), sept)).toBe(true);
+    expect(spanInPeriod(day("2026-08-31"), sept)).toBe(false);
+    expect(spanInPeriod(day("2026-10-01"), sept)).toBe(false);
+  });
+
+  it("a 続く苔片 is in when any of its days is — the server's first_day <= to AND last_day >= from", () => {
+    expect(spanInPeriod({ firstDay: "2026-08-30", lastDay: "2026-09-01" }, sept)).toBe(true);
+    expect(spanInPeriod({ firstDay: "2026-09-30", lastDay: "2026-10-05" }, sept)).toBe(true);
+    expect(spanInPeriod({ firstDay: "2026-08-01", lastDay: "2026-10-31" }, sept)).toBe(true);
+    expect(spanInPeriod({ firstDay: "2026-08-01", lastDay: "2026-08-31" }, sept)).toBe(false);
+    expect(spanInPeriod({ firstDay: "2026-10-01", lastDay: "2026-10-31" }, sept)).toBe(false);
   });
 
   it("an open half bounds one side only", () => {
-    expect(dayInPeriod("2999-12-31", { from: "2026-09-01" })).toBe(true);
-    expect(dayInPeriod("2026-08-31", { from: "2026-09-01" })).toBe(false);
-    expect(dayInPeriod("1999-01-01", { to: "2026-09-30" })).toBe(true);
-    expect(dayInPeriod("2026-10-01", { to: "2026-09-30" })).toBe(false);
+    expect(spanInPeriod(day("2999-12-31"), { from: "2026-09-01" })).toBe(true);
+    expect(spanInPeriod(day("2026-08-31"), { from: "2026-09-01" })).toBe(false);
+    expect(spanInPeriod({ firstDay: "2026-08-01", lastDay: "2026-09-01" }, { from: "2026-09-01" })).toBe(true);
+    expect(spanInPeriod(day("1999-01-01"), { to: "2026-09-30" })).toBe(true);
+    expect(spanInPeriod(day("2026-10-01"), { to: "2026-09-30" })).toBe(false);
+    expect(spanInPeriod({ firstDay: "2026-09-30", lastDay: "2026-10-31" }, { to: "2026-09-30" })).toBe(true);
   });
 });

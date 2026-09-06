@@ -12,23 +12,27 @@ import {
 import {
   BodyField,
   ComposeDialog,
+  DaysDisclosure,
   KindField,
   submitOnCmdEnter,
   tagsField,
   useComposeShortcut,
   type ComposeRequest,
+  type DaysFields,
 } from "./Compose";
+import { isStackedNow, placeInFeed, postedLabel, stackDaysInput } from "./days";
 import { clearDraft } from "./draft";
 import { HeatmapSection } from "./Heatmap";
 import { KIND_LABELS, parseKind, type PostKind } from "./kind";
 import { Markdown } from "./markdown";
 import {
-  dayInPeriod,
   periodFromFields,
   periodKey,
   periodLabel,
   PRESETS,
   presetPeriod,
+  slashDay,
+  spanInPeriod,
   type Period,
 } from "./period";
 import {
@@ -53,6 +57,18 @@ import { useAuth } from "./useAuth";
 
 const dateFmt = new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" });
 const fmtDate = (ms: number | null) => (ms === null ? "—" : dateFmt.format(new Date(ms)));
+
+/**
+ * The receipt after a post, hung from the bar: a sentence, and — for a 苔片
+ * the feed did not travel to (a past day, a 続く苔片) — the one tap that
+ * narrows the feed to its days. Never applied on the reader's behalf
+ * (features.md §1).
+ */
+type Notice = { text: string; action?: { label: string; run: () => void } };
+
+/** What the edit form's date fields mean: the days as they are, lengthened or moved here. */
+const EDIT_DAYS_HINT =
+  "範囲を伸ばすと、その日々に在った続く苔片になります。今日より先には伸ばせません。";
 
 export function App() {
   const auth = useAuth();
@@ -191,13 +207,15 @@ function AuthedView(props: {
   const [compose, setCompose] = useState<ComposeRequest | null>(null);
   // The receipt after a post — 「積みました」, and where it went when the feed
   // cannot show it — hangs from the sticky bar so it is in view wherever the
-  // reader was. It goes away on its own; nothing else moves.
-  const [notice, setNotice] = useState<string | null>(null);
+  // reader was. It goes away on its own; nothing else moves. One carrying a
+  // button stays longer: a tap target that vanishes mid-reach is a trap.
+  const [notice, setNotice] = useState<Notice | null>(null);
   useEffect(() => {
     if (notice === null) return;
-    const timer = setTimeout(() => setNotice(null), 6000);
+    const timer = setTimeout(() => setNotice(null), notice.action === undefined ? 6000 : 15000);
     return () => clearTimeout(timer);
   }, [notice]);
+  const noticeAction = notice?.action;
   const openCompose = useCallback(() => setCompose({ seedTags: null }), []);
   useComposeShortcut(openCompose);
   return (
@@ -221,7 +239,18 @@ function AuthedView(props: {
         </div>
         {/* Always in the tree: a live region must exist before its text lands. */}
         <p role="status" className={notice === null ? "bar-notice" : "bar-notice on"}>
-          {notice ?? ""}
+          {notice?.text ?? ""}
+          {noticeAction !== undefined && (
+            <button
+              type="button"
+              onClick={() => {
+                setNotice(null);
+                noticeAction.run();
+              }}
+            >
+              {noticeAction.label}
+            </button>
+          )}
         </p>
       </header>
       <p className="quiet">{props.user.displayName} の庭。</p>
@@ -272,7 +301,7 @@ function Garden(props: {
   compose: ComposeRequest | null;
   onCompose: (request: ComposeRequest) => void;
   onComposeClose: () => void;
-  onNotice: (text: string) => void;
+  onNotice: (notice: Notice) => void;
 }) {
   const [posts, setPosts] = useState<PostItem[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -343,24 +372,45 @@ function Garden(props: {
     };
   }, [postFilter, postPeriod, fault]);
 
+  /** Whether a 苔片 carries every filtered stone. */
+  const carriesStones = (item: PostItem) =>
+    postFilter.every((f) => item.tags.some((t) => t.id === f.id));
+
+  /** Whether a 苔片 belongs on this page of the feed: every filtered stone, and days that overlap the period. */
+  const inPage = (item: PostItem) => carriesStones(item) && spanInPeriod(item, postPeriod);
+
   const handleCreated = (created: PostItem) => {
     setError(null);
-    // A 苔片 not carrying every filtered stone, or stacked on a day outside
-    // the period (its day is the server's call — a post at 00:01 belongs to
-    // the new day even if the chip was set at 23:59), belongs off-screen —
-    // the moss still darkens, which is the visible receipt that it landed,
-    // and the bar says where it went.
-    const shown =
-      postFilter.every((f) => created.tags.some((t) => t.id === f.id)) &&
-      dayInPeriod(created.firstDay, postPeriod);
+    // A 苔片 not carrying every filtered stone, or whose days miss the period
+    // (its days are the server's call — a post at 00:01 belongs to the new
+    // day even if the chip was set at 23:59), belongs off-screen — the moss
+    // still darkens, which is the visible receipt that it landed. One that
+    // belongs goes where the server's order puts it (days.ts): the head for a
+    // 苔片 stacked now, its own day for one stacked on a past day.
+    const shown = inPage(created);
     if (shown) {
-      setPosts((current) => [created, ...(current ?? [])]);
+      setPosts((current) =>
+        current === null ? current : placeInFeed(current, created, nextCursor !== null),
+      );
+    }
+    if (isStackedNow(created)) {
       // The dialog has closed and focus is back on its invoker — the bar, or a
       // 苔片 somewhere down the feed — so the new 苔片 at the head of the list
       // is usually off-screen: travel there, the 導線's own movement.
-      feedRef.current?.scrollIntoView({ block: "start" });
+      if (shown) feedRef.current?.scrollIntoView({ block: "start" });
+      props.onNotice({ text: shown ? "積みました" : "積みました（いまの絞り込みの外）" });
+    } else {
+      // A past day or a 続く苔片 is not at the head, so the feed stays put and
+      // is never narrowed on the reader's behalf (features.md §1); the receipt
+      // offers the narrowing instead — the 苔片's days as the period, with the
+      // stones let go when it does not carry them, so the tap always lands on it.
+      const days = { from: created.firstDay, to: created.lastDay };
+      const stones = carriesStones(created) ? undefined : [];
+      props.onNotice({
+        text: "積みました",
+        action: { label: `${periodLabel(days)} に絞る`, run: () => showPeriod(days, stones) },
+      });
     }
-    props.onNotice(shown ? "積みました" : "積みました（いまの絞り込みの外）");
     setMossVersion((v) => v + 1);
     // The post may have minted new stones — refresh the completion list.
     if (created.tags.length > 0) {
@@ -372,17 +422,26 @@ function Garden(props: {
 
   const handleUpdated = (updated: PostItem) => {
     setError(null);
-    // Same rule as create: a 苔片 whose new stones no longer carry every
-    // filtered one drops out of the filtered view instead of lingering stale.
-    const matches = postFilter.every((f) => updated.tags.some((t) => t.id === f.id));
-    setPosts((current) =>
-      current === null
-        ? current
-        : matches
-          ? current.map((p) => (p.id === updated.id ? updated : p))
-          : current.filter((p) => p.id !== updated.id),
-    );
-    // Tags may have moved between stones — the 年表 and つながり follow.
+    // Same rule as create: a 苔片 whose new stones or days no longer meet the
+    // filter drops out of the filtered view instead of lingering stale. Days
+    // that moved move its seat in the order too (re-placed like a new 苔片);
+    // unchanged days keep it where it is, whatever page boundary it sits on.
+    const keep = inPage(updated);
+    setPosts((current) => {
+      if (current === null) return current;
+      if (!keep) return current.filter((p) => p.id !== updated.id);
+      const before = current.find((p) => p.id === updated.id);
+      if (before !== undefined && before.firstDay === updated.firstDay) {
+        return current.map((p) => (p.id === updated.id ? updated : p));
+      }
+      return placeInFeed(
+        current.filter((p) => p.id !== updated.id),
+        updated,
+        nextCursor !== null,
+      );
+    });
+    // Tags may have moved between stones, days along the axis — the 総草, the
+    // 年表 and つながり follow.
     setMossVersion((v) => v + 1);
     if (updated.tags.length > 0) {
       void listTags()
@@ -426,16 +485,22 @@ function Garden(props: {
     feedRef.current?.scrollIntoView({ block: "start" });
   };
 
-  // The period's twin: the 総草's cell lands on that one day (visualization.md
-  // §1) — the same 1-day window the 今日 preset makes, so the chip reads
-  // 「YYYY/MM/DD ×」 and the 期間で絞る fields show the day. The stones stay:
-  // the cell counts every 苔片 of the day, but a reader who narrowed to a stone
-  // asked for that stone's, and the chips say both.
-  const showDay = (day: string) => {
-    const period = { from: day, to: day };
+  // The period's twin, for the days of a 苔片 or the 総草's one day: the same
+  // window the 期間で絞る form makes, so the chip reads the days and the fields
+  // show them. The stones stay unless `stones` says otherwise: the cell counts
+  // every 苔片 of the day, but a reader who narrowed to a stone asked for that
+  // stone's, and the chips say both.
+  const showPeriod = (period: { from: string; to: string }, stones?: TagSummary[]) => {
+    if (stones !== undefined) {
+      setPostFilter((current) => (rowKey(current) === rowKey(stones) ? current : stones));
+    }
     setPostPeriod((current) => (periodKey(current) === periodKey(period) ? current : period));
     feedRef.current?.scrollIntoView({ block: "start" });
   };
+
+  // The 総草's cell lands on that one day (visualization.md §1) — the same
+  // 1-day window the 今日 preset makes, so the chip reads 「YYYY/MM/DD ×」.
+  const showDay = (day: string) => showPeriod({ from: day, to: day });
 
   // Chips and the live announcement share one wording: stones by name, the
   // period as its chip text (a whole month reads as the month).
@@ -456,6 +521,7 @@ function Garden(props: {
       {props.compose !== null && (
         <ComposeDialog
           seedTags={props.compose.seedTags}
+          today={today}
           onCreated={handleCreated}
           onClose={props.onComposeClose}
           onSessionLost={props.onSessionLost}
@@ -545,6 +611,7 @@ function Garden(props: {
         </details>
         <Timeline
           posts={posts}
+          today={today}
           filtered={narrowedBy.length > 0}
           onTagTap={(t) => showPosts([t])}
           onSameStones={(tags) => props.onCompose({ seedTags: tagsField(tags) })}
@@ -636,6 +703,8 @@ function PeriodForm(props: {
 
 function Timeline(props: {
   posts: PostItem[] | null;
+  /** The feed's server-decided today — the ceiling of the edit forms' date fields. */
+  today: string | null;
   filtered: boolean;
   onTagTap: (tag: TagSummary) => void;
   onSameStones: (tags: TagSummary[]) => void;
@@ -661,6 +730,7 @@ function Timeline(props: {
         <PostEntry
           key={p.id}
           post={p}
+          today={props.today}
           onTagTap={props.onTagTap}
           onSameStones={props.onSameStones}
           onUpdated={props.onUpdated}
@@ -680,6 +750,7 @@ function Timeline(props: {
  */
 function PostEntry(props: {
   post: PostItem;
+  today: string | null;
   onTagTap: (tag: TagSummary) => void;
   onSameStones: (tags: TagSummary[]) => void;
   onUpdated: (updated: PostItem) => void;
@@ -688,9 +759,14 @@ function PostEntry(props: {
 }) {
   const p = props.post;
   const [editing, setEditing] = useState(false);
-  // 編集中の本文だけ state（プレビューが要る）。見出しとタグは form のまま。
-  // 「編集」を押した時点の本文で毎回蒔き直すので、やめる ＝ 捨てる が保たれる。
+  // 編集中の本文と日だけ state（本文はプレビューが要り、日は 2 欄が互いを縛る）。
+  // 見出しとタグは form のまま。「編集」を押した時点の値で毎回蒔き直すので、
+  // やめる ＝ 捨てる が保たれる。
   const [editBody, setEditBody] = useState(p.body);
+  const [editDays, setEditDays] = useState<DaysFields>({
+    firstDay: p.firstDay,
+    lastDay: p.lastDay,
+  });
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -714,16 +790,20 @@ function PostEntry(props: {
     body: string;
     tags: string[];
     kind: PostKind | null;
+    days: DaysFields;
   }) => {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
+      // Blank date fields name no days, and a PATCH naming none keeps the
+      // row's own — the days only move when the form says where to.
       const updated = await updatePost(p.id, {
         body: input.body,
         ...(input.title ? { title: input.title } : {}),
         tags: input.tags,
         kind: input.kind,
+        ...stackDaysInput(input.days.firstDay, input.days.lastDay),
       });
       setEditing(false);
       props.onUpdated(updated);
@@ -761,6 +841,7 @@ function PostEntry(props: {
               body: editBody,
               tags: splitTagField(String(fd.get("tags") ?? "")),
               kind: parseKind(fd.get("kind")),
+              days: editDays,
             });
           }}
         >
@@ -775,6 +856,16 @@ function PostEntry(props: {
               onKeyDown={submitOnCmdEnter}
             />
           </div>
+          {/* The 苔片's days, folded — the summary names them; opening is how a
+              続く苔片 is lengthened (CONTEXT.md: まだ続くものは後で伸ばす). */}
+          <DaysDisclosure
+            idPrefix={`edit-${p.id}`}
+            firstDay={editDays.firstDay}
+            lastDay={editDays.lastDay}
+            today={props.today}
+            hint={EDIT_DAYS_HINT}
+            onChange={setEditDays}
+          />
           <BodyField
             id={`edit-body-${p.id}`}
             label="本文"
@@ -825,9 +916,29 @@ function PostEntry(props: {
   return (
     <li className="post">
       <div className="post-meta">
-        <time className="hint" dateTime={new Date(p.createdAt).toISOString()}>
-          {fmtDate(p.createdAt)}
-        </time>
+        {/* 「いま積んだ」 shows the moment; a 苔片 stacked on a past day, or a
+            続く苔片, shows its days and — small — the day it was written on
+            (features.md §1). The days are the server's keys, compared only. */}
+        {isStackedNow(p) ? (
+          <time className="hint" dateTime={new Date(p.createdAt).toISOString()}>
+            {fmtDate(p.createdAt)}
+          </time>
+        ) : (
+          <>
+            <span className="hint post-days">
+              <time dateTime={p.firstDay}>{slashDay(p.firstDay)}</time>
+              {p.firstDay !== p.lastDay && (
+                <>
+                  {" 〜 "}
+                  <time dateTime={p.lastDay}>{slashDay(p.lastDay)}</time>
+                </>
+              )}
+            </span>
+            <span className="hint post-posted">
+              <time dateTime={p.postedDay}>{postedLabel(p.postedDay, p.lastDay)}</time> に積む
+            </span>
+          </>
+        )}
         {/* The 向き as a word (never colour alone); its dot repeats the 総草's
             hue so the two vocabularies meet. 未分類 wears nothing. */}
         {p.kind !== null && (
@@ -871,6 +982,7 @@ function PostEntry(props: {
           disabled={busy}
           onClick={() => {
             setEditBody(p.body);
+            setEditDays({ firstDay: p.firstDay, lastDay: p.lastDay });
             setEditing(true);
           }}
         >

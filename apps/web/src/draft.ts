@@ -13,28 +13,66 @@ import { parseKind, type PostKind } from "./kind";
 
 const KEY = "kokemusu.draft.v1";
 
-export type Draft = { title: string; body: string; tags: string; kind: PostKind | null };
+/**
+ * Everything the dialog holds. `firstDay` / `lastDay` are the two date fields
+ * as typed (`YYYY-MM-DD`, "" = not chosen = today) — the days 退避 like the
+ * body, so a 苔片 half-written for last Tuesday is still last Tuesday's when
+ * the dialog comes back.
+ */
+export type Draft = {
+  title: string;
+  body: string;
+  tags: string;
+  kind: PostKind | null;
+  firstDay: string;
+  lastDay: string;
+};
+
+/** A draft with nothing in it — what a fresh dialog starts from and what success leaves. */
+export const EMPTY_DRAFT: Draft = {
+  title: "",
+  body: "",
+  tags: "",
+  kind: null,
+  firstDay: "",
+  lastDay: "",
+};
+
+const stringOr = (value: unknown, fallback: string): string =>
+  typeof value === "string" ? value : fallback;
 
 /**
  * The stored JSON → a Draft, or null for anything that is not one. `title`
- * joined the shape with the 見出し toggle (2026-09-05) and `kind` with the 向き
- * radio (2026-09-06); a draft saved before either lacks the field and reads as
- * 見出しなし / 未分類.
+ * joined the shape with the 見出し toggle (2026-09-05), `kind` with the 向き
+ * radio and the days with 日を選ぶ (2026-09-06); a draft saved before any of
+ * them lacks the field and reads as 見出しなし / 未分類 / 今日.
  */
 export function parseDraft(raw: string): Draft | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (typeof parsed !== "object" || parsed === null) return null;
-    const { title, body, tags, kind } = parsed as Record<string, unknown>;
+    const { title, body, tags, kind, firstDay, lastDay } = parsed as Record<string, unknown>;
     if (typeof body !== "string" || typeof tags !== "string") return null;
-    return { title: typeof title === "string" ? title : "", body, tags, kind: parseKind(kind) };
+    return {
+      title: stringOr(title, ""),
+      body,
+      tags,
+      kind: parseKind(kind),
+      firstDay: stringOr(firstDay, ""),
+      lastDay: stringOr(lastDay, ""),
+    };
   } catch {
     return null;
   }
 }
 
 export const isEmptyDraft = (draft: Draft): boolean =>
-  draft.title === "" && draft.body === "" && draft.tags === "" && draft.kind === null;
+  draft.title === "" &&
+  draft.body === "" &&
+  draft.tags === "" &&
+  draft.kind === null &&
+  draft.firstDay === "" &&
+  draft.lastDay === "";
 
 export function loadDraft(): Draft | null {
   try {

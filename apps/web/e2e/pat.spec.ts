@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { E2E_INITIAL_REGISTRATION_TOKEN } from "./env";
+import { shiftDay, slashed } from "./helpers/day";
 import { queryRows } from "./helpers/db";
 import { enableVirtualAuthenticator } from "./helpers/webauthn";
 
@@ -53,8 +54,13 @@ test("PAT: mint → Bearer post lands encrypted → write-only wall → revoke k
   expect(me.status()).toBe(200);
   expect(((await me.json()) as { id: string }).id).toBeTruthy();
 
-  // The daily-post shape: same body as the composer, plus the optional title
-  // and 向き (a learning app's 苔片 faces in).
+  // The daily-post shape: same body as the composer, plus the optional title,
+  // 向き (a learning app's 苔片 faces in) and the day — a sender that pushes
+  // yesterday's results the morning after names yesterday as `firstDay`, and
+  // the 苔片 lands there while `postedDay` stays the day it was sent
+  // (ADR-0005). Today is the server's (the feed's, read with the session).
+  const { today } = (await (await page.request.get("/api/posts")).json()) as { today: string };
+  const yesterday = shiftDay(today, -1);
   const created = await sender.post("/api/posts", {
     headers: bearer,
     data: {
@@ -62,12 +68,24 @@ test("PAT: mint → Bearer post lands encrypted → write-only wall → revoke k
       body: "PAT からの苔片",
       tags: ["mazuoboeru"],
       kind: "input",
+      firstDay: yesterday,
     },
   });
   expect(created.status()).toBe(201);
-  const createdItem = (await created.json()) as { id: string; kind: string | null };
+  const createdItem = (await created.json()) as {
+    id: string;
+    kind: string | null;
+    firstDay: string;
+    lastDay: string;
+    postedDay: string;
+  };
   const createdId = createdItem.id;
   expect(createdItem.kind).toBe("input");
+  expect([createdItem.firstDay, createdItem.lastDay, createdItem.postedDay]).toEqual([
+    yesterday,
+    yesterday,
+    today,
+  ]);
 
   // The write-only wall: post:write cannot read the decrypted timeline…
   expect((await sender.get("/api/posts", { headers: bearer })).status()).toBe(403);
@@ -92,25 +110,34 @@ test("PAT: mint → Bearer post lands encrypted → write-only wall → revoke k
     (await sender.post("/api/posts", { headers: { Authorization: "Bearer junk" } })).status(),
   ).toBe(401);
 
-  // The sender's 苔片 lands in the owner's UI, decrypted — title included…
+  // The sender's 苔片 lands in the owner's UI, decrypted — title included — on
+  // yesterday (its card names the day, not a time; by body, since the feed is
+  // in day order and the golden path may have left today's 苔片 above it)…
   await page.reload();
   const timeline = page.locator("ol.posts");
-  await expect(timeline.getByText("PAT からの苔片", { exact: true })).toBeVisible();
-  await expect(timeline.locator(".post-title").first()).toHaveText("まず覚える 2026-09-03");
-  await expect(timeline.locator(".post-tags .tag-chip").first()).toHaveText("mazuoboeru");
+  const patCard = timeline.locator("li.post", { hasText: "PAT からの苔片" });
+  await expect(patCard).toBeVisible();
+  await expect(patCard.locator(".post-title")).toHaveText("まず覚える 2026-09-03");
+  await expect(patCard.locator(".post-tags .tag-chip")).toHaveText(["mazuoboeru"]);
+  await expect(patCard.locator(".post-days")).toHaveText(slashed(yesterday));
 
-  // …while at rest title and body are k1. envelopes like every other 苔片.
-  // (By id — the specs share one sqlite, and the golden path leaves a titled
-  // 苔片 of its own behind since the 見出し toggle.)
-  const storedPost = queryRows<{ title: string; body: string; kind: string | null }>(
-    `SELECT title, body, kind FROM post WHERE id = '${createdId}'`,
-  );
+  // …while at rest title and body are k1. envelopes like every other 苔片, and
+  // the days and 向き are plaintext metadata (ADR-0001) — the 総草 reads them
+  // without the key. (By id — the specs share one sqlite, and the golden path
+  // leaves a titled 苔片 of its own behind since the 見出し toggle.)
+  const storedPost = queryRows<{
+    title: string;
+    body: string;
+    kind: string | null;
+    first_day: string;
+    last_day: string;
+  }>(`SELECT title, body, kind, first_day, last_day FROM post WHERE id = '${createdId}'`);
   expect(storedPost).toHaveLength(1);
   expect(storedPost[0]?.title).toMatch(/^k1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,}$/);
   expect(storedPost[0]?.body).toMatch(/^k1\./);
   expect(storedPost[0]?.body).not.toContain("苔片");
-  // The 向き is plaintext metadata (ADR-0001) — the 総草 reads it without the key.
   expect(storedPost[0]?.kind).toBe("input");
+  expect([storedPost[0]?.first_day, storedPost[0]?.last_day]).toEqual([yesterday, yesterday]);
 
   // Revoke in the settings UI. The row stays, marked dead.
   await page.getByText("API トークン（PAT）").click();

@@ -6,8 +6,11 @@ SQLite / D1 前提。1インスタンス＝1ユーザーだが、認証情報の
 2026-09-06 更新: **苔片の軸を「日」の範囲に**（[ADR-0005](adr/0005-post-axis-is-day-range.md)。✅ 同日 merge #43 の
 `drizzle/0004_post_day_axis.sql` が `post` を 1 回だけ再構築し、本番 D1 にも適用済み）: `first_day` / `last_day`（日本時間の
 `YYYY-MM-DD`、NOT NULL）が可視化・絞り込み・並びの軸で、`created_at` は「投稿した瞬間」。**`kind`**（向き、NULLABLE）は
-同じ再構築で列だけ同乗し、書く側（create / PATCH、UI と PAT）が受けるのは ✅ 同日 #46、[plans/day-axis-and-kind.md](plans/day-axis-and-kind.md) の B。
-過去の日に積む・続く苔片を作るのは A2 —— 未実装で、いまは create が `first_day = last_day = 今日` を入れる。
+同じ再構築で列だけ同乗し、書く側（create / PATCH、UI と PAT）が受けるのは ✅ 同日 #46。
+過去の日に積む・続く苔片を作る側も ✅ 同日 #47: create / PATCH の body に `firstDay` / `lastDay`（`YYYY-MM-DD`）。create は省略 ＝ 今日・
+`lastDay` 省略 ＝ `firstDay`、PATCH は省略した側を据え置き（日を言わない編集は日を動かさない）。どちらも結果を
+`最初の日 ≤ 最後の日 ≤ 今日` かつ **今日から 1200 か月以内**（`enumerateMonths` の上限 ＝ 年表の月展開が throw しない床。
+コアの `canStackOn` / `earliestStackDay`）で検証し、外れれば 400。応答の `postedDay` ＝ `dayKey(created_at)` は編集でも動かない。
 
 2026-09-03 更新: **`api_token` を実装**（`drizzle/0002_api_token.sql`。葉テーブルの追加のみ = 既存テーブル再構築なしを
 生成 SQL とテスト `migrations.test.ts` の両方で確認）。`PAT_PEPPER` は fail closed —— 未設定なら発行が 503・Bearer 検証は

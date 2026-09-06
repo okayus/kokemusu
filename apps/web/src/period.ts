@@ -93,8 +93,18 @@ export function periodLabel(period: Period): string {
   return "";
 }
 
-/** Whether a 苔片 stacked on `day` (its server-decided JST day) falls inside the period. */
-export function dayInPeriod(day: string, period: Period | null): boolean {
+/**
+ * Whether a 苔片's days OVERLAP the period — the server's own test (ADR-0005:
+ * `first_day <= to AND last_day >= from`), so a 続く苔片 is in a period that
+ * meets any of its days. A single-day 苔片 has the two days equal.
+ */
+export function spanInPeriod(
+  span: { firstDay: string; lastDay: string },
+  period: Period | null,
+): boolean {
   if (period === null) return true;
-  return (period.from === undefined || period.from <= day) && (period.to === undefined || day <= period.to);
+  return (
+    (period.from === undefined || period.from <= span.lastDay) &&
+    (period.to === undefined || span.firstDay <= period.to)
+  );
 }

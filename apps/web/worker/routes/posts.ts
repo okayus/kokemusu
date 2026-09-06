@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { decodeCursor, encodeCursor } from "../core/cursor";
 import { decryptBody, encryptBody, importBodyKey } from "../core/crypto";
-import { dayKey, isDayKey, type DayKey } from "../core/day";
+import { canStackOn, dayKey, isDayKey, type DayKey } from "../core/day";
 import { POST_KINDS, type PostKind } from "../core/kind";
 import { MAX_TAGS_PER_POST, normalizeTagName, parseTagNames, parseTagsParam } from "../core/tag";
 import { createDb, type Db } from "../db";
@@ -36,6 +36,15 @@ export const createPostSchema = z.object({
   // away. The same field on PATCH: the edit form sends the whole state, so an
   // omitted 向き clears it, like an omitted title clears the heading.
   kind: z.enum(POST_KINDS).nullable().optional(),
+  // The days to stack on (ADR-0005, features.md §1): calendar days here, the
+  // order and the bounds in the handler, which knows today — `firstDay ≤
+  // lastDay ≤ today`, no earlier than core's floor (canStackOn); a 400 for
+  // anything else. On POST an omitted `firstDay` is today and an omitted
+  // `lastDay` is `firstDay`; on PATCH an omitted half keeps the row's own
+  // day (an edit that says nothing about the days moves nothing — the way
+  // to lengthen a 続く苔片 is a PATCH naming its new `lastDay`).
+  firstDay: z.string().refine(isDayKey, "must be a YYYY-MM-DD calendar day").optional(),
+  lastDay: z.string().refine(isDayKey, "must be a YYYY-MM-DD calendar day").optional(),
 });
 
 // The two tag filter forms: `?tag=` = one tag by (normalized) name —
@@ -192,10 +201,15 @@ export const postRoutes = new Hono<Env>()
     const db = createDb(c.env.DB);
 
     const now = Date.now();
-    // The one place the zone enters (core/day.ts): a 苔片 stacked now lands on
-    // today's 「日」. Until A2 takes the days off the body, every 苔片 is a
-    // single day and it is this one.
+    // The one place the zone enters (core/day.ts): today's 「日」 is where a
+    // 苔片 lands when the body names no day, and the ceiling for one that does
+    // — a past day, or a range that makes it a 続く苔片 (ADR-0005). The days
+    // are checked against today AFTER the schema, since only this handler
+    // knows today; a failed check is the same 400 as a malformed body.
     const today = dayKey(now);
+    const firstDay = parsed.data.firstDay ?? today;
+    const lastDay = parsed.data.lastDay ?? firstDay;
+    if (!canStackOn({ firstDay, lastDay }, today)) return fail(c, "validation_error");
     const kind = parsed.data.kind ?? null;
     const { newTags, resolved } = await resolveTagRows(db, userId, wanted, now);
 
@@ -208,8 +222,8 @@ export const postRoutes = new Hono<Env>()
       title: titlePlain === null ? null : await encryptBody(titlePlain, key),
       body: await encryptBody(parsed.data.body, key),
       bodyFormat: "markdown",
-      firstDay: today,
-      lastDay: today,
+      firstDay,
+      lastDay,
       kind,
       createdAt: now,
       updatedAt: now,
@@ -234,8 +248,8 @@ export const postRoutes = new Hono<Env>()
       bodyFormat: row.bodyFormat ?? "markdown",
       createdAt: now,
       updatedAt: now,
-      firstDay: today,
-      lastDay: today,
+      firstDay,
+      lastDay,
       postedDay: today,
       kind,
       tags: resolved,
@@ -424,6 +438,14 @@ export const postRoutes = new Hono<Env>()
     if (!owned) return fail(c, "not_found");
 
     const now = Date.now();
+    // The days: a half the body leaves out keeps the row's own, so an edit
+    // that says nothing about them moves nothing; whatever results is held to
+    // the same rule as a new 苔片 (canStackOn) — this is where a 続く苔片 is
+    // lengthened, and it may not be lengthened past today.
+    const today = dayKey(now);
+    const firstDay = parsed.data.firstDay ?? owned.firstDay;
+    const lastDay = parsed.data.lastDay ?? owned.lastDay;
+    if (!canStackOn({ firstDay, lastDay }, today)) return fail(c, "validation_error");
     const { newTags, resolved } = await resolveTagRows(db, userId, wanted, now);
 
     // Encrypt at the last moment, like create — plaintext never rides an error.
@@ -439,7 +461,7 @@ export const postRoutes = new Hono<Env>()
     await db.batch([
       db
         .update(post)
-        .set({ title: encryptedTitle, body: encryptedBody, kind, updatedAt: now })
+        .set({ title: encryptedTitle, body: encryptedBody, firstDay, lastDay, kind, updatedAt: now })
         .where(eq(post.id, owned.id)),
       ...newTags.map((t) => db.insert(tag).values(t)),
       db.delete(postTags).where(eq(postTags.postId, owned.id)),
@@ -453,9 +475,9 @@ export const postRoutes = new Hono<Env>()
       bodyFormat: owned.bodyFormat,
       createdAt: owned.createdAt,
       updatedAt: now,
-      // The days are not editable yet (A2): the row keeps its own.
-      firstDay: owned.firstDay,
-      lastDay: owned.lastDay,
+      firstDay,
+      lastDay,
+      // The day it was written on never moves — an edit is not a new 苔片.
       postedDay: dayKey(owned.createdAt),
       kind,
       tags: resolved,
