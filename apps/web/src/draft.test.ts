@@ -7,7 +7,8 @@ describe("parseDraft", () => {
       parseDraft(
         JSON.stringify({
           body: "本文",
-          tags: "a, b",
+          tags: ["a", "b"],
+          tagText: "c",
           kind: "input",
           firstDay: "2026-09-01",
           lastDay: "2026-09-05",
@@ -15,7 +16,8 @@ describe("parseDraft", () => {
       ),
     ).toEqual({
       body: "本文",
-      tags: "a, b",
+      tags: ["a", "b"],
+      tagText: "c",
       kind: "input",
       firstDay: "2026-09-01",
       lastDay: "2026-09-05",
@@ -27,6 +29,15 @@ describe("parseDraft", () => {
       ...EMPTY_DRAFT,
       body: "本文",
     });
+  });
+
+  it("reads the old field's comma-separated tags as stones, and the chip field's array as it is", () => {
+    expect(parseDraft(JSON.stringify({ body: "x", tags: "a, b、c" }))?.tags).toEqual(["a", "b", "c"]);
+    const chips = parseDraft(JSON.stringify({ body: "x", tags: ["a", "b"], tagText: "c" }));
+    expect(chips?.tags).toEqual(["a", "b"]);
+    expect(chips?.tagText).toBe("c");
+    expect(parseDraft(JSON.stringify({ body: "x", tags: [1] }))).toBeNull();
+    expect(parseDraft(JSON.stringify({ body: "x", tags: null }))).toBeNull();
   });
 
   it("folds the 見出し of a draft saved before ADR-0006 into the body's first line rather than dropping it", () => {
@@ -59,7 +70,8 @@ describe("parseDraft", () => {
 describe("isEmptyDraft", () => {
   it("is empty only when every field is — a 向き or a day alone is worth resuming", () => {
     expect(isEmptyDraft(EMPTY_DRAFT)).toBe(true);
-    expect(isEmptyDraft({ ...EMPTY_DRAFT, tags: "a" })).toBe(false);
+    expect(isEmptyDraft({ ...EMPTY_DRAFT, tags: ["a"] })).toBe(false);
+    expect(isEmptyDraft({ ...EMPTY_DRAFT, tagText: "a" })).toBe(false);
     expect(isEmptyDraft({ ...EMPTY_DRAFT, kind: "output" })).toBe(false);
     expect(isEmptyDraft({ ...EMPTY_DRAFT, firstDay: "2026-09-01" })).toBe(false);
     expect(isEmptyDraft({ ...EMPTY_DRAFT, lastDay: "2026-09-05" })).toBe(false);

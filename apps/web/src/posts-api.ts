@@ -82,15 +82,3 @@ export function listPosts(
 }
 
 export const listTags = (): Promise<TagSummary[]> => request("/api/tags");
-
-/**
- * Split the composer's one tag field on half/full-width commas and 読点 —
- * friendly to Japanese IME input. The server re-normalizes; this only decides
- * where one tag ends and the next begins.
- */
-export function splitTagField(raw: string): string[] {
-  return raw
-    .split(/[,，、]/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}

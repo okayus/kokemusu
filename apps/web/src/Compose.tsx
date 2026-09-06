@@ -11,30 +11,25 @@
 // carry-over of tags to the next 苔片 (a forgotten stone would grow moss on the
 // wrong rock, and it counts in every visualization), and no carry-over of a
 // past day either.
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type Ref } from "react";
+import { useEffect, useId, useRef, useState, type Ref } from "react";
 import { describeApiError, isApiError } from "./api";
 import { daysLabel, earliestStackDay, stackDaysInput } from "./days";
 import { EMPTY_DRAFT, loadDraft, saveDraft, type Draft } from "./draft";
+import { submitOnCmdEnter } from "./form";
 import { KIND_CHOICES, type PostKind } from "./kind";
 import { Markdown } from "./markdown";
-import { createPost, splitTagField, type PostItem, type TagSummary } from "./posts-api";
+import { createPost, type PostItem, type TagSummary } from "./posts-api";
+import { TagField } from "./TagField";
+import { stonesOf } from "./tags";
 
 /**
- * What opens the dialog: `seedTags` is the tag field's text for 同じ石に積む;
+ * What opens the dialog: `seedTags` is the stones (by name) for 同じ石に積む;
  * null means resume the draft as it was left (積む / `n`).
  */
-export type ComposeRequest = { seedTags: string | null };
+export type ComposeRequest = { seedTags: string[] | null };
 
-/** A 苔片's stones as the tag field's text — the edit form's spelling too. */
-export const tagsField = (tags: TagSummary[]): string => tags.map((t) => t.name).join(", ");
-
-/** ⌘/Ctrl+Enter submits the surrounding form (composer と編集フォームで共用). */
-export const submitOnCmdEnter = (e: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
-  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-    e.preventDefault();
-    e.currentTarget.form?.requestSubmit();
-  }
-};
+/** A 苔片's stones by name — what 同じ石に積む seeds and the edit form starts from. */
+export const stoneNames = (tags: TagSummary[]): string[] => tags.map((t) => t.name);
 
 /**
  * The `n` shortcut (features.md §1) opens the dialog only when the key would
@@ -288,7 +283,9 @@ export const COMPOSE_DAYS_HINT =
  * dialog — so the garden can travel to the new 苔片 without being undone.
  */
 export function ComposeDialog(props: {
-  seedTags: string | null;
+  seedTags: string[] | null;
+  /** The garden's registered stones — the tag field's suggestions. */
+  tagOptions: TagSummary[];
   /** The feed's server-decided today — the date fields' ceiling. */
   today: string | null;
   onCreated: (created: PostItem) => void;
@@ -299,7 +296,7 @@ export function ComposeDialog(props: {
   // the stones only — the body, 向き and days are whatever was left there.
   const [fields, setFields] = useState<Draft>(() => {
     const draft = loadDraft() ?? EMPTY_DRAFT;
-    return props.seedTags === null ? draft : { ...draft, tags: props.seedTags };
+    return props.seedTags === null ? draft : { ...draft, tags: props.seedTags, tagText: "" };
   });
   // 日を選ぶ is folded away by default, unfolded when a draft already carries days.
   const daysChosen = fields.firstDay !== "" || fields.lastDay !== "";
@@ -342,7 +339,8 @@ export function ComposeDialog(props: {
     try {
       const created = await createPost({
         body: fields.body,
-        tags: splitTagField(fields.tags),
+        // The text still in the tag field is a stone too — nothing typed is lost.
+        tags: stonesOf({ tags: fields.tags, text: fields.tagText }),
         kind: fields.kind,
         ...stackDaysInput(fields.firstDay, fields.lastDay),
       });
@@ -400,21 +398,12 @@ export function ComposeDialog(props: {
           onChange={(next) => update({ body: next })}
         />
         <KindField value={fields.kind} onChange={(next) => update({ kind: next })} />
-        <div className="field">
-          <label htmlFor="post-tags">タグ（コンマ区切り・任意）</label>
-          {/* list: the garden's one datalist — completion shared with the edit forms. */}
-          <input
-            id="post-tags"
-            name="tags"
-            list="tag-options"
-            autoComplete="off"
-            maxLength={500}
-            value={fields.tags}
-            placeholder="typescript, 読書"
-            onChange={(e) => update({ tags: e.target.value })}
-            onKeyDown={submitOnCmdEnter}
-          />
-        </div>
+        <TagField
+          id="post-tags"
+          options={props.tagOptions}
+          value={{ tags: fields.tags, text: fields.tagText }}
+          onChange={(next) => update({ tags: next.tags, tagText: next.text })}
+        />
         {error && (
           <p role="alert" className="error">
             {error}

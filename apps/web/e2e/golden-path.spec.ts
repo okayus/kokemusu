@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { E2E_INITIAL_REGISTRATION_TOKEN } from "./env";
 import { shiftDay, shortDay, slashed } from "./helpers/day";
 import { queryRows } from "./helpers/db";
+import { fillTags, tagChips } from "./helpers/tags";
 import { enableVirtualAuthenticator } from "./helpers/webauthn";
 
 type HeatmapWire = {
@@ -58,7 +59,8 @@ test("register → post → today's moss darkens → reload → logout → login
   const body = `e2e の苔片 ${Date.now()}`;
   await stack.click();
   await dialog.getByLabel("いまの苔片").fill(body);
-  await dialog.getByLabel("タグ（コンマ区切り・任意）").fill("e2e, 苔");
+  await fillTags(dialog, ["e2e", "苔"]);
+  await expect(tagChips(dialog)).toHaveText(["e2e", "苔"]);
   await dialog.getByRole("button", { name: "積む", exact: true }).click();
   await expect(dialog).toBeHidden();
 
@@ -201,7 +203,26 @@ test("register → post → today's moss darkens → reload → logout → login
   await expect(preview.locator("h4")).toHaveText("見出し");
   await expect(preview.locator("li")).toHaveText("箇条書き");
 
-  await dialog.getByLabel("タグ（コンマ区切り・任意）").fill("e2e");
+  // The tag field (features.md §2): typing offers the registered stones as a
+  // listbox — "e" finds e2e — and Enter takes the highlighted one; a spelling
+  // no stone has offers 「…」を新しい石に instead; Escape folds the list and
+  // only the list (the dialog stays); Backspace on an empty field takes the
+  // last chip back.
+  const tagBox = dialog.getByRole("combobox", { name: "タグ（任意）" });
+  await tagBox.fill("e");
+  await expect(dialog.getByRole("option", { name: "e2e" })).toBeVisible();
+  await tagBox.press("Enter");
+  await expect(tagChips(dialog)).toHaveText(["e2e"]);
+  await expect(tagBox).toHaveValue("");
+  await tagBox.fill("新しい石");
+  await expect(dialog.getByRole("option", { name: "「新しい石」を新しい石に" })).toBeVisible();
+  await tagBox.press("Escape");
+  await expect(dialog.getByRole("listbox")).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await tagBox.fill("");
+  await tagBox.press("Backspace");
+  await expect(tagChips(dialog)).toHaveCount(0);
+  await fillTags(dialog, ["e2e"]);
   await dialog.getByRole("button", { name: "積む", exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(timeline.locator("li.post")).toHaveCount(2);
@@ -262,7 +283,9 @@ test("register → post → today's moss darkens → reload → logout → login
   // and 削除 as substrings once the new stone exists.)
   await second.getByRole("button", { name: "編集", exact: true }).click();
   await second.getByLabel("本文").fill("編集された苔片");
-  await second.getByLabel("タグ（コンマ区切り・任意）").fill("e2e, 編集");
+  // The edit form starts from the 苔片's own stones as chips; one more is typed.
+  await expect(tagChips(second)).toHaveText(["e2e"]);
+  await fillTags(second, ["編集"]);
   await second.getByRole("button", { name: "保存" }).click();
 
   const edited = timeline.locator("li.post", { hasText: "編集された苔片" });
@@ -402,7 +425,8 @@ test("register → post → today's moss darkens → reload → logout → login
   // the last post (the draft was spent); a body typed and dismissed with Esc is
   // there again on the next open.
   await stack.click();
-  await expect(dialog.getByLabel("タグ（コンマ区切り・任意）")).toHaveValue("");
+  await expect(tagChips(dialog)).toHaveCount(0);
+  await expect(tagBox).toHaveValue("");
   await expect(dialog.getByLabel("いまの苔片")).toHaveValue("");
   await dialog.getByLabel("いまの苔片").fill("今日の苔片");
   await page.keyboard.press("Escape");
@@ -419,7 +443,7 @@ test("register → post → today's moss darkens → reload → logout → login
   await expect(periodChip).toHaveText(`${slashed(yesterday)} ×`);
   await stack.click();
   await expect(dialog.getByLabel("いまの苔片")).toHaveValue("今日の苔片");
-  await dialog.getByLabel("タグ（コンマ区切り・任意）").fill("e2e");
+  await fillTags(dialog, ["e2e"]);
   await dialog.getByRole("button", { name: "積む", exact: true }).click();
   await expect(dialog).toBeHidden();
   const receipt = bar.getByRole("status");
@@ -436,7 +460,7 @@ test("register → post → today's moss darkens → reload → logout → login
   const survivor = timeline.locator("li.post").nth(1);
   await expect(survivor.getByText(body, { exact: true })).toBeVisible();
   await survivor.getByRole("button", { name: "同じ石に積む" }).click();
-  await expect(dialog.getByLabel("タグ（コンマ区切り・任意）")).toHaveValue("e2e, 苔");
+  await expect(tagChips(dialog)).toHaveText(["e2e", "苔"]);
   await expect(dialog.getByLabel("いまの苔片")).toHaveValue("");
   await dialog.getByLabel("いまの苔片").fill("同じ石に積んだ苔片");
   await dialog.getByRole("button", { name: "積む", exact: true }).click();
@@ -540,7 +564,7 @@ test("register → post → today's moss darkens → reload → logout → login
   await dialog.getByLabel("いつ", { exact: true }).fill(yesterday);
   await dialog.getByLabel("〜いつまで").fill(todayKey);
   await dialog.getByLabel("いまの苔片").fill("二日続いた苔片");
-  await dialog.getByLabel("タグ（コンマ区切り・任意）").fill("続き");
+  await fillTags(dialog, ["続き"]);
   await dialog.getByRole("button", { name: "積む", exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(
