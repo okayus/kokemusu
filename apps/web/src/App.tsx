@@ -12,6 +12,7 @@ import {
 import {
   BodyField,
   ComposeDialog,
+  KindField,
   submitOnCmdEnter,
   tagsField,
   useComposeShortcut,
@@ -19,6 +20,7 @@ import {
 } from "./Compose";
 import { clearDraft } from "./draft";
 import { HeatmapSection } from "./Heatmap";
+import { KIND_LABELS, parseKind, type PostKind } from "./kind";
 import { Markdown } from "./markdown";
 import {
   dayInPeriod,
@@ -707,7 +709,12 @@ function PostEntry(props: {
     else setError(describeApiError(e));
   };
 
-  const save = async (input: { title: string; body: string; tags: string[] }) => {
+  const save = async (input: {
+    title: string;
+    body: string;
+    tags: string[];
+    kind: PostKind | null;
+  }) => {
     if (busy) return;
     setBusy(true);
     setError(null);
@@ -716,6 +723,7 @@ function PostEntry(props: {
         body: input.body,
         ...(input.title ? { title: input.title } : {}),
         tags: input.tags,
+        kind: input.kind,
       });
       setEditing(false);
       props.onUpdated(updated);
@@ -752,6 +760,7 @@ function PostEntry(props: {
               title: String(fd.get("title") ?? "").trim(),
               body: editBody,
               tags: splitTagField(String(fd.get("tags") ?? "")),
+              kind: parseKind(fd.get("kind")),
             });
           }}
         >
@@ -772,6 +781,9 @@ function PostEntry(props: {
             value={editBody}
             onChange={setEditBody}
           />
+          {/* Uncontrolled like the other fields: the radio group is re-seeded
+              from the 苔片 each time 編集 opens, so やめる discards. */}
+          <KindField defaultValue={p.kind} />
           <div className="field">
             <label htmlFor={`edit-tags-${p.id}`}>タグ（コンマ区切り・任意）</label>
             {/* list: the composer's datalist — one source of completion. */}
@@ -812,9 +824,16 @@ function PostEntry(props: {
 
   return (
     <li className="post">
-      <time className="hint" dateTime={new Date(p.createdAt).toISOString()}>
-        {fmtDate(p.createdAt)}
-      </time>
+      <div className="post-meta">
+        <time className="hint" dateTime={new Date(p.createdAt).toISOString()}>
+          {fmtDate(p.createdAt)}
+        </time>
+        {/* The 向き as a word (never colour alone); its dot repeats the 総草's
+            hue so the two vocabularies meet. 未分類 wears nothing. */}
+        {p.kind !== null && (
+          <span className={`post-kind ${p.kind}`}>{KIND_LABELS[p.kind]}</span>
+        )}
+      </div>
       {p.title !== null && <strong className="post-title">{p.title}</strong>}
       {/* 本文は Markdown。描画器は HTML 文字列を作らない（markdown.tsx / ADR-0004）。 */}
       <Markdown source={p.body} className="post-body md" />

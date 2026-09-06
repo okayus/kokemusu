@@ -70,6 +70,16 @@ describe("ComposeDialog", () => {
     expect(html).not.toContain('value="typescript');
   });
 
+  it("offers the 向き as native radios — the three words and 未分類, which is checked until a draft says otherwise", () => {
+    const html = render(null);
+    expect(html).toContain("<legend>向き（任意）</legend>");
+    expect(html.match(/type="radio" name="kind"/g)).toHaveLength(4);
+    // React serialises `checked` before `value`; exactly one radio is checked, the 未分類 one.
+    expect(html.match(/name="kind" checked=""/g)).toHaveLength(1);
+    expect(html).toContain('<input type="radio" name="kind" checked="" value=""/>未分類');
+    for (const label of ["インプット", "アウトプット", "両方", "未分類"]) expect(html).toContain(label);
+  });
+
   it("is a light-dismissable modal named 積む, with the 見出し folded and 閉じる (not やめる)", () => {
     const html = render(null);
     expect(html).toContain('closedby="any"');

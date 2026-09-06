@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { HeatmapChart, walkTarget } from "./Heatmap";
+import { HeatmapChart, leanOf, leanRatio, walkTarget } from "./Heatmap";
 import type { Heatmap } from "./stats-api";
 
 // The SVG grid is pure output of props, so the layout — the part a browser
@@ -8,17 +8,33 @@ import type { Heatmap } from "./stats-api";
 // scroll-to-today) don't run under renderToStaticMarkup, which is fine: this
 // is about geometry, not behaviour.
 
-const series = (from: string, counts: number[]): Heatmap => {
+/** A window of days as [count, input, output] — every fixture 苔片 is a single day, so the totals are the cells' sums. */
+const leaning = (from: string, tallies: [number, number, number][]): Heatmap => {
   const start = new Date(`${from}T00:00:00Z`);
-  const days = counts.map((count, i) => {
+  const days = tallies.map(([count, input, output], i) => {
     const d = new Date(start.getTime() + i * 86_400_000);
-    return { day: d.toISOString().slice(0, 10), count, level: Math.min(count, 4) };
+    return { day: d.toISOString().slice(0, 10), count, level: Math.min(count, 4), input, output };
   });
   const last = days[days.length - 1];
   if (last === undefined) throw new Error("series needs at least one day");
-  // Every fixture 苔片 is a single day, so the server's total is the cells' sum.
-  return { from, to: last.day, total: counts.reduce((sum, c) => sum + c, 0), days };
+  const sum = (pick: (t: [number, number, number]) => number) =>
+    tallies.reduce((n, t) => n + pick(t), 0);
+  return {
+    from,
+    to: last.day,
+    total: sum((t) => t[0]),
+    input: sum((t) => t[1]),
+    output: sum((t) => t[2]),
+    days,
+  };
 };
+
+/** A window with no 向き on it: counts alone. */
+const series = (from: string, counts: number[]): Heatmap =>
+  leaning(
+    from,
+    counts.map((count) => [count, 0, 0]),
+  );
 
 const render = (data: Heatmap) =>
   renderToStaticMarkup(<HeatmapChart label="総草" data={data} onDayTap={() => {}} />);
@@ -95,6 +111,80 @@ describe("HeatmapChart offers every cell as a button (visualization.md §1: マ�
     expect(html).not.toContain('role="img"');
     // The axis text is for the eye; the cells carry the days.
     expect(html).toMatch(/<g aria-hidden="true">.*>9月<\/text>/);
+  });
+});
+
+describe("HeatmapChart colours a day by its lean (visualization.md §1: 色相は「向き」、濃さは件数のまま)", () => {
+  // 9/1 leans 吸う, 9/2 leans 出す, 9/3 is a tie, 9/4 is 未分類 only, 9/5 (today) is empty.
+  const html = render(
+    leaning("2026-09-01", [
+      [3, 2, 1],
+      [2, 0, 2],
+      [2, 1, 1],
+      [1, 0, 0],
+      [0, 0, 0],
+    ]),
+  );
+
+  it("adds `in` / `out` to the leaning cells and nothing to a tie, a 未分類 day or an empty one", () => {
+    expect(html).toContain('class="heatmap-cell l3 in"');
+    expect(html).toContain('class="heatmap-cell l2 out"');
+    expect(html).toContain('class="heatmap-cell l2"');
+    expect(html).toContain('class="heatmap-cell l1"');
+    expect(html).toContain('class="heatmap-cell l0 today"');
+  });
+
+  it("reads the two sides out with the count — name and tooltip — only where some 苔片 faces a way", () => {
+    expect(html).toContain('aria-label="2026/09/01 · 3 件（インプット 2・アウトプット 1）"');
+    expect(html).toContain("<title>9/1 · 3 件（インプット 2・アウトプット 1）</title>");
+    expect(html).toContain('aria-label="2026/09/03 · 2 件（インプット 1・アウトプット 1）"');
+    expect(html).toContain('aria-label="2026/09/04 · 1 件"');
+    expect(html).toContain('aria-label="2026/09/05 · 0 件"');
+    expect(html).toContain("<title>9/5 · 0 件</title>");
+  });
+
+  it("captions the window's ratio next to 計 and puts it in the group's name", () => {
+    // 8 苔片 in the window, 3 facing in, 4 facing out: 37.5 rounds to 38.
+    expect(html).toContain('<span class="heatmap-total">計 8 片</span>');
+    expect(html).toContain('<span class="heatmap-lean">吸う 38% · 出す 50%</span>');
+    expect(html).toMatch(/aria-label="総草: [^"]*計 8 片、吸う 38% · 出す 50%"/);
+  });
+
+  it("keeps the ratio off a garden that never uses 向き, and off an empty one (the legend still names the hues)", () => {
+    const plain = render(series("2026-08-30", [0, 1, 2]));
+    expect(plain).not.toContain("heatmap-lean");
+    expect(plain).toContain('aria-label="総草: 2026-08-30 から 2026-09-01 のヒートマップ、計 3 片"');
+    expect(plain).toContain("計 3 片");
+    expect(render(series("2026-08-30", [0]))).not.toContain("heatmap-lean");
+  });
+
+  it("adds the two hues to the legend, one swatch each", () => {
+    expect(html).toMatch(/<i class="in"><\/i>吸う/);
+    expect(html).toMatch(/<i class="out"><\/i>出す/);
+  });
+});
+
+describe("leanOf — the hue is the majority side, and a tie is no hue", () => {
+  it.each([
+    [2, 1, "in"],
+    [1, 0, "in"],
+    [0, 3, "out"],
+    [1, 1, null],
+    [0, 0, null],
+  ] as const)("(%i 吸う, %i 出す) → %s", (input, output, lean) => {
+    expect(leanOf(input, output)).toBe(lean);
+  });
+});
+
+describe("leanRatio — each side over the whole window, rounded", () => {
+  it("shows both sides of the 苔片 that face a way, `both` on each", () => {
+    expect(leanRatio({ total: 3, input: 2, output: 2 })).toBe("吸う 67% · 出す 67%");
+    expect(leanRatio({ total: 5, input: 2, output: 0 })).toBe("吸う 40% · 出す 0%");
+  });
+
+  it("is nothing while no 苔片 faces a way", () => {
+    expect(leanRatio({ total: 0, input: 0, output: 0 })).toBeNull();
+    expect(leanRatio({ total: 7, input: 0, output: 0 })).toBeNull();
   });
 });
 

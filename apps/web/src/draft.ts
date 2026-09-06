@@ -9,29 +9,32 @@
 // Storage can be unavailable (private mode, blocked site data), so every access
 // is wrapped and the composer works without it.
 
+import { parseKind, type PostKind } from "./kind";
+
 const KEY = "kokemusu.draft.v1";
 
-export type Draft = { title: string; body: string; tags: string };
+export type Draft = { title: string; body: string; tags: string; kind: PostKind | null };
 
 /**
  * The stored JSON → a Draft, or null for anything that is not one. `title`
- * joined the shape with the 見出し toggle (2026-09-05); a draft saved before
- * that lacks the field and reads as 見出しなし.
+ * joined the shape with the 見出し toggle (2026-09-05) and `kind` with the 向き
+ * radio (2026-09-06); a draft saved before either lacks the field and reads as
+ * 見出しなし / 未分類.
  */
 export function parseDraft(raw: string): Draft | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (typeof parsed !== "object" || parsed === null) return null;
-    const { title, body, tags } = parsed as Record<string, unknown>;
+    const { title, body, tags, kind } = parsed as Record<string, unknown>;
     if (typeof body !== "string" || typeof tags !== "string") return null;
-    return { title: typeof title === "string" ? title : "", body, tags };
+    return { title: typeof title === "string" ? title : "", body, tags, kind: parseKind(kind) };
   } catch {
     return null;
   }
 }
 
 export const isEmptyDraft = (draft: Draft): boolean =>
-  draft.title === "" && draft.body === "" && draft.tags === "";
+  draft.title === "" && draft.body === "" && draft.tags === "" && draft.kind === null;
 
 export function loadDraft(): Draft | null {
   try {

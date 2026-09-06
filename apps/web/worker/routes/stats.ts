@@ -27,7 +27,7 @@ import {
   type DaySpan,
   type MonthKey,
 } from "../core/day";
-import type { PostKind } from "../core/kind";
+import { isInput, isOutput, type PostKind } from "../core/kind";
 import { parseTagsParam } from "../core/tag";
 import { createDb } from "../db";
 import { post, postTags, tag } from "../db/schema";
@@ -80,24 +80,54 @@ export function resolveWindow(
   return { from, to };
 }
 
-/** One cell on the wire: the day, its 苔片 count, and the 0..4 shade. */
-export type HeatmapDay = { day: DayKey; count: number; level: number };
+/**
+ * One cell on the wire: the day, its 苔片 count, the 0..4 shade, and the two
+ * sides of 向き that were there (core/kind.ts: `both` counts on each) — the
+ * client compares them for the cell's hue and reads them out with the count.
+ */
+export type HeatmapDay = {
+  day: DayKey;
+  count: number;
+  level: number;
+  input: number;
+  output: number;
+};
 
 /** What the heatmap SQL hands back per 苔片 overlapping the window: its days and its 向き. */
 export type HeatmapSpan = DaySpan & { kind: PostKind | null };
 
 /**
  * Fold the 苔片 spans into the dense ascending series the SVG draws — a 続く苔片
- * lights each of its days inside the window (ADR-0005). The 入 / 出 tallies
- * core computes alongside stay off the wire until the 総草 has a colour for
- * them (plans/day-axis-and-kind.md §B).
+ * lights each of its days inside the window (ADR-0005), and each day carries
+ * its 入 / 出 tallies from core, so the hue is decided where the count is.
  */
 export function buildHeatmap(spans: Iterable<HeatmapSpan>, from: DayKey, to: DayKey): HeatmapDay[] {
   const tallies = bucketSpansByDay(spans, from, to);
   return enumerateDays(from, to).map((day) => {
-    const count = tallies.get(day)?.count ?? 0;
-    return { day, count, level: Math.min(count, MAX_LEVEL) };
+    const { count, input, output } = tallies.get(day) ?? { count: 0, input: 0, output: 0 };
+    return { day, count, level: Math.min(count, MAX_LEVEL), input, output };
   });
+}
+
+/** The window's totals on the wire: 苔片 overlapping it, and how many face each way. */
+export type HeatmapTotals = { total: number; input: number; output: number };
+
+/**
+ * Count the 苔片 of the window by their 向き — per 苔片, not per day, so a
+ * 続く苔片 is one on each side it faces however many cells it lights (the same
+ * rule as `total`, visualization.md §1). The caption's 「吸う x% · 出す y%」 is
+ * these over `total`; `both` is on both sides, so the two need not add to 100.
+ */
+export function heatmapTotals(spans: Iterable<HeatmapSpan>): HeatmapTotals {
+  let total = 0;
+  let input = 0;
+  let output = 0;
+  for (const span of spans) {
+    total += 1;
+    if (isInput(span.kind)) input += 1;
+    if (isOutput(span.kind)) output += 1;
+  }
+  return { total, input, output };
 }
 
 // ---------------------------------------------------------------------------
@@ -291,8 +321,9 @@ export const statsRoutes = new Hono<Env>()
       );
 
     // `total` is the 苔片 overlapping the window — the caption's 「計 N 片」 —
-    // not the cells' sum, which a 続く苔片 would inflate by its length.
-    return c.json({ from, to, total: rows.length, days: buildHeatmap(rows, from, to) });
+    // not the cells' sum, which a 続く苔片 would inflate by its length; the
+    // 向き totals beside it are counted the same way.
+    return c.json({ from, to, ...heatmapTotals(rows), days: buildHeatmap(rows, from, to) });
   })
   // --------------------------------------------- tag timeline (石の年表, §8)
   .get("/timeline", async (c) => {

@@ -11,6 +11,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type Ref } from "react";
 import { describeApiError, isApiError } from "./api";
 import { loadDraft, saveDraft, type Draft } from "./draft";
+import { KIND_CHOICES, type PostKind } from "./kind";
 import { Markdown } from "./markdown";
 import { createPost, splitTagField, type PostItem, type TagSummary } from "./posts-api";
 
@@ -137,6 +138,46 @@ export function BodyField(props: {
 }
 
 /**
+ * 向き の欄 — native radios, three words and 未分類 (features.md §1: pressing
+ * nothing is 未分類, and the fourth radio is the way back to it). Shared by the
+ * composer (controlled: every change is 退避 to the draft) and the edit form
+ * (uncontrolled: `FormData` reads `kind`, やめる discards) — pass `onChange`
+ * for the former, `defaultValue` for the latter. Native radios on purpose
+ * (modern-web-guidance/forms: 1–5 exclusive choices = visible radios; the
+ * moss `accent-color` dresses them) — no re-invented chip widget.
+ */
+export function KindField(props: {
+  value?: PostKind | null;
+  defaultValue?: PostKind | null;
+  onChange?: (next: PostKind | null) => void;
+}) {
+  const { onChange } = props;
+  return (
+    <fieldset className="kind-field">
+      <legend>向き（任意）</legend>
+      <div className="kind-choices">
+        {KIND_CHOICES.map((choice) => (
+          <label key={choice.value ?? ""}>
+            <input
+              type="radio"
+              name="kind"
+              value={choice.value ?? ""}
+              {...(onChange
+                ? {
+                    checked: (props.value ?? null) === choice.value,
+                    onChange: () => onChange(choice.value),
+                  }
+                : { defaultChecked: (props.defaultValue ?? null) === choice.value })}
+            />
+            {choice.label}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+/**
  * The 積む dialog. Mounted only while open (Garden), so opening is mounting:
  * `showModal()` runs on mount — the `open` attribute would show it non-modal,
  * without backdrop or focus trap — and the caret goes to the body. `closedby=
@@ -158,6 +199,8 @@ export function ComposeDialog(props: {
   const [title, setTitle] = useState(draft?.title ?? "");
   const [body, setBody] = useState(draft?.body ?? "");
   const [tagField, setTagField] = useState(props.seedTags ?? draft?.tags ?? "");
+  // 向き resumes from the draft like the body — 同じ石に積む seeds the stones only.
+  const [kind, setKind] = useState<PostKind | null>(draft?.kind ?? null);
   // The 見出し toggle (roadmap 決めること 7): one field, folded away by default,
   // unfolded when a draft already carries a heading.
   const [titleOpen, setTitleOpen] = useState(title !== "");
@@ -180,13 +223,14 @@ export function ComposeDialog(props: {
   useEffect(() => {
     if (seeded.current || props.seedTags === null) return;
     seeded.current = true;
-    saveDraft({ title, body, tags: props.seedTags });
-  }, [props.seedTags, title, body]);
+    saveDraft({ title, body, tags: props.seedTags, kind });
+  }, [props.seedTags, title, body, kind]);
 
   const update = (next: Draft) => {
     setTitle(next.title);
     setBody(next.body);
     setTagField(next.tags);
+    setKind(next.kind);
     saveDraft(next);
   };
 
@@ -204,9 +248,10 @@ export function ComposeDialog(props: {
         body,
         tags: splitTagField(tagField),
         ...(heading ? { title: heading } : {}),
+        kind,
       });
       // Spent: nothing carries over (features.md §1).
-      update({ title: "", body: "", tags: "" });
+      update({ title: "", body: "", tags: "", kind: null });
       createdRef.current = created;
       dialogRef.current?.close("posted");
     } catch (e) {
@@ -254,7 +299,7 @@ export function ComposeDialog(props: {
               maxLength={200}
               autoComplete="off"
               value={title}
-              onChange={(e) => update({ title: e.target.value, body, tags: tagField })}
+              onChange={(e) => update({ title: e.target.value, body, tags: tagField, kind })}
               onKeyDown={submitOnCmdEnter}
             />
           </div>
@@ -265,7 +310,11 @@ export function ComposeDialog(props: {
           placeholder="なにを積む？"
           value={body}
           textareaRef={bodyRef}
-          onChange={(next) => update({ title, body: next, tags: tagField })}
+          onChange={(next) => update({ title, body: next, tags: tagField, kind })}
+        />
+        <KindField
+          value={kind}
+          onChange={(next) => update({ title, body, tags: tagField, kind: next })}
         />
         <div className="field">
           <label htmlFor="post-tags">タグ（コンマ区切り・任意）</label>
@@ -278,7 +327,7 @@ export function ComposeDialog(props: {
             maxLength={500}
             value={tagField}
             placeholder="typescript, 読書"
-            onChange={(e) => update({ title, body, tags: e.target.value })}
+            onChange={(e) => update({ title, body, tags: e.target.value, kind })}
             onKeyDown={submitOnCmdEnter}
           />
         </div>

@@ -53,13 +53,21 @@ test("PAT: mint → Bearer post lands encrypted → write-only wall → revoke k
   expect(me.status()).toBe(200);
   expect(((await me.json()) as { id: string }).id).toBeTruthy();
 
-  // The daily-post shape: same body as the composer, plus the optional title.
+  // The daily-post shape: same body as the composer, plus the optional title
+  // and 向き (a learning app's 苔片 faces in).
   const created = await sender.post("/api/posts", {
     headers: bearer,
-    data: { title: "まず覚える 2026-09-03", body: "PAT からの苔片", tags: ["mazuoboeru"] },
+    data: {
+      title: "まず覚える 2026-09-03",
+      body: "PAT からの苔片",
+      tags: ["mazuoboeru"],
+      kind: "input",
+    },
   });
   expect(created.status()).toBe(201);
-  const createdId = ((await created.json()) as { id: string }).id;
+  const createdItem = (await created.json()) as { id: string; kind: string | null };
+  const createdId = createdItem.id;
+  expect(createdItem.kind).toBe("input");
 
   // The write-only wall: post:write cannot read the decrypted timeline…
   expect((await sender.get("/api/posts", { headers: bearer })).status()).toBe(403);
@@ -94,13 +102,15 @@ test("PAT: mint → Bearer post lands encrypted → write-only wall → revoke k
   // …while at rest title and body are k1. envelopes like every other 苔片.
   // (By id — the specs share one sqlite, and the golden path leaves a titled
   // 苔片 of its own behind since the 見出し toggle.)
-  const storedPost = queryRows<{ title: string; body: string }>(
-    `SELECT title, body FROM post WHERE id = '${createdId}'`,
+  const storedPost = queryRows<{ title: string; body: string; kind: string | null }>(
+    `SELECT title, body, kind FROM post WHERE id = '${createdId}'`,
   );
   expect(storedPost).toHaveLength(1);
   expect(storedPost[0]?.title).toMatch(/^k1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,}$/);
   expect(storedPost[0]?.body).toMatch(/^k1\./);
   expect(storedPost[0]?.body).not.toContain("苔片");
+  // The 向き is plaintext metadata (ADR-0001) — the 総草 reads it without the key.
+  expect(storedPost[0]?.kind).toBe("input");
 
   // Revoke in the settings UI. The row stays, marked dead.
   await page.getByText("API トークン（PAT）").click();
