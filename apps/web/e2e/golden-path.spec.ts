@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { E2E_INITIAL_REGISTRATION_TOKEN } from "./env";
-import { executeSql, queryRows } from "./helpers/db";
+import { shiftDay, shortDay, slashed } from "./helpers/day";
+import { queryRows } from "./helpers/db";
 import { enableVirtualAuthenticator } from "./helpers/webauthn";
 
 type HeatmapWire = {
@@ -12,15 +13,10 @@ type HeatmapWire = {
   days: { day: string; count: number; level: number; input: number; output: number }[];
 };
 
-type PostsWire = { posts: { body: string; firstDay: string }[]; today: string };
-
-/** A `YYYY-MM-DD` key moved by whole days — civil math on the UTC carrier, like the app's own. */
-const shiftDay = (day: string, days: number) =>
-  new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, +day.slice(8, 10) + days))
-    .toISOString()
-    .slice(0, 10);
-
-const slashed = (day: string) => day.replaceAll("-", "/");
+type PostsWire = {
+  posts: { body: string; firstDay: string; lastDay: string; postedDay: string }[];
+  today: string;
+};
 
 // The vertical slice, wired end to end: token-gated passkey registration (a real
 // WebAuthn ceremony against a CDP virtual authenticator — no DEV_BYPASS) → the
@@ -127,7 +123,13 @@ test("register → post → today's moss darkens → reload → logout → login
   // together = exactly the one 苔片, echoed in request order.
   type TimelineWire = {
     today: string;
-    rows: { tags: { id: string }[]; count: number; months: { month: string; count: number }[] }[];
+    rows: {
+      tags: { id: string; name: string }[];
+      firstDay: string;
+      lastDay: string;
+      count: number;
+      months: { month: string; count: number }[];
+    }[];
   };
   const all = (await (await page.request.get("/api/stats/timeline")).json()) as TimelineWire;
   const stoneIds = all.rows.map((r) => r.tags[0]?.id ?? "");
@@ -313,15 +315,23 @@ test("register → post → today's moss darkens → reload → logout → login
   expect(byDay.today).toBe(todayKey);
   expect(byDay.posts.map((p) => [p.body, p.firstDay])).toEqual([[body, todayKey]]);
 
-  // Move the survivor back one day AT REST (the API can only stack "now" until
-  // A2): its 「日」 is `first_day` / `last_day` (ADR-0005), so the same-day
-  // window empties while yesterday's holds it — the overlap, against the real
-  // sqlite — and each half stands alone. `date()` on a day string has no zone
-  // in it, and SET reads the old row, so each column is shifted on its own.
-  executeSql(
-    "UPDATE post SET first_day = date(first_day, '-1 day'), last_day = date(last_day, '-1 day')",
-  );
+  // Move the survivor back one day through the edit form (plans/day-axis-and-
+  // kind.md §A2: PATCH takes the days): its 「日: YYYY/MM/DD」 fold opens the two
+  // date fields, both set to yesterday. Its 「日」 is `first_day` / `last_day`
+  // (ADR-0005), so the same-day window — the one the feed is narrowed to —
+  // lets it go on the spot, while yesterday's holds it: the overlap, against
+  // the real sqlite, and each half stands alone.
   const yesterday = shiftDay(todayKey, -1);
+  const survivorCard = timeline.locator("li.post").first();
+  await survivorCard.getByRole("button", { name: "編集", exact: true }).click();
+  await survivorCard.getByText(`日: ${slashed(todayKey)}`).click();
+  await survivorCard.getByLabel("いつ", { exact: true }).fill(yesterday);
+  await survivorCard.getByLabel("〜いつまで").fill(yesterday);
+  await survivorCard.getByRole("button", { name: "保存" }).click();
+  await expect(feed.getByText("この絞り込みに合う苔片はありません。")).toBeVisible();
+  expect(
+    queryRows<{ first_day: string; last_day: string }>("SELECT first_day, last_day FROM post"),
+  ).toEqual([{ first_day: yesterday, last_day: yesterday }]);
   const countIn = async (params: Record<string, string>) =>
     ((await (await page.request.get("/api/posts", { params })).json()) as PostsWire).posts.length;
   expect(await countIn({ from: todayKey, to: todayKey })).toBe(0);
@@ -334,12 +344,16 @@ test("register → post → today's moss darkens → reload → logout → login
   expect(await rejected({ from: todayKey, to: yesterday })).toBe(400);
   expect(await rejected({ from: "2026-02-30" })).toBe(400);
 
-  // The custom range finds it on yesterday …
+  // The custom range finds it on yesterday — and its card now shows the day
+  // and 「M/D に積む」 (it was written today) instead of a time (features.md §1).
   await feed.getByLabel("開始日").fill(yesterday);
   await feed.getByLabel("終了日").fill(yesterday);
   await feed.getByRole("button", { name: "絞る" }).click();
   await expect(periodChip).toHaveText(`${slashed(yesterday)} ×`);
   await expect(timeline.getByText(body, { exact: true })).toBeVisible();
+  await expect(survivorCard.locator(".post-days")).toHaveText(slashed(yesterday));
+  await expect(survivorCard.locator(".post-posted")).toHaveText(`${shortDay(todayKey)} に積む`);
+  await expect(survivorCard.locator(".post-meta")).not.toContainText(":");
 
   // … and an inverted range never leaves the browser: 開始日 after 終了日 is
   // the field's own rangeOverflow (max = 終了日), the submit is blocked, the
@@ -360,11 +374,11 @@ test("register → post → today's moss darkens → reload → logout → login
   await expect(timeline.getByText(body, { exact: true })).toBeVisible();
 
   // 総草のマスのタップ (visualization.md §1): the fourth 導線 into the feed. A
-  // reload redraws the 総草 with the survivor on yesterday's cell (it moved at
-  // rest; the grid never refetched). One tab stop: today's cell, ↑ walks a day
-  // back and the stop follows, Enter lands the feed on that day — the same
-  // 1-day window the 今日 preset makes, so the chip reads the day. A click on
-  // today's cell finds nothing (the 苔片 is yesterday's), and × brings it back.
+  // reload redraws the 総草 from the rows: the survivor on yesterday's cell,
+  // today's empty. One tab stop: today's cell, ↑ walks a day back and the stop
+  // follows, Enter lands the feed on that day — the same 1-day window the 今日
+  // preset makes, so the chip reads the day. A click on today's cell finds
+  // nothing (the 苔片 is yesterday's), and × brings it back.
   await page.reload();
   const cellOf = (day: string) => page.locator(`rect.heatmap-cell[data-day="${day}"]`);
   await expect(cellOf(yesterday)).toHaveClass(/\bl1\b/);
@@ -485,4 +499,167 @@ test("register → post → today's moss darkens → reload → logout → login
   await expect(page.locator(".heatmap-lean")).toHaveText("吸う 20% · 出す 0%");
   const stillIn = queryRows<{ c: number }>("SELECT COUNT(*) AS c FROM post WHERE kind = 'input'");
   expect(stillIn[0]?.c).toBe(1);
+
+  // 過去に積む (plans/day-axis-and-kind.md §A2, ADR-0005): 日を選ぶ in the
+  // dialog, いつ alone = that one past day. The 苔片 is not at the head, so the
+  // feed stays put and is never narrowed on its own — the receipt offers the
+  // narrowing as a button (features.md §1) — while yesterday's cell darkens by
+  // one (the survivor is there already) and the window counts one more. Its
+  // card shows the day and 「M/D に積む」, no time.
+  await stack.click();
+  await dialog.getByText("日を選ぶ", { exact: true }).click();
+  await dialog.getByLabel("いつ", { exact: true }).fill(yesterday);
+  await dialog.getByLabel("いまの苔片").fill("昨日の苔片");
+  await dialog.getByRole("button", { name: "積む", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(receipt).toContainText("積みました");
+  const narrowToYesterday = receipt.getByRole("button", { name: `${slashed(yesterday)} に絞る` });
+  await expect(narrowToYesterday).toBeVisible();
+  await expect(timeline.locator("li.post").first()).toContainText("読んだ 2");
+  await expect(cellOf(yesterday)).toHaveClass(/\bl2\b/);
+  await expect(total).toHaveText("計 6 片");
+  await narrowToYesterday.click();
+  await expect(periodChip).toHaveText(`${slashed(yesterday)} ×`);
+  await expect(timeline.locator("li.post")).toHaveCount(2);
+  const pastCard = timeline.locator("li.post", { hasText: "昨日の苔片" });
+  await expect(pastCard).toBeVisible();
+  await expect(pastCard.locator(".post-days")).toHaveText(slashed(yesterday));
+  await expect(pastCard.locator(".post-posted")).toHaveText(`${shortDay(todayKey)} に積む`);
+  await expect(pastCard.locator(".post-meta")).not.toContainText(":");
+  const stackedPast = (await (await page.request.get("/api/stats/heatmap")).json()) as HeatmapWire;
+  expect(stackedPast.days.find((d) => d.day === yesterday)?.count).toBe(2);
+  expect(stackedPast.total).toBe(6);
+  const yesterdaysPosts = (await (
+    await page.request.get("/api/posts", { params: { from: yesterday, to: yesterday } })
+  ).json()) as PostsWire;
+  expect(yesterdaysPosts.posts.map((p) => [p.body, p.firstDay, p.lastDay, p.postedDay])).toEqual([
+    ["昨日の苔片", yesterday, yesterday, todayKey],
+    [body, yesterday, yesterday, todayKey],
+  ]);
+  await periodChip.click();
+
+  // 続く苔片 (CONTEXT.md): いつ = yesterday, 〜いつまで = today. Each of its days
+  // is +1 (today's cell is saturated at l4 already — its readout counts) while
+  // the window counts it ONCE (計 7 片, not the cells' sum); the 年表 spans its
+  // stone from yesterday to today and lists the month(s) it touches; and 今日's
+  // window holds it — the overlap, on the wire and on screen. The dialog
+  // started clean: the past day was spent with the post, nothing carried over.
+  await stack.click();
+  await dialog.getByText("日を選ぶ", { exact: true }).click();
+  await expect(dialog.getByLabel("いつ", { exact: true })).toHaveValue("");
+  await dialog.getByLabel("いつ", { exact: true }).fill(yesterday);
+  await dialog.getByLabel("〜いつまで").fill(todayKey);
+  await dialog.getByLabel("いまの苔片").fill("二日続いた苔片");
+  await dialog.getByLabel("タグ（コンマ区切り・任意）").fill("続き");
+  await dialog.getByRole("button", { name: "積む", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(
+    receipt.getByRole("button", { name: `${slashed(yesterday)} 〜 ${slashed(todayKey)} に絞る` }),
+  ).toBeVisible();
+  await expect(cellOf(yesterday)).toHaveClass(/\bl3\b/);
+  await expect(today).toHaveAttribute(
+    "aria-label",
+    `${slashed(todayKey)} · 5 件（インプット 1・アウトプット 0）`,
+  );
+  await expect(total).toHaveText("計 7 片");
+  const spanned = (await (await page.request.get("/api/stats/heatmap")).json()) as HeatmapWire;
+  expect(spanned.days.find((d) => d.day === yesterday)?.count).toBe(3);
+  expect(spanned.days.at(-1)?.count).toBe(5);
+  expect(spanned.total).toBe(7);
+  const spanRow = (
+    (await (await page.request.get("/api/stats/timeline")).json()) as TimelineWire
+  ).rows.find((r) => r.tags.length === 1 && r.tags[0]?.name === "続き");
+  expect(spanRow).toBeDefined();
+  expect([spanRow?.firstDay, spanRow?.lastDay, spanRow?.count]).toEqual([yesterday, todayKey, 1]);
+  expect(spanRow?.months.map((m) => m.month)).toEqual([
+    ...new Set([yesterday.slice(0, 7), todayKey.slice(0, 7)]),
+  ]);
+  expect(spanRow?.months.every((m) => m.count === 1)).toBe(true);
+  await expect(yearChart.locator("li.tl-row", { hasText: "続き" })).toBeVisible();
+  await today.click();
+  await expect(periodChip).toHaveText(`${slashed(todayKey)} ×`);
+  const spanCard = timeline.locator("li.post", { hasText: "二日続いた苔片" });
+  await expect(spanCard).toBeVisible();
+  await expect(spanCard.locator(".post-days")).toHaveText(
+    `${slashed(yesterday)} 〜 ${slashed(todayKey)}`,
+  );
+  await expect(spanCard.locator(".post-posted")).toHaveText(`${shortDay(todayKey)} に積む`);
+  const todaysPosts = (await (
+    await page.request.get("/api/posts", { params: { from: todayKey, to: todayKey } })
+  ).json()) as PostsWire;
+  expect(todaysPosts.posts.find((p) => p.body === "二日続いた苔片")).toMatchObject({
+    body: "二日続いた苔片",
+    firstDay: yesterday,
+    lastDay: todayKey,
+    postedDay: todayKey,
+  });
+  await periodChip.click();
+
+  // An inverted pair never leaves the browser: いつ's max is 〜いつまで, so a
+  // later いつ is the field's own rangeOverflow — the submit is blocked, the
+  // dialog stays, nothing is stacked (the same guard as 期間で絞る's).
+  await stack.click();
+  await dialog.getByText("日を選ぶ", { exact: true }).click();
+  await dialog.getByLabel("〜いつまで").fill(yesterday);
+  const firstDayField = dialog.getByLabel("いつ", { exact: true });
+  await firstDayField.fill(todayKey);
+  await dialog.getByLabel("いまの苔片").fill("逆転");
+  await dialog.getByRole("button", { name: "積む", exact: true }).click();
+  expect(await firstDayField.evaluate((el) => (el as HTMLInputElement).validity.rangeOverflow)).toBe(
+    true,
+  );
+  await expect(dialog).toBeVisible();
+  await expect(total).toHaveText("計 7 片");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+
+  // The server's half, for a new 苔片 and an edit alike (same body, same rule):
+  // a day that has not come, a day the calendar lacks, an inverted pair and a
+  // day below the floor are all 400, and nothing is stacked or moved. In-page
+  // fetch: the session cookie and the Origin header ride along as the app's own
+  // requests do. (Every one of these reads the body before refusing, so the
+  // wrangler dev unread-body trap — e2e/README.md — does not apply.)
+  const attempt = (method: "POST" | "PATCH", path: string, payload: Record<string, unknown>) =>
+    page.evaluate(
+      async (req: { method: string; path: string; payload: Record<string, unknown> }) => {
+        const res = await fetch(req.path, {
+          method: req.method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(req.payload),
+        });
+        return res.status;
+      },
+      { method, path, payload },
+    );
+  const tomorrow = shiftDay(todayKey, 1);
+  expect(await attempt("POST", "/api/posts", { body: "未来", firstDay: tomorrow })).toBe(400);
+  expect(
+    await attempt("POST", "/api/posts", { body: "未来", firstDay: todayKey, lastDay: tomorrow }),
+  ).toBe(400);
+  expect(await attempt("POST", "/api/posts", { body: "非日付", firstDay: "2026-02-30" })).toBe(400);
+  expect(await attempt("POST", "/api/posts", { body: "非日付", lastDay: "きのう" })).toBe(400);
+  expect(
+    await attempt("POST", "/api/posts", { body: "逆転", firstDay: todayKey, lastDay: yesterday }),
+  ).toBe(400);
+  expect(await attempt("POST", "/api/posts", { body: "古すぎ", firstDay: "1900-01-01" })).toBe(400);
+  const spanRowId = queryRows<{ id: string }>(
+    `SELECT id FROM post WHERE first_day = '${yesterday}' AND last_day = '${todayKey}'`,
+  )[0]?.id;
+  expect(spanRowId).toBeTruthy();
+  expect(
+    await attempt("PATCH", `/api/posts/${spanRowId ?? ""}`, { body: "伸ばす", lastDay: tomorrow }),
+  ).toBe(400);
+  expect(
+    await attempt("PATCH", `/api/posts/${spanRowId ?? ""}`, {
+      body: "逆転",
+      firstDay: todayKey,
+      lastDay: yesterday,
+    }),
+  ).toBe(400);
+  expect(queryRows<{ c: number }>("SELECT COUNT(*) AS c FROM post")[0]?.c).toBe(7);
+  expect(
+    queryRows<{ first_day: string; last_day: string }>(
+      `SELECT first_day, last_day FROM post WHERE id = '${spanRowId ?? ""}'`,
+    ),
+  ).toEqual([{ first_day: yesterday, last_day: todayKey }]);
 });

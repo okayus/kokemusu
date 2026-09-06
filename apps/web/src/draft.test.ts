@@ -1,24 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { isEmptyDraft, parseDraft } from "./draft";
+import { EMPTY_DRAFT, isEmptyDraft, parseDraft } from "./draft";
 
 describe("parseDraft", () => {
   it("reads a full draft", () => {
     expect(
-      parseDraft(JSON.stringify({ title: "見出し", body: "本文", tags: "a, b", kind: "input" })),
+      parseDraft(
+        JSON.stringify({
+          title: "見出し",
+          body: "本文",
+          tags: "a, b",
+          kind: "input",
+          firstDay: "2026-09-01",
+          lastDay: "2026-09-05",
+        }),
+      ),
     ).toEqual({
       title: "見出し",
       body: "本文",
       tags: "a, b",
       kind: "input",
+      firstDay: "2026-09-01",
+      lastDay: "2026-09-05",
     });
   });
 
-  it("reads a draft saved before the 見出し toggle and the 向き radio as 見出しなし・未分類", () => {
+  it("reads a draft saved before the 見出し toggle, the 向き radio and 日を選ぶ as 見出しなし・未分類・今日", () => {
     expect(parseDraft(JSON.stringify({ body: "本文", tags: "" }))).toEqual({
-      title: "",
+      ...EMPTY_DRAFT,
       body: "本文",
-      tags: "",
-      kind: null,
     });
   });
 
@@ -26,6 +35,12 @@ describe("parseDraft", () => {
     expect(parseDraft(JSON.stringify({ body: "本文", tags: "", kind: "consume" }))?.kind).toBeNull();
     expect(parseDraft(JSON.stringify({ body: "本文", tags: "", kind: 3 }))?.kind).toBeNull();
     expect(parseDraft(JSON.stringify({ body: "本文", tags: "", kind: "both" }))?.kind).toBe("both");
+  });
+
+  it("reads a day that is not a string as not chosen rather than dropping the draft", () => {
+    const draft = parseDraft(JSON.stringify({ body: "本文", tags: "", firstDay: 20260901, lastDay: null }));
+    expect(draft?.firstDay).toBe("");
+    expect(draft?.lastDay).toBe("");
   });
 
   it.each(["null", "42", '"str"', "[]", "{}", '{"body":1,"tags":""}', "{not json"])(
@@ -37,10 +52,12 @@ describe("parseDraft", () => {
 });
 
 describe("isEmptyDraft", () => {
-  it("is empty only when every field is — a 向き alone is worth resuming", () => {
-    expect(isEmptyDraft({ title: "", body: "", tags: "", kind: null })).toBe(true);
-    expect(isEmptyDraft({ title: "x", body: "", tags: "", kind: null })).toBe(false);
-    expect(isEmptyDraft({ title: "", body: "", tags: "a", kind: null })).toBe(false);
-    expect(isEmptyDraft({ title: "", body: "", tags: "", kind: "output" })).toBe(false);
+  it("is empty only when every field is — a 向き or a day alone is worth resuming", () => {
+    expect(isEmptyDraft(EMPTY_DRAFT)).toBe(true);
+    expect(isEmptyDraft({ ...EMPTY_DRAFT, title: "x" })).toBe(false);
+    expect(isEmptyDraft({ ...EMPTY_DRAFT, tags: "a" })).toBe(false);
+    expect(isEmptyDraft({ ...EMPTY_DRAFT, kind: "output" })).toBe(false);
+    expect(isEmptyDraft({ ...EMPTY_DRAFT, firstDay: "2026-09-01" })).toBe(false);
+    expect(isEmptyDraft({ ...EMPTY_DRAFT, lastDay: "2026-09-05" })).toBe(false);
   });
 });

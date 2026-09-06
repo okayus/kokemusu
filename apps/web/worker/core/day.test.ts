@@ -4,8 +4,10 @@ import {
   addDays,
   bucketSpansByDay,
   bucketSpansByMonth,
+  canStackOn,
   dayKey,
   dayOfWeek,
+  earliestStackDay,
   enumerateDays,
   enumerateMonths,
   isDayKey,
@@ -341,5 +343,66 @@ describe("bucketSpansByMonth folds 苔片 onto the month axis", () => {
 
   it("throws on an inverted span instead of miscounting", () => {
     expect(() => bucketSpansByMonth([span("2026-10-01", "2026-09-30")])).toThrow(RangeError);
+  });
+});
+
+describe("earliestStackDay — the floor under the days a 苔片 may be stacked on", () => {
+  it("is the 1st of the month 1200 months back, today's month counted", () => {
+    expect(earliestStackDay("2026-09-06")).toBe("1926-10-01");
+    expect(earliestStackDay("2026-09-30")).toBe("1926-10-01");
+    expect(earliestStackDay("2026-01-01")).toBe("1926-02-01");
+    expect(earliestStackDay("2026-12-31")).toBe("1927-01-01");
+  });
+
+  it("is exactly the ceiling of the 年表's month walk: from it the walk fits, one day earlier it throws", () => {
+    const today = "2026-09-06";
+    const floor = earliestStackDay(today);
+    expect(enumerateMonths(floor, today)).toHaveLength(1200);
+    expect(() => enumerateMonths(addDays(floor, -1), today)).toThrow(RangeError);
+  });
+
+  it("rejects a malformed today", () => {
+    expect(() => earliestStackDay("2026-9-6")).toThrow(RangeError);
+  });
+});
+
+describe("canStackOn — first ≤ last ≤ today, no earlier than the floor, never a throw", () => {
+  const today = "2026-09-06";
+  const span = (firstDay: string, lastDay = firstDay) => ({ firstDay, lastDay });
+
+  it("takes today, a past day, and a range ending today or earlier", () => {
+    expect(canStackOn(span("2026-09-06"), today)).toBe(true);
+    expect(canStackOn(span("2026-09-05"), today)).toBe(true);
+    expect(canStackOn(span("2026-09-05", "2026-09-06"), today)).toBe(true);
+    expect(canStackOn(span("2025-03-01", "2026-01-31"), today)).toBe(true);
+    expect(canStackOn(span("1926-10-01", "2026-09-06"), today)).toBe(true);
+  });
+
+  it("refuses a day that has not come — the last day may not pass today", () => {
+    expect(canStackOn(span("2026-09-07"), today)).toBe(false);
+    expect(canStackOn(span("2026-09-06", "2026-09-07"), today)).toBe(false);
+  });
+
+  it("refuses an inverted pair", () => {
+    expect(canStackOn(span("2026-09-06", "2026-09-05"), today)).toBe(false);
+  });
+
+  it("refuses a first day below the floor, by one day", () => {
+    expect(canStackOn(span("1926-09-30", "1926-09-30"), today)).toBe(false);
+    expect(canStackOn(span("1926-09-30", "2026-09-06"), today)).toBe(false);
+    expect(canStackOn(span("0001-01-01"), today)).toBe(false);
+  });
+
+  it("refuses anything that is not a calendar day, without throwing", () => {
+    expect(canStackOn(span("2026-02-30"), today)).toBe(false);
+    expect(canStackOn(span("2026-9-6"), today)).toBe(false);
+    expect(canStackOn(span("2026-09-06", "yesterday"), today)).toBe(false);
+    expect(canStackOn(span(""), today)).toBe(false);
+    expect(canStackOn(span("2026-09-06"), "today")).toBe(false);
+  });
+
+  it("moves with today: the same past day is fine today and gone once the floor passes it", () => {
+    expect(canStackOn(span("1926-10-01"), "2026-09-06")).toBe(true);
+    expect(canStackOn(span("1926-10-01"), "2026-10-01")).toBe(false);
   });
 });

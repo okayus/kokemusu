@@ -265,6 +265,40 @@ export function enumerateMonths(from: DayKey, to: DayKey): MonthKey[] {
 }
 
 /**
+ * The earliest 「日」 a 苔片 may be stacked on as of `today`: the first day of
+ * the month MAX_SPAN_MONTHS months back, today's month included — so the month
+ * walk from it to today is exactly the ceiling `enumerateMonths` allows. The
+ * floor exists for the read side, not for taste: a 苔片 further back would be
+ * stored without complaint and then throw in the 年表's month walk on every
+ * request after. The composer mirrors it as the date fields' `min`
+ * (src/days.ts); the route is the check that counts.
+ *
+ * @throws RangeError on a malformed `today`.
+ */
+export function earliestStackDay(today: DayKey): DayKey {
+  const civil = requireCivil(today);
+  const month = civil.year * 12 + (civil.month - 1) - (MAX_SPAN_MONTHS - 1);
+  return `${pad(Math.floor(month / 12), 4)}-${pad((month % 12) + 1, 2)}-01`;
+}
+
+/**
+ * Whether a 苔片 may be stacked on these days as of `today` (features.md §1,
+ * ADR-0005): both real calendar days, `firstDay ≤ lastDay ≤ today` — nothing
+ * is stacked on a day that has not come; a 続く苔片 still going ends on today
+ * and is lengthened later — and `firstDay` no earlier than `earliestStackDay`.
+ * Day keys of 4-digit years order as strings, so the comparisons are string
+ * comparisons. A validator: false, never a throw, whatever came off the wire.
+ */
+export function canStackOn(span: DaySpan, today: DayKey): boolean {
+  if (!isDayKey(span.firstDay) || !isDayKey(span.lastDay) || !isDayKey(today)) return false;
+  return (
+    earliestStackDay(today) <= span.firstDay &&
+    span.firstDay <= span.lastDay &&
+    span.lastDay <= today
+  );
+}
+
+/**
  * Fold 苔片 spans into "what was there on each day" of the window `from`..`to`
  * — the whole heatmap aggregation, on plaintext metadata only (ADR-0001:
  * bodies stay encrypted and are never touched to draw the moss). A 続く苔片

@@ -26,7 +26,7 @@ export type PostItem = {
 /** `today` is server-decided (JST) like the 年表's axis edge — the anchor of the period presets. */
 export type Timeline = { posts: PostItem[]; nextCursor: string | null; today: string };
 
-/** What a write carries: the body, and the optional 見出し / stones / 向き. */
+/** What a write carries: the body, and the optional 見出し / stones / 向き / days. */
 export type PostInput = {
   body: string;
   tags?: string[];
@@ -34,6 +34,11 @@ export type PostInput = {
   title?: string;
   // 向き — omitted or null = 未分類.
   kind?: PostKind | null;
+  // The days to stack on (`YYYY-MM-DD`, ADR-0005): a past day, or a range that
+  // makes a 続く苔片. Omitted on 積む = today; omitted on 直す = the row's own.
+  // The server holds them to first ≤ last ≤ today (400 otherwise).
+  firstDay?: string;
+  lastDay?: string;
 };
 
 export const createPost = (input: PostInput): Promise<PostItem> => postJson("/api/posts", input);

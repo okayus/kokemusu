@@ -132,10 +132,25 @@ body {
 }
 
 .bar-notice.on {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   padding: 0.25rem 0.75rem;
   border-radius: 999px;
   background: var(--moss);
   color: var(--moss-ink);
+}
+
+/* The one tap in the receipt — 「YYYY/MM/DD に絞る」 for a 苔片 the feed did not
+   travel to. Dressed for the pill it sits in (ink on moss), not the page. */
+.bar-notice button {
+  min-height: 28px;
+  padding: 0 0.6rem;
+  font-size: 0.8rem;
+  border-color: color-mix(in oklab, var(--moss-ink) 55%, transparent);
+  border-radius: 999px;
+  color: inherit;
+  white-space: nowrap;
 }
 
 /* 導線と着地の scrollIntoView は sticky なバーの下に頭を出す。 */
@@ -289,18 +304,54 @@ dialog.compose h2 {
   }
 }
 
-.compose-title {
+/* The two folds above the body — 見出しを付ける and 日を選ぶ (features.md §1):
+   quiet summaries, and the summary names what is inside while folded. */
+.compose-title,
+.compose-days {
   margin-block-end: 0.75rem;
 }
 
-.compose-title > summary {
+:is(.compose-title, .compose-days) > summary {
   font-size: 0.85rem;
   color: var(--quiet);
   cursor: pointer;
 }
 
-.compose-title[open] > summary {
+:is(.compose-title, .compose-days)[open] > summary {
   margin-block-end: 0.5rem;
+}
+
+/* いつ / 〜いつまで: two native date fields side by side (one under the other
+   when narrow), the hint under both. Same dress as 期間で絞る's range. */
+.days-field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  min-inline-size: 0;
+  border: 0;
+  padding: 0;
+  margin: 0 0 1.25rem;
+}
+
+.days-field-part {
+  flex: 1 1 10rem;
+}
+
+.days-field-part label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--quiet);
+  margin-block-end: 0.25rem;
+}
+
+.days-field .hint {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* In the edit form the fold sits among .field blocks: the same spacing. */
+.post-edit .compose-days {
+  margin-block-end: 1.25rem;
 }
 
 .composer-actions {
@@ -869,12 +920,22 @@ dialog.compose h2 {
   border-block-start: 1px solid var(--line);
 }
 
-/* 時刻と向きの印を 1 行に。 */
+/* 時刻（または日と「M/D に積む」）と向きの印を 1 行に。 */
 .post-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.15rem 0.6rem;
+}
+
+/* 過去に積んだ苔片・続く苔片: 日が主、積んだ日は一段小さく添える。 */
+.post-days,
+.post-posted {
+  margin: 0;
+}
+
+.post-posted {
+  font-size: 0.75rem;
 }
 
 /* 向きの印: 言葉が主、点は総草の色相の写し（両方 は半々）。 */

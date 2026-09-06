@@ -169,6 +169,33 @@ describe("createPostSchema", () => {
       expect(createPostSchema.safeParse({ body: "x", kind }).success).toBe(false);
     }
   });
+
+  // The days' ORDER and ceiling (first ≤ last ≤ today, the floor) are the
+  // handler's, which knows today — core/day.ts `canStackOn` carries that table.
+  // The schema's share is the spelling: calendar days or nothing.
+  it("takes the days to stack on as calendar days — either, both, or neither", () => {
+    expect(createPostSchema.safeParse({ body: "x", firstDay: "2026-09-05" }).success).toBe(true);
+    expect(createPostSchema.safeParse({ body: "x", lastDay: "2026-09-05" }).success).toBe(true);
+    const both = createPostSchema.safeParse({
+      body: "x",
+      firstDay: "2025-03-01",
+      lastDay: "2026-01-31",
+    });
+    expect(both.success).toBe(true);
+    if (both.success) {
+      expect(both.data.firstDay).toBe("2025-03-01");
+      expect(both.data.lastDay).toBe("2026-01-31");
+    }
+  });
+
+  it("rejects a day the calendar does not have, or one not spelled YYYY-MM-DD", () => {
+    for (const day of ["2026-02-30", "2026-13-01", "2026-9-5", "2026/09/05", "", "yesterday"]) {
+      expect(createPostSchema.safeParse({ body: "x", firstDay: day }).success).toBe(false);
+      expect(createPostSchema.safeParse({ body: "x", lastDay: day }).success).toBe(false);
+    }
+    expect(createPostSchema.safeParse({ body: "x", firstDay: null }).success).toBe(false);
+    expect(createPostSchema.safeParse({ body: "x", firstDay: 20260905 }).success).toBe(false);
+  });
 });
 
 describe("listPostsQuerySchema", () => {
