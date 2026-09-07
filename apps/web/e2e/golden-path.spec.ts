@@ -156,6 +156,21 @@ test("register → post → today's moss darkens → reload → logout → login
   expect(focused.rows.map((r) => r.months)).toEqual([thisMonth, thisMonth]);
   await expect(yearChart.locator("rect.tl-month")).toHaveCount(2);
 
+  // `?focus=` takes the same list since 2026-09-07 (選んだ石, docs/plans/
+  // tabs-and-stones.md) — no UI drives it until the tabs land, so prove the
+  // set SQL here: both stones as the axis = the one 苔片 carrying both, its
+  // chips in request order, and no third stone to add a set×stone row. A
+  // malformed list is the parser's 400, same as ?tags=.
+  const pairIds = [...stoneIds].reverse();
+  const pairFocus = (await (
+    await page.request.get(`/api/stats/timeline?focus=${pairIds.join(",")}`)
+  ).json()) as TimelineWire;
+  expect(pairFocus.rows).toHaveLength(1);
+  expect(pairFocus.rows[0]?.count).toBe(1);
+  expect(pairFocus.rows[0]?.tags.map((t) => t.id)).toEqual(pairIds);
+  expect(pairFocus.rows[0]?.months).toEqual(thisMonth);
+  expect((await page.request.get("/api/stats/timeline?focus=a,,b")).status()).toBe(400);
+
   // At rest it is a `k1.<iv>.<ciphertext>` envelope (ADR-0001), never the text —
   // the DoD 5 check, read from the sqlite itself rather than through the API.
   const stored = queryRows<{ body: string }>("SELECT body FROM post");
