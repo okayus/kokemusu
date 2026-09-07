@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { describeApiError, isApiError } from "./api";
 import {
   addDevice,
@@ -42,10 +43,12 @@ import {
   type PostItem,
   type TagSummary,
 } from "./posts-api";
+import { togglePair, toggleStone } from "./stones";
 import { TagField } from "./TagField";
 import { TagGraphSection } from "./TagGraph";
 import { stonesOf, type TagsFields } from "./tags";
 import { rowKey, TagTimelineSection } from "./TagTimeline";
+import { pathOf, useView, VIEWS, type View } from "./view";
 import {
   createToken,
   listTokens,
@@ -219,6 +222,8 @@ function AuthedView(props: {
   const noticeAction = notice?.action;
   const openCompose = useCallback(() => setCompose({ seedTags: null }), []);
   useComposeShortcut(openCompose);
+  // 見かた (features.md §3): 投稿一覧 or 年表, read from and written to the URL.
+  const { view, show } = useView();
   return (
     <main className="shell">
       <header className="bar">
@@ -235,6 +240,29 @@ function AuthedView(props: {
             ログアウト
           </button>
         </div>
+        {/* The two views as links in the sticky bar — reachable from anywhere
+            down a long feed. Real hrefs (a new tab, a bookmark, a middle
+            click all work); a plain click is taken over so the view swaps in
+            place and the page starts from the top, like a page would. */}
+        <nav className="views" aria-label="見かた">
+          {VIEWS.map((v) => (
+            <a
+              key={v.view}
+              href={pathOf(v.view)}
+              aria-current={view === v.view ? "page" : undefined}
+              onClick={(e) => {
+                if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                show(v.view);
+                // A view swap is a page change, not a 導線's travel: jump, do
+                // not glide (the CSS smooth scroll is for in-page landings).
+                window.scrollTo({ top: 0, behavior: "instant" });
+              }}
+            >
+              {v.label}
+            </a>
+          ))}
+        </nav>
         {/* Always in the tree: a live region must exist before its text lands. */}
         <p role="status" className={notice === null ? "bar-notice" : "bar-notice on"}>
           {notice?.text ?? ""}
@@ -273,6 +301,8 @@ function AuthedView(props: {
         </p>
       )}
       <Garden
+        view={view}
+        onView={show}
         onSessionLost={props.onSessionLost}
         compose={compose}
         onCompose={setCompose}
@@ -310,6 +340,9 @@ function feedQuery(filter: TagSummary[], period: Period | null) {
  * Owns the loaded page of 苔片 and renders the 積む dialog when asked.
  */
 function Garden(props: {
+  /** Which view is up (features.md §3): the 投稿一覧 or the 年表. */
+  view: View;
+  onView: (view: View) => void;
   onSessionLost: () => void;
   compose: ComposeRequest | null;
   onCompose: (request: ComposeRequest) => void;
@@ -324,15 +357,15 @@ function Garden(props: {
   // Bumped after each post: the moss must darken right away (DoD 4 — the one
   // deliberate motion in the UI, plans/vertical-slice.md の UI トーン決定).
   const [mossVersion, setMossVersion] = useState(0);
-  // The 年表's focused stone lives here because two sections write it: the
-  // 年表's own chips and the graph's stones (§6 のノードタップの着地 = §8 フォーカス).
-  const [timelineFocus, setTimelineFocus] = useState<TagSummary | null>(null);
+  // 選んだ石 (features.md §3, 2026-09-07): the one selection both views read —
+  // the 投稿一覧's AND filter and the 年表's axis. The graph's stones and
+  // bridges toggle it (stones.ts), a chip on a 苔片 or a 年表 row replaces it
+  // with that one stone, the feed's filter chips take one out.
+  const [stones, setStones] = useState<TagSummary[]>([]);
   const timelineRef = useRef<HTMLElement | null>(null);
-  // 投稿一覧のタグ絞り込み (features.md §3) — the landing of three 導線: a
-  // 苔片's own chip (1 石), §8 フォーカスの「投稿一覧へ」(1 石), §6 の橋 (2 石).
-  const [postFilter, setPostFilter] = useState<TagSummary[]>([]);
   // 期間の絞り込み (features.md §3): the reader's own 導線 — a preset or a
-  // custom range from the 期間で絞る form — and it ANDs with the stones.
+  // custom range from the 期間で絞る form, or a 総草 cell — and it ANDs with
+  // the stones. The 投稿一覧's alone: the 年表 has no period.
   const [postPeriod, setPostPeriod] = useState<Period | null>(null);
   // Server-decided today (JST), refreshed with every first page: the anchor
   // of 今日 / 今週 / 今月 / 今年, so the presets cut where the server cuts.
@@ -354,7 +387,7 @@ function Garden(props: {
   // adjust-state-while-rendering pattern, same as the 年表's focus). The epoch
   // keeps a slow もっと遡る answer from appending the old filter's page under
   // the new one.
-  const filterKey = `${rowKey(postFilter)}|${periodKey(postPeriod)}`;
+  const filterKey = `${rowKey(stones)}|${periodKey(postPeriod)}`;
   const [shownFilterKey, setShownFilterKey] = useState(filterKey);
   const feedEpoch = useRef(0);
   if (shownFilterKey !== filterKey) {
@@ -370,7 +403,7 @@ function Garden(props: {
 
   useEffect(() => {
     let cancelled = false;
-    listPosts(feedQuery(postFilter, postPeriod))
+    listPosts(feedQuery(stones, postPeriod))
       .then((timeline) => {
         if (cancelled) return;
         setPosts(timeline.posts);
@@ -383,11 +416,11 @@ function Garden(props: {
     return () => {
       cancelled = true;
     };
-  }, [postFilter, postPeriod, fault]);
+  }, [stones, postPeriod, fault]);
 
-  /** Whether a 苔片 carries every filtered stone. */
+  /** Whether a 苔片 carries every 選んだ石. */
   const carriesStones = (item: PostItem) =>
-    postFilter.every((f) => item.tags.some((t) => t.id === f.id));
+    stones.every((f) => item.tags.some((t) => t.id === f.id));
 
   /** Whether a 苔片 belongs on this page of the feed: every filtered stone, and days that overlap the period. */
   const inPage = (item: PostItem) => carriesStones(item) && spanInPeriod(item, postPeriod);
@@ -407,21 +440,33 @@ function Garden(props: {
       );
     }
     if (isStackedNow(created)) {
-      // The dialog has closed and focus is back on its invoker — the bar, or a
-      // 苔片 somewhere down the feed — so the new 苔片 at the head of the list
-      // is usually off-screen: travel there, the 導線's own movement.
-      if (shown) feedRef.current?.scrollIntoView({ block: "start" });
-      props.onNotice({ text: shown ? "積みました" : "積みました（いまの絞り込みの外）" });
+      if (props.view === "posts") {
+        // The dialog has closed and focus is back on its invoker — the bar, or
+        // a 苔片 somewhere down the feed — so the new 苔片 at the head of the
+        // list is usually off-screen: travel there, the 導線's own movement.
+        if (shown) feedRef.current?.scrollIntoView({ block: "start" });
+        props.onNotice({ text: shown ? "積みました" : "積みました（いまの絞り込みの外）" });
+      } else {
+        // Stacked from the 年表 view: the feed is not on screen, and the view
+        // is never swapped on the reader's behalf (features.md §3) — the
+        // receipt offers the way there instead, and the 年表 itself redraws
+        // (mossVersion) as the visible receipt of the new 苔片.
+        props.onNotice(
+          shown
+            ? { text: "積みました", action: { label: "投稿一覧へ", run: travelToFeed } }
+            : { text: "積みました（いまの絞り込みの外）" },
+        );
+      }
     } else {
       // A past day or a 続く苔片 is not at the head, so the feed stays put and
       // is never narrowed on the reader's behalf (features.md §1); the receipt
       // offers the narrowing instead — the 苔片's days as the period, with the
       // stones let go when it does not carry them, so the tap always lands on it.
       const days = { from: created.firstDay, to: created.lastDay };
-      const stones = carriesStones(created) ? undefined : [];
+      const withStones = carriesStones(created) ? undefined : [];
       props.onNotice({
         text: "積みました",
-        action: { label: `${periodLabel(days)} に絞る`, run: () => showPeriod(days, stones) },
+        action: { label: `${periodLabel(days)} に絞る`, run: () => showPeriod(days, withStones) },
       });
     }
     setMossVersion((v) => v + 1);
@@ -477,7 +522,7 @@ function Garden(props: {
     try {
       const timeline = await listPosts({
         cursor: nextCursor,
-        ...feedQuery(postFilter, postPeriod),
+        ...feedQuery(stones, postPeriod),
       });
       if (epoch === feedEpoch.current) {
         setPosts((current) => [...(current ?? []), ...timeline.posts]);
@@ -490,25 +535,34 @@ function Garden(props: {
     }
   };
 
-  // 導線の着地: filter, then travel (scroll-behavior in CSS honours reduced
-  // motion). A same-set tap keeps the identity so nothing refetches, but still
-  // travels — the intent is "show me those 苔片".
-  const showPosts = (tags: TagSummary[]) => {
-    setPostFilter((current) => (rowKey(current) === rowKey(tags) ? current : tags));
+  // The same stones in a new array keep the identity so nothing refetches.
+  const replaceStones = (tags: TagSummary[]) =>
+    setStones((current) => (rowKey(current) === rowKey(tags) ? current : tags));
+
+  // 導線の着地 in the 投稿一覧: bring that view up if the 年表 was, then travel
+  // to the feed's head (scroll-behavior in CSS honours reduced motion). The
+  // swap is flushed first — a hidden section cannot be scrolled to.
+  const travelToFeed = () => {
+    if (props.view !== "posts") flushSync(() => props.onView("posts"));
     feedRef.current?.scrollIntoView({ block: "start" });
+  };
+
+  // A chip's 導線: these stones, then travel — the intent is "show me those
+  // 苔片", so a same-set tap still travels.
+  const showPosts = (tags: TagSummary[]) => {
+    replaceStones(tags);
+    travelToFeed();
   };
 
   // The period's twin, for the days of a 苔片 or the 総草's one day: the same
   // window the 期間で絞る form makes, so the chip reads the days and the fields
-  // show them. The stones stay unless `stones` says otherwise: the cell counts
-  // every 苔片 of the day, but a reader who narrowed to a stone asked for that
-  // stone's, and the chips say both.
-  const showPeriod = (period: { from: string; to: string }, stones?: TagSummary[]) => {
-    if (stones !== undefined) {
-      setPostFilter((current) => (rowKey(current) === rowKey(stones) ? current : stones));
-    }
+  // show them. The stones stay unless `withStones` says otherwise: the cell
+  // counts every 苔片 of the day, but a reader who narrowed to a stone asked
+  // for that stone's, and the chips say both.
+  const showPeriod = (period: { from: string; to: string }, withStones?: TagSummary[]) => {
+    if (withStones !== undefined) replaceStones(withStones);
     setPostPeriod((current) => (periodKey(current) === periodKey(period) ? current : period));
-    feedRef.current?.scrollIntoView({ block: "start" });
+    travelToFeed();
   };
 
   // The 総草's cell lands on that one day (visualization.md §1) — the same
@@ -518,9 +572,10 @@ function Garden(props: {
   // Chips and the live announcement share one wording: stones by name, the
   // period as its chip text (a whole month reads as the month).
   const narrowedBy = [
-    ...postFilter.map((t) => `「${t.name}」`),
+    ...stones.map((t) => `「${t.name}」`),
     ...(postPeriod === null ? [] : [periodLabel(postPeriod)]),
   ];
+  const showingPosts = props.view === "posts";
 
   return (
     <>
@@ -539,29 +594,37 @@ function Garden(props: {
           {error}
         </p>
       )}
-      <HeatmapSection refreshKey={mossVersion} onDayTap={showDay} onFault={fault} />
+      {/* One order serves both views (features.md §3): 総草 (投稿一覧 only) →
+          石のつながり (both — the 操作盤, one instance, so its period and its
+          answer survive a swap) → 年表 or 投稿一覧. The other view's sections
+          stay mounted, hidden, so nothing they hold is lost. */}
+      <HeatmapSection
+        refreshKey={mossVersion}
+        onDayTap={showDay}
+        onFault={fault}
+        hidden={!showingPosts}
+      />
+      <TagGraphSection
+        refreshKey={mossVersion}
+        selected={stones}
+        // No travel after a toggle: the answer — the filtered feed or the
+        // 内訳 — lands right under the map, and the next tap wants the map still
+        // in reach. The feed's live region says what the filter became.
+        onStoneTap={(t) => setStones((current) => toggleStone(current, t))}
+        onBridgeTap={(a, b) => setStones((current) => togglePair(current, a, b))}
+        onFault={fault}
+      />
       <TagTimelineSection
         ref={timelineRef}
         refreshKey={mossVersion}
         tagOptions={tagOptions}
-        focusTag={timelineFocus}
-        onFocusChange={setTimelineFocus}
-        onShowPosts={(t) => showPosts([t])}
+        focus={stones}
+        onFocusChange={replaceStones}
+        onShowPosts={travelToFeed}
         onFault={fault}
+        hidden={showingPosts}
       />
-      <TagGraphSection
-        refreshKey={mossVersion}
-        onTagTap={(t) => {
-          // §6 → §8: focus the 年表 on the tapped stone and travel there so the
-          // answer is on screen. scrollIntoView reads scroll-behavior from CSS,
-          // which is where reduced motion is honoured.
-          setTimelineFocus(t);
-          timelineRef.current?.scrollIntoView({ block: "start" });
-        }}
-        onEdgeTap={(a, b) => showPosts([a, b])}
-        onFault={fault}
-      />
-      <section className="post-feed" ref={feedRef}>
+      <section className="post-feed" ref={feedRef} hidden={!showingPosts}>
         <h2>投稿一覧</h2>
         {/* The one polite live seat of the feed. Rendered before any filter
             exists — a region must already be in the tree when its text lands. */}
@@ -571,13 +634,13 @@ function Garden(props: {
         {narrowedBy.length > 0 && (
           <div className="feed-filter">
             <span className="feed-filter-label">絞り込み:</span>
-            {postFilter.map((t) => (
+            {stones.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 className="tag-chip"
                 aria-label={`「${t.name}」の絞り込みを外す`}
-                onClick={() => setPostFilter((current) => current.filter((x) => x.id !== t.id))}
+                onClick={() => setStones((current) => current.filter((x) => x.id !== t.id))}
               >
                 {t.name} ×
               </button>
@@ -596,7 +659,7 @@ function Garden(props: {
               type="button"
               className="feed-filter-clear"
               onClick={() => {
-                setPostFilter([]);
+                setStones([]);
                 setPostPeriod(null);
               }}
             >

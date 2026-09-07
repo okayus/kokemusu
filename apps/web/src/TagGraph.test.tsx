@@ -98,9 +98,16 @@ describe("layoutGraph", () => {
 
 describe("TagGraphChart markup", () => {
   const graph: TagGraph = { nodes: [node("a", 5), node("b", 1)], edges: [edge("a", "b", 2)] };
-  const html = renderToStaticMarkup(
-    <TagGraphChart graph={graph} onTagTap={() => {}} onEdgeTap={() => {}} />,
-  );
+  const render = (selected: { id: string; name: string }[]) =>
+    renderToStaticMarkup(
+      <TagGraphChart
+        graph={graph}
+        selected={selected}
+        onStoneTap={() => {}}
+        onBridgeTap={() => {}}
+      />,
+    );
+  const html = render([]);
 
   it("offers each stone as a keyboard-reachable button named with its count", () => {
     expect(html).toContain('aria-label="A · 5 片"');
@@ -108,6 +115,25 @@ describe("TagGraphChart markup", () => {
     // 2 stones + 1 bridge: every tappable thing is a real tab stop.
     expect(html.match(/role="button"/g)).toHaveLength(3);
     expect(html.match(/tabindex="0"/g)).toHaveLength(3);
+  });
+
+  it("is a set of toggle buttons: nothing pressed until a stone is chosen", () => {
+    // aria-pressed is what makes them toggles (選んだ石, features.md §3), and
+    // the CSS reads the same attribute — so it is always present, true or false.
+    expect(html.match(/aria-pressed="false"/g)).toHaveLength(3);
+    expect(html).not.toContain('aria-pressed="true"');
+  });
+
+  it("presses the chosen stones, and a bridge only once both its ends are chosen", () => {
+    const one = render([{ id: "a", name: "A" }]);
+    expect(one).toMatch(/aria-pressed="true" aria-label="A · 5 片"/);
+    expect(one).toMatch(/aria-pressed="false" aria-label="B · 1 片"/);
+    expect(one).toMatch(/aria-pressed="false" aria-label="A × B · 2 片"/);
+    const both = render([
+      { id: "b", name: "B" },
+      { id: "a", name: "A" },
+    ]);
+    expect(both.match(/aria-pressed="true"/g)).toHaveLength(3);
   });
 
   it("sizes stones by 苔片 count and bridges by co-occurrence", () => {

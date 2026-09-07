@@ -99,17 +99,58 @@ body {
   inset-block-start: 0;
   z-index: 1;
   display: flex;
+  /* Two rows: the title line, then the views (.views takes the full width). */
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0 1rem;
   margin-inline: -1.25rem;
   margin-block-end: 1rem;
-  padding: 0.5rem 1.25rem;
+  padding: 0.5rem 1.25rem 0;
+  border-block-end: 1px solid var(--line);
   background: var(--bg);
 }
 
 .bar h1 {
   margin-block: 0;
+}
+
+/* ---- 見かた（投稿一覧 / 年表）---- */
+
+/* The two views as links in the bar's second row (features.md §3): plain
+   text with an underline on the current one — a nav, not a tab widget, since
+   each view is a URL of its own. 40px tall for the thumb. */
+.views {
+  flex-basis: 100%;
+  display: flex;
+  gap: 0.25rem;
+  margin-block-start: 0.25rem;
+}
+
+.views a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 0.75rem;
+  margin-block-end: -1px;
+  border-block-end: 2px solid transparent;
+  color: var(--quiet);
+  text-decoration: none;
+}
+
+.views a:hover {
+  color: var(--ink);
+}
+
+.views a[aria-current="page"] {
+  color: var(--ink);
+  font-weight: 600;
+  border-block-end-color: var(--moss);
+}
+
+.views a:focus-visible {
+  outline: 3px solid var(--moss);
+  outline-offset: -3px;
 }
 
 .bar-actions {
@@ -188,9 +229,17 @@ body {
   visibility: hidden;
 }
 
-/* 導線と着地の scrollIntoView は sticky なバーの下に頭を出す。 */
+/* 導線と着地の scrollIntoView は sticky なバー（2 段）の下に頭を出す。 */
 .shell > section {
-  scroll-margin-block-start: 4.25rem;
+  scroll-margin-block-start: 6.5rem;
+}
+
+/* 見かた (features.md §3): the other view's sections stay mounted — the feed
+   keeps its pages, the 年表 its axis — and are only hidden. Attribute over
+   class, and specific enough that a section's own display rule (.heatmaps is
+   a grid) cannot undo it. */
+.shell > section[hidden] {
+  display: none;
 }
 
 h1 {
@@ -933,7 +982,7 @@ dialog.compose h2 {
   overflow: visible;
 }
 
-/* 橋 = 苔。太さがデータなので色は一様。タップで両タグの投稿一覧へ。 */
+/* 橋 = 苔。太さがデータなので色は一様。タップで両端の石を選ぶ／外す。 */
 .tg-edge {
   stroke: var(--moss);
   opacity: 0.4;
@@ -942,6 +991,24 @@ dialog.compose h2 {
 
 .tg-bridge {
   cursor: pointer;
+}
+
+/* 選んだ石 (features.md §3): the state is aria-pressed, read here rather than
+   mirrored in a class. A pressed stone wears the ink ring the hover shows,
+   thicker; a pressed bridge (both ends chosen) is drawn in ink at full
+   strength; and while anything is chosen, the rest of the moss steps back. */
+.tg-node[aria-pressed="true"] .tg-stone {
+  stroke: var(--ink);
+  stroke-width: 3;
+}
+
+.tg-bridge[aria-pressed="true"] .tg-edge {
+  stroke: var(--ink);
+  opacity: 1;
+}
+
+.tg-chart:has([aria-pressed="true"]) .tg-node[aria-pressed="false"] .tg-stone {
+  opacity: 0.55;
 }
 
 /* 細い橋でもタップできるよう、透明な太い当たり判定を重ねる。 */

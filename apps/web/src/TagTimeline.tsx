@@ -463,19 +463,26 @@ function TimelineBar(props: { span: Span; domain: Domain }) {
 
 /**
  * Data + view state around the chart. `refreshKey` bumps after a post so a
- * fresh 苔片 stretches its stones' bars right away, same as the 総草. The
- * focused stone is the page's state, not this section's — the graph's stone
- * taps land here too (§6 → §8) — so it arrives as a controlled prop.
+ * fresh 苔片 stretches its stones' bars right away, same as the 総草. The axis
+ * — the 選んだ石 (features.md §3) — is the page's state, not this section's:
+ * the graph's taps write it and the 投稿一覧 reads the same set, so it arrives
+ * as a controlled prop. Empty = every stone, one row each; one or more = that
+ * set's 内訳 (visualization.md §8: the set itself, then set × each
+ * co-occurring stone).
  */
 export function TagTimelineSection(props: {
   refreshKey: number;
   tagOptions: TagSummary[];
-  focusTag: TagSummary | null;
-  onFocusChange: (tag: TagSummary | null) => void;
-  /** 投稿一覧へ (visualization.md §8): land the post list's filter on the focused stone. */
-  onShowPosts: (tag: TagSummary) => void;
+  /** The 選んだ石 — the axis. */
+  focus: readonly TagSummary[];
+  /** Replace the 選んだ石: a row's chip means that one stone, すべての石へ means none. */
+  onFocusChange: (tags: TagSummary[]) => void;
+  /** 投稿一覧へ (visualization.md §8): the same stones already filter the feed, so this only travels. */
+  onShowPosts: () => void;
   onFault: (e: unknown) => void;
-  /** Lets the page scroll the 年表 into view when a stone is tapped elsewhere. */
+  /** The other view is up: stay mounted — the axis and its rows are kept — but out of the page. */
+  hidden?: boolean;
+  /** Lets the page scroll the 年表 into view. */
   ref?: Ref<HTMLElement>;
 }) {
   const [data, setData] = useState<TagTimeline | null>(null);
@@ -483,15 +490,16 @@ export function TagTimelineSection(props: {
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
 
-  const { refreshKey, onFault, focusTag } = props;
-  const focusId = focusTag === null ? null : focusTag.id;
+  const { refreshKey, onFault, focus } = props;
+  const focusKey = rowKey(focus);
+  const focusIds = focus.map((t) => t.id);
 
-  // The focus moved (a chip here, a stone in the graph, すべての石へ): drop the
-  // view-local state before this render's output, so the old view's rows never
+  // The axis moved (a chip here, a stone in the graph, すべての石へ): drop the
+  // view-local state before this render's output, so the old axis's rows never
   // sit under the new heading (the adjust-state-while-rendering pattern).
-  const [shownFocusId, setShownFocusId] = useState(focusId);
-  if (shownFocusId !== focusId) {
-    setShownFocusId(focusId);
+  const [shownFocusKey, setShownFocusKey] = useState(focusKey);
+  if (shownFocusKey !== focusKey) {
+    setShownFocusKey(focusKey);
     setData(null);
     setAdhoc([]);
     setPickerFor(null);
@@ -500,7 +508,10 @@ export function TagTimelineSection(props: {
 
   useEffect(() => {
     let cancelled = false;
-    getTimeline(focusId === null ? {} : { focus: focusId })
+    // Keyed on the ids' key, not the array: the same stones in a new array
+    // must not refetch. The effect only runs when the key changed, and then
+    // it is this render's closure, so focusIds is current.
+    getTimeline(focusIds.length === 0 ? {} : { focus: focusIds })
       .then((d) => {
         if (!cancelled) setData(d);
       })
@@ -510,10 +521,12 @@ export function TagTimelineSection(props: {
     return () => {
       cancelled = true;
     };
-  }, [refreshKey, focusId, onFault]);
+  }, [refreshKey, focusKey, onFault]);
 
+  // A row's chip names one stone: the axis becomes that stone alone (a 導線,
+  // not a toggle — the toggling is the graph's, features.md §3).
   const focusOn = (t: TagSummary) => {
-    if (focusId !== t.id) props.onFocusChange(t);
+    if (!(focus.length === 1 && focus[0]?.id === t.id)) props.onFocusChange([t]);
   };
 
   const addChip = async (row: ChartRow, raw: string) => {
@@ -573,22 +586,22 @@ export function TagTimelineSection(props: {
     });
   };
 
-  // Until the first tagged 苔片 exists there is no 年表 — appear when grown,
-  // like the 総草 (null also covers the very first load).
-  if (focusTag === null && (data === null || data.rows.length === 0)) return null;
-
+  // The 年表 is a view of its own now (features.md §3), so an empty garden
+  // gets words rather than a missing section — the 総草 still appears only
+  // when grown, but that one sits in the other view.
   const rows = data === null ? [] : assembleRows(data.rows, adhoc);
+  const focused = focus.length > 0;
   return (
-    <section className="tag-timeline" ref={props.ref}>
+    <section className="tag-timeline" ref={props.ref} hidden={props.hidden}>
       <div className="tl-head">
         <h2>年表</h2>
-        {focusTag !== null && (
+        {focused && (
           <p className="tl-focus">
-            <span>「{focusTag.name}」の内訳</span>
-            <button type="button" onClick={() => props.onShowPosts(focusTag)}>
+            <span>「{focus.map((t) => t.name).join(" × ")}」の内訳</span>
+            <button type="button" onClick={props.onShowPosts}>
               投稿一覧へ
             </button>
-            <button type="button" onClick={() => props.onFocusChange(null)}>
+            <button type="button" onClick={() => props.onFocusChange([])}>
               すべての石へ
             </button>
           </p>
@@ -597,14 +610,20 @@ export function TagTimelineSection(props: {
       {data === null ? (
         <p className="quiet">…</p>
       ) : rows.length === 0 ? (
-        <p className="quiet">この石の苔片はもうありません。</p>
+        <p className="quiet">
+          {!focused
+            ? "まだ石がありません。苔片にタグを付けると、ここに年表が育ちます。"
+            : focus.length === 1
+              ? "この石の苔片はもうありません。"
+              : "この石を全部持つ苔片はありません。"}
+        </p>
       ) : (
         <TimelineChart
           rows={rows}
           today={data.today}
           onTagTap={focusOn}
           deepDive={
-            focusTag === null
+            !focused
               ? undefined
               : {
                   options: props.tagOptions,

@@ -6,9 +6,10 @@ import { getGraph, type GraphEdge, type GraphNode, type GraphPeriod, type TagGra
 // a stone, grown by its 苔片 count — §6's stand-in for a per-tag heatmap; an
 // edge is moss bridging two stones that share 苔片, thicker the more they
 // share. Hand-written SVG over a hand-rolled deterministic force layout: tens
-// of stones need no library (§6 実装方針). Tapping a stone lands on the §8
-// focus 年表 (its 内訳); tapping a bridge lands on the post list filtered to
-// both stones (両タグ AND) — the page wires both up.
+// of stones need no library (§6 実装方針). The map is the 操作盤 of both views
+// (features.md §3, 2026-09-07): a stone tap toggles it in or out of the
+// 選んだ石, a bridge tap toggles both its ends at once, and the set is read by
+// the 投稿一覧 (AND filter) and the 年表 (its axis) below — the page wires it up.
 
 // ---------------------------------------------------------------- pure layout
 
@@ -169,13 +170,16 @@ export const edgeTitle = (a: GraphNode, b: GraphNode, count: number) =>
 // same arrangement as TimelineChart (no in-sandbox browser to eyeball it).
 export function TagGraphChart(props: {
   graph: TagGraph;
-  onTagTap: (tag: TagSummary) => void;
-  onEdgeTap: (a: TagSummary, b: TagSummary) => void;
+  /** The 選んだ石 (features.md §3): these stones are pressed, and so is a bridge whose both ends are. */
+  selected: readonly TagSummary[];
+  onStoneTap: (tag: TagSummary) => void;
+  onBridgeTap: (a: TagSummary, b: TagSummary) => void;
 }) {
   const { nodes, edges } = props.graph;
   const laid = useMemo(() => layoutGraph(nodes, edges), [nodes, edges]);
   const at = new Map(laid.map((p) => [p.id, p] as const));
   const named = new Map(nodes.map((node) => [node.id, node] as const));
+  const chosen = new Set(props.selected.map((t) => t.id));
   return (
     <svg className="tg-chart" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>
       {/* Bridges first so stones paint over them (and take the later tab stops). */}
@@ -195,14 +199,23 @@ export function TagGraphChart(props: {
             pa={pa}
             pb={pb}
             count={e.count}
-            onEdgeTap={props.onEdgeTap}
+            pressed={chosen.has(e.a) && chosen.has(e.b)}
+            onBridgeTap={props.onBridgeTap}
           />
         );
       })}
       {nodes.map((node) => {
         const p = at.get(node.id);
         if (p === undefined) return null;
-        return <Stone key={node.id} node={node} at={p} onTagTap={props.onTagTap} />;
+        return (
+          <Stone
+            key={node.id}
+            node={node}
+            at={p}
+            pressed={chosen.has(node.id)}
+            onStoneTap={props.onStoneTap}
+          />
+        );
       })}
     </svg>
   );
@@ -214,18 +227,20 @@ function Bridge(props: {
   pa: LaidNode;
   pb: LaidNode;
   count: number;
-  onEdgeTap: (a: TagSummary, b: TagSummary) => void;
+  pressed: boolean;
+  onBridgeTap: (a: TagSummary, b: TagSummary) => void;
 }) {
   const { a, b, pa, pb } = props;
-  const tap = () => props.onEdgeTap({ id: a.id, name: a.name }, { id: b.id, name: b.name });
+  const tap = () => props.onBridgeTap({ id: a.id, name: a.name }, { id: b.id, name: b.name });
   return (
     // The same rebuilt-button contract as Stone (no native button inside SVG).
-    // Activating a bridge lands on the post list filtered to both stones
-    // (visualization.md §6: エッジをタップで両方のタグが付いた投稿一覧へ).
+    // A bridge is a toggle for its two stones at once (visualization.md §6):
+    // aria-pressed says whether both ends are among the 選んだ石.
     <g
       className="tg-bridge"
       role="button"
       tabIndex={0}
+      aria-pressed={props.pressed}
       aria-label={edgeTitle(a, b, props.count)}
       onClick={tap}
       onKeyDown={(e) => {
@@ -251,18 +266,26 @@ function Bridge(props: {
   );
 }
 
-function Stone(props: { node: GraphNode; at: LaidNode; onTagTap: (tag: TagSummary) => void }) {
+function Stone(props: {
+  node: GraphNode;
+  at: LaidNode;
+  pressed: boolean;
+  onStoneTap: (tag: TagSummary) => void;
+}) {
   const { node, at } = props;
-  const tap = () => props.onTagTap({ id: node.id, name: node.name });
+  const tap = () => props.onStoneTap({ id: node.id, name: node.name });
   return (
     // No native button exists inside SVG, so this is the one place the app
     // rebuilds one: role + tabindex + the native keyboard contract — Enter on
     // keydown, Space on keyup, keydown only swallows the scroll
-    // (modern-web-guidance/accessibility §5).
+    // (modern-web-guidance/accessibility §5). A stone is a toggle button — a
+    // tap chooses it, the same tap lets it go — and aria-pressed carries that;
+    // the CSS reads the same attribute for the ring and the fade.
     <g
       className="tg-node"
       role="button"
       tabIndex={0}
+      aria-pressed={props.pressed}
       aria-label={nodeTitle(node)}
       onClick={tap}
       onKeyDown={(e) => {
@@ -294,13 +317,19 @@ const PERIODS: { value: GraphPeriod; label: string }[] = [
 
 /**
  * Data + view state around the chart. `refreshKey` bumps after a post so new
- * moss thickens its bridges right away, same as the 総草 and the 年表.
+ * moss thickens its bridges right away, same as the 総草 and the 年表. The map
+ * is the one 操作盤 of both views (features.md §3): it stays on screen while
+ * the 投稿一覧 and the 年表 take turns below it, and its taps toggle the 選んだ石
+ * that both of them read — so the section holds no selection of its own.
  */
 export function TagGraphSection(props: {
   refreshKey: number;
-  onTagTap: (tag: TagSummary) => void;
-  /** 橋タップの着地 (§6): the post list filtered to both stones. */
-  onEdgeTap: (a: TagSummary, b: TagSummary) => void;
+  /** The 選んだ石, drawn pressed. */
+  selected: readonly TagSummary[];
+  /** A stone tap: in or out of the 選んだ石 (stones.ts の toggleStone). */
+  onStoneTap: (tag: TagSummary) => void;
+  /** A bridge tap: both ends in or out at once (stones.ts の togglePair). */
+  onBridgeTap: (a: TagSummary, b: TagSummary) => void;
   onFault: (e: unknown) => void;
 }) {
   // Answers are tagged with the period they answer, so a switch shows "…"
@@ -357,7 +386,12 @@ export function TagGraphSection(props: {
       ) : shown.nodes.length === 0 ? (
         <p className="quiet">この期間に積んだ苔片はありません。</p>
       ) : (
-        <TagGraphChart graph={shown} onTagTap={props.onTagTap} onEdgeTap={props.onEdgeTap} />
+        <TagGraphChart
+          graph={shown}
+          selected={props.selected}
+          onStoneTap={props.onStoneTap}
+          onBridgeTap={props.onBridgeTap}
+        />
       )}
     </section>
   );
