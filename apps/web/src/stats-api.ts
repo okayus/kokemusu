@@ -54,12 +54,13 @@ export type TagTimeline = { today: string; rows: TimelineRow[] };
 
 /**
  * The three forms of visualization.md §8: no option = one row per tag,
- * `focus` = that stone + stone×co-occurring-tag rows, `tags` = the one
- * AND row for a 2+ tag set. Metadata only — bodies never ride here.
+ * `focus` = the 選んだ石 (1+ ids) as one row + set×co-occurring-stone rows,
+ * `tags` = the one AND row for a 2+ tag set. Metadata only — bodies never
+ * ride here.
  */
-export function getTimeline(opts: { focus?: string; tags?: string[] } = {}): Promise<TagTimeline> {
+export function getTimeline(opts: { focus?: string[]; tags?: string[] } = {}): Promise<TagTimeline> {
   const q = new URLSearchParams();
-  if (opts.focus !== undefined) q.set("focus", opts.focus);
+  if (opts.focus !== undefined) q.set("focus", opts.focus.join(","));
   if (opts.tags !== undefined) q.set("tags", opts.tags.join(","));
   const qs = q.toString();
   return request(`/api/stats/timeline${qs ? `?${qs}` : ""}`);

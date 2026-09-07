@@ -75,9 +75,19 @@ test("register → post → today's moss darkens → reload → logout → login
   expect(heatmap.days.at(-1)).toEqual({ day: heatmap.to, count: 1, level: 1, input: 0, output: 0 });
   expect(heatmap.days.reduce((n, d) => n + d.count, 0)).toBe(1);
 
-  // 石の年表 (visualization.md §8): the two stones appear as one row each, and
-  // tapping a stone opens its 内訳年表 — the stone alone plus stone × 共起タグ.
+  // 石の年表 (visualization.md §8) is the other view (features.md §3, 2026-09-07):
+  // the bar's 年表 link brings it up in place of the feed — the URL follows —
+  // and the two stones appear as one row each. A row's chip makes that stone
+  // the axis: its 内訳年表, the stone alone plus stone × 共起タグ.
   const yearChart = page.locator("section.tag-timeline");
+  const feedSection = page.locator("section.post-feed");
+  const viewLink = (name: string) => page.getByRole("link", { name, exact: true });
+  await expect(yearChart).toBeHidden();
+  await viewLink("年表").click();
+  await expect(page).toHaveURL(/\/%E5%B9%B4%E8%A1%A8$/);
+  await expect(viewLink("年表")).toHaveAttribute("aria-current", "page");
+  await expect(yearChart).toBeVisible();
+  await expect(feedSection).toBeHidden();
   await expect(yearChart.locator("li.tl-row")).toHaveCount(2);
   await expect(yearChart.locator(".tl-note").first()).toHaveText("1 片 · 1.0日/片");
   await yearChart.getByRole("button", { name: "e2e", exact: true }).click();
@@ -88,18 +98,37 @@ test("register → post → today's moss darkens → reload → logout → login
   await yearChart.getByRole("button", { name: "すべての石へ" }).click();
   await expect(yearChart.locator("li.tl-row")).toHaveCount(2);
 
-  // 石のつながり (visualization.md §6): two stones on one 苔片 = one bridge, and
-  // tapping a stone lands on the §8 focus 年表 (2026-09-03 決定 — the graph's
-  // node tap is wired to the timeline's focus, not a page of its own).
+  // 石のつながり (visualization.md §6) is the 操作盤 of both views: two stones on
+  // one 苔片 = one bridge, and a stone tap toggles it into the 選んだ石 — here
+  // the 年表's axis. A second stone deepens the axis to the pair (the set's own
+  // row; no third stone to add a set×stone row), the same tap again lets a
+  // stone go, and the bridge is pressed exactly while both its ends are.
   const graphChart = page.locator("section.tag-graph");
   await expect(graphChart.locator(".tg-node")).toHaveCount(2);
   await expect(graphChart.locator(".tg-edge")).toHaveCount(1);
-  // exact — the bridge button's name ("e2e × 苔 · 1 片") contains this too.
-  await graphChart.getByRole("button", { name: "苔 · 1 片", exact: true }).click();
+  // Anchored — the bridge's name ("e2e × 苔 · 1 片") contains a stone's too —
+  // and open on the count, which grows as the 苔片 below are stacked.
+  const mossStone = graphChart.getByRole("button", { name: /^苔 · \d+ 片$/ });
+  const e2eStone = graphChart.getByRole("button", { name: /^e2e · \d+ 片$/ });
+  // The bridge's name orders the pair by tag id (a < b), so match either spelling.
+  const bridge = graphChart.getByRole("button", { name: /^(e2e × 苔|苔 × e2e) · 1 片$/ });
+  await expect(mossStone).toHaveAttribute("aria-pressed", "false");
+  await mossStone.click();
+  await expect(mossStone).toHaveAttribute("aria-pressed", "true");
+  await expect(bridge).toHaveAttribute("aria-pressed", "false");
   await expect(yearChart.getByText("「苔」の内訳")).toBeVisible();
   await expect(yearChart.locator("li.tl-row")).toHaveCount(2);
+  await e2eStone.click();
+  await expect(bridge).toHaveAttribute("aria-pressed", "true");
+  await expect(yearChart.getByText("「苔 × e2e」の内訳")).toBeVisible();
+  await expect(yearChart.locator("li.tl-row")).toHaveCount(1);
+  await mossStone.click();
+  await expect(mossStone).toHaveAttribute("aria-pressed", "false");
+  await expect(bridge).toHaveAttribute("aria-pressed", "false");
+  await expect(yearChart.getByText("「e2e」の内訳")).toBeVisible();
   await yearChart.getByRole("button", { name: "すべての石へ" }).click();
   await expect(yearChart.locator("li.tl-row")).toHaveCount(2);
+  await expect(e2eStone).toHaveAttribute("aria-pressed", "false");
 
   // §6 on the wire, against the real sqlite: the self-join sees the one pair
   // (with `a` < `b`), and the JST period filter keeps a 苔片 posted "today"
@@ -178,8 +207,19 @@ test("register → post → today's moss darkens → reload → logout → login
   expect(stored[0]?.body).toMatch(/^k1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,}$/);
   expect(stored[0]?.body).not.toContain("苔片");
 
-  // Persisted — and decrypted on the way back.
+  // Persisted — and decrypted on the way back. The view persists too: the
+  // reload lands on /年表 (the URL is the view, features.md §3), the back
+  // gesture returns to the 投稿一覧 the session started on, and the feed comes
+  // back with the 苔片 in it.
   await page.reload();
+  await expect(viewLink("年表")).toHaveAttribute("aria-current", "page");
+  await expect(yearChart).toBeVisible();
+  await expect(feedSection).toBeHidden();
+  await page.goBack();
+  await expect(viewLink("投稿一覧")).toHaveAttribute("aria-current", "page");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(feedSection).toBeVisible();
+  await expect(yearChart).toBeHidden();
   await expect(timeline.getByText(body, { exact: true })).toBeVisible();
   await expect(today).toHaveClass(/\bl1\b/);
 
@@ -272,25 +312,39 @@ test("register → post → today's moss darkens → reload → logout → login
   ).json()) as { posts: { body: string }[] };
   expect(byName.posts.map((p) => p.body)).toEqual([body]);
 
-  // 導線 2 — §8 focus → 投稿一覧へ: the focused stone becomes the filter.
+  // 導線 2 — §8 focus → 投稿一覧へ: the 選んだ石 are one set for both views
+  // (features.md §3), so the 年表 opens already on 「苔」の内訳 from 導線 1; its
+  // "e2e" chip makes that stone the axis, and 投稿一覧へ only swaps the view —
+  // the feed is filtered by the same stone.
+  await viewLink("年表").click();
+  await expect(yearChart.getByText("「苔」の内訳")).toBeVisible();
   await yearChart.getByRole("button", { name: "e2e", exact: true }).click();
   await expect(yearChart.getByText("「e2e」の内訳")).toBeVisible();
   await yearChart.getByRole("button", { name: "投稿一覧へ" }).click();
+  await expect(viewLink("投稿一覧")).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("button", { name: "「e2e」の絞り込みを外す" })).toBeVisible();
   await expect(timeline.locator("li.post")).toHaveCount(2);
 
-  // 導線 3 — §6 bridge: both stones as an AND set (?tags=). The button's name
-  // orders the pair by tag id (a < b), so match either spelling.
-  await graphChart.getByRole("button", { name: /^(e2e × 苔|苔 × e2e) · 1 片$/ }).click();
+  // 導線 3 — §6 bridge: both ends join the 選んだ石 at once — e2e was there, 苔
+  // joins — the AND set (?tags=). A stone tap then lets that one end go, and
+  // the other stays as the filter.
+  await bridge.click();
+  await expect(bridge).toHaveAttribute("aria-pressed", "true");
   await expect(timeline.locator("li.post")).toHaveCount(1);
   await expect(timeline.getByText(body, { exact: true })).toBeVisible();
   const bySet = (await (
     await page.request.get(`/api/posts?tags=${stoneIds.join(",")}`)
   ).json()) as { posts: { body: string }[] };
   expect(bySet.posts.map((p) => p.body)).toEqual([body]);
+  await e2eStone.click();
+  await expect(bridge).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "「e2e」の絞り込みを外す" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "「苔」の絞り込みを外す" })).toBeVisible();
+  await expect(timeline.locator("li.post")).toHaveCount(1);
 
   await page.locator(".feed-filter").getByRole("button", { name: "解除" }).click();
   await expect(timeline.locator("li.post")).toHaveCount(2);
+  await expect(mossStone).toHaveAttribute("aria-pressed", "false");
 
   // 編集 (ADR-0003 PR): the second 苔片 is rewritten in place — body and
   // stones replaced, re-encrypted at rest — and the counts stay put: an edit
@@ -602,7 +656,8 @@ test("register → post → today's moss darkens → reload → logout → login
     ...new Set([yesterday.slice(0, 7), todayKey.slice(0, 7)]),
   ]);
   expect(spanRow?.months.every((m) => m.count === 1)).toBe(true);
-  await expect(yearChart.locator("li.tl-row", { hasText: "続き" })).toBeVisible();
+  // The 年表 is the other view (hidden here, still mounted): its row exists.
+  await expect(yearChart.locator("li.tl-row", { hasText: "続き" })).toHaveCount(1);
   await today.click();
   await expect(periodChip).toHaveText(`${slashed(todayKey)} ×`);
   const spanCard = timeline.locator("li.post", { hasText: "二日続いた苔片" });

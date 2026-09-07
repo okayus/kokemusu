@@ -110,8 +110,10 @@ export function HeatmapChart(props: {
   label: string;
   data: Heatmap;
   onDayTap: (day: string) => void;
+  /** Whether the section around it is hidden — the scroll to today re-runs when it comes back. */
+  hidden?: boolean | undefined;
 }) {
-  const { label, data, onDayTap } = props;
+  const { label, data, onDayTap, hidden = false } = props;
   const offset = weekdayOf(data.from);
   const cells = data.days.map((d, i) => ({
     ...d,
@@ -151,10 +153,13 @@ export function HeatmapChart(props: {
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // Today lives at the right edge; start there. Keyed on the window, not the
-    // data, so a refetch after posting doesn't yank the reader's scroll back.
+    // data, so a refetch after posting doesn't yank the reader's scroll back —
+    // and on `hidden`, because a section that was display:none had no width to
+    // scroll (a garden opened at /年表): it starts at today when it comes back.
+    if (hidden) return;
     const el = scrollRef.current;
     if (el) el.scrollLeft = el.scrollWidth;
-  }, [data.from, data.to]);
+  }, [data.from, data.to, hidden]);
 
   return (
     <figure className="heatmap">
@@ -279,6 +284,8 @@ export function HeatmapSection(props: {
   refreshKey: number;
   onDayTap: (day: string) => void;
   onFault: (e: unknown) => void;
+  /** The 年表 view is up: the 総草 belongs to the 投稿一覧 (features.md §3) and waits, mounted. */
+  hidden?: boolean;
 }) {
   // Refetches replace the data in place — no flicker back to a loading state.
   const [garden, setGarden] = useState<Heatmap | null>(null);
@@ -300,9 +307,9 @@ export function HeatmapSection(props: {
 
   if (garden === null) return null; // first load: appear when grown
   return (
-    <section className="heatmaps">
+    <section className="heatmaps" hidden={props.hidden}>
       <h2>苔</h2>
-      <HeatmapChart label="総草" data={garden} onDayTap={onDayTap} />
+      <HeatmapChart label="総草" data={garden} onDayTap={onDayTap} hidden={props.hidden} />
     </section>
   );
 }

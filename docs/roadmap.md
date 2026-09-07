@@ -30,6 +30,8 @@
 - ✅ **書く面をダイアログへ、トップは振り返りに**（2026-09-05。「積む」/ `n` で開くネイティブ `<dialog>`、
   苔片の「同じ石に積む」— [features.md](features.md) §1 / §3、[CONTEXT.md](../CONTEXT.md)。2026-09-06 に「積む」は sticky ヘッダーから
   右下の丸いボタンへ、同乗した見出しトグルは [ADR-0006](adr/0006-no-post-title.md) で廃止）。
+- ✅ **見かた 2 つ（投稿一覧 / 年表）と選んだ石**（2026-09-07。石のつながりが両方の操作盤、選んだ石は共有 —
+  [features.md](features.md) §3、[visualization.md](visualization.md) §6 / §8、[CONTEXT.md](../CONTEXT.md)。API は #52、UI は同日の後続 PR）。
 - **過去に積む・続く苔片・向き**（2026-09-06 決定、[ADR-0005](adr/0005-post-axis-is-day-range.md)。順番は
   A1 軸を「日」に ✅ #43 → B 向き ✅ #46 → A2 過去に積む・続く苔片 ✅ #47。計画は完了したので plans から削除、経緯は log）。
 - 累積（積み上げ）グラフ、ストリーク、内訳・時間帯分布。
