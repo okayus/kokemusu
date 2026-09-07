@@ -9,7 +9,7 @@ import {
   lte,
   max,
   min,
-  ne,
+  notInArray,
   sql,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -28,7 +28,7 @@ import {
   type MonthKey,
 } from "../core/day";
 import { isInput, isOutput, type PostKind } from "../core/kind";
-import { parseTagsParam } from "../core/tag";
+import { parseFocusParam, parseTagsParam } from "../core/tag";
 import { createDb } from "../db";
 import { post, postTags, tag } from "../db/schema";
 import { fail } from "../lib/errors";
@@ -140,13 +140,15 @@ export function heatmapTotals(spans: Iterable<HeatmapSpan>): HeatmapTotals {
 // each 苔片's two days over for the month segments, which core walks month by
 // month (`monthCounts`).
 
-// The three forms (docs/plans/tag-timeline.md): no param = one row per tag,
-// `?focus=` = that stone + stone×co-occurring-tag rows, `?tags=` = one AND row
-// (core/tag.ts の `?tags=` wire 規約 — posts の絞り込みと共有). focus and tags
+// The three forms: no param = one row per tag, `?focus=` = the chosen stones —
+// 選んだ石, one id since #30 and a comma list since 2026-09-07
+// (docs/plans/tabs-and-stones.md) — as one row + set×co-occurring-stone rows,
+// `?tags=` = one AND row (core/tag.ts の `?tags=` wire 規約 — posts の絞り込みと
+// 共有). Both lists are parsed in core after the size gate here. focus and tags
 // are exclusive — a request mixing them has no meaning.
 export const timelineQuerySchema = z
   .object({
-    focus: z.string().min(1).max(64).optional(),
+    focus: z.string().min(1).max(1400).optional(),
     tags: z.string().min(1).max(1400).optional(),
   })
   .refine((q) => q.focus === undefined || q.tags === undefined, "focus and tags are exclusive");
@@ -240,6 +242,57 @@ export function monthCountsByTag(rows: Iterable<AxisRow>): Map<string, MonthCoun
     else list.push(span);
   }
   return new Map([...spans].map(([tagId, list]) => [tagId, monthCounts(list)]));
+}
+
+/** What the focus form's batch hands back, in the order its statements were sent. */
+export type FocusMaterials = {
+  /** The chosen stones' ids in request order — the rows' chip order. */
+  ids: string[];
+  /** MIN / MAX / COUNT over the 苔片 carrying the whole set (undefined = no aggregate row at all). */
+  agg: { first: DayKey | null; last: DayKey | null; count: number } | undefined;
+  /** The set's stones as the user's own tags — a missing id means no such stone. */
+  named: TimelineTag[];
+  /** The set's 苔片, one span each — the set row's 活動月. */
+  setAxis: DaySpan[];
+  /** Every OTHER stone on those 苔片, grouped — the set×stone rows. */
+  cooc: RawTagSpan[];
+  /** Those other stones' links with the 苔片's days — the set×stone rows' 活動月. */
+  coocAxis: AxisRow[];
+};
+
+/**
+ * Fold the focus form's batch into its rows: the set itself first, then set ×
+ * each co-occurring stone in 年表 order (`buildTagSpans`), every row's chips
+ * starting with the set in request order. Empty when no 苔片 carries the whole
+ * set — an unknown id lands here too, since nothing can carry it — the same
+ * "empty, not an error" as the other forms.
+ */
+export function buildFocusRows(m: FocusMaterials): TimelineRow[] {
+  const { agg } = m;
+  if (agg === undefined || agg.count === 0 || agg.first === null || agg.last === null) return [];
+  const byId = new Map(m.named.map((t) => [t.id, t] as const));
+  const set = m.ids.flatMap((id) => {
+    const hit = byId.get(id);
+    return hit ? [hit] : [];
+  });
+  if (set.length !== m.ids.length) return [];
+  const months = monthCountsByTag(m.coocAxis);
+  return [
+    {
+      tags: set,
+      firstDay: agg.first,
+      lastDay: agg.last,
+      count: agg.count,
+      months: monthCounts(m.setAxis),
+    },
+    ...buildTagSpans(m.cooc).map((s) => ({
+      tags: [...set, s.tag],
+      firstDay: s.firstDay,
+      lastDay: s.lastDay,
+      count: s.count,
+      months: months.get(s.tag.id) ?? [],
+    })),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -411,65 +464,61 @@ export const statsRoutes = new Hono<Env>()
       return c.json({ today, rows: [row] });
     }
 
-    // ---- ?focus=<tagId>: that stone alone + stone × each co-occurring tag —
-    // the 内訳年表 in one round trip (batched: two statements, one D1 call).
+    // ---- ?focus=t1[,t2,…]: the chosen stones — 選んだ石 — as one row, then
+    // set × each co-occurring stone: the 内訳年表 in one round trip. One id is
+    // the 1-stone form the 年表 has drawn since #30; more ids generalise it
+    // (docs/plans/tabs-and-stones.md, 2026-09-07): the 苔片 are those carrying
+    // the WHOLE set (the same HAVING as ?tags=), and the co-occurring stones
+    // are every other tag on them. Five statements, one D1 batch, one snapshot.
     if (parsed.data.focus !== undefined) {
-      const focusId = parsed.data.focus;
-      const aloneQuery = db
+      const ids = parseFocusParam(parsed.data.focus);
+      if (ids === null) return fail(c, "validation_error");
+
+      const matched = db
+        .select({ postId: postTags.postId })
+        .from(postTags)
+        .where(inArray(postTags.tagId, ids))
+        .groupBy(postTags.postId)
+        .having(eq(countDistinct(postTags.tagId), ids.length));
+      const inSet = and(ownPosts, inArray(post.id, matched));
+      const aggQuery = db
+        .select({ first: min(post.firstDay), last: max(post.lastDay), count: count() })
+        .from(post)
+        .where(inSet);
+      const setAxisQuery = db
+        .select({ firstDay: post.firstDay, lastDay: post.lastDay })
+        .from(post)
+        .where(inSet);
+      const namedQuery = db
+        .select({ id: tag.id, name: tag.name })
+        .from(tag)
+        .where(and(eq(tag.userId, userId), inArray(tag.id, ids)));
+      // The other stones on the set's 苔片: the set's own links drop out, so a
+      // 苔片 carrying nothing but the set contributes no row here.
+      const others = and(inSet, notInArray(postTags.tagId, ids));
+      const coocQuery = db
         .select(spanColumns)
         .from(postTags)
         .innerJoin(post, eq(postTags.postId, post.id))
         .innerJoin(tag, eq(postTags.tagId, tag.id))
-        .where(and(eq(postTags.tagId, focusId), ownPosts))
+        .where(others)
         .groupBy(tag.id, tag.name, tag.norm);
-      // The §6 co-occurrence self-join, pinned on one side: a = the focused
-      // stone, b = every other tag on the same 苔片, grouped by b.
-      const a = alias(postTags, "a");
-      const b = alias(postTags, "b");
-      const coocQuery = db
-        .select(spanColumns)
-        .from(a)
-        .innerJoin(b, and(eq(b.postId, a.postId), ne(b.tagId, focusId)))
-        .innerJoin(post, eq(a.postId, post.id))
-        .innerJoin(tag, eq(b.tagId, tag.id))
-        .where(and(eq(a.tagId, focusId), ownPosts))
-        .groupBy(tag.id, tag.name, tag.norm);
-      // Every link on every 苔片 carrying the stone: the stone's own links are
-      // its months, and each other tag's links are the 石×共起タグ row's — a
-      // 苔片 in here carries the stone by construction, so no self-join.
-      const stonePosts = db
-        .select({ postId: postTags.postId })
-        .from(postTags)
-        .where(eq(postTags.tagId, focusId));
-      const axisQuery = db
+      const coocAxisQuery = db
         .select(axisColumns)
         .from(postTags)
         .innerJoin(post, eq(postTags.postId, post.id))
-        .where(and(ownPosts, inArray(post.id, stonePosts)));
-      const [aloneRaw, coocRaw, axis] = await db.batch([aloneQuery, coocQuery, axisQuery]);
-
-      // Unknown id or a stone whose 苔片 are all gone: empty, not an error.
-      const alone = buildTagSpans(aloneRaw)[0];
-      if (alone === undefined) return c.json({ today, rows: [] });
-
-      const months = monthCountsByTag(axis);
-      const rows: TimelineRow[] = [
-        {
-          tags: [alone.tag],
-          firstDay: alone.firstDay,
-          lastDay: alone.lastDay,
-          count: alone.count,
-          months: months.get(alone.tag.id) ?? [],
-        },
-        ...buildTagSpans(coocRaw).map((s) => ({
-          tags: [alone.tag, s.tag],
-          firstDay: s.firstDay,
-          lastDay: s.lastDay,
-          count: s.count,
-          months: months.get(s.tag.id) ?? [],
-        })),
-      ];
-      return c.json({ today, rows });
+        .where(others);
+      const [aggRows, setAxis, named, cooc, coocAxis] = await db.batch([
+        aggQuery,
+        setAxisQuery,
+        namedQuery,
+        coocQuery,
+        coocAxisQuery,
+      ]);
+      return c.json({
+        today,
+        rows: buildFocusRows({ ids, agg: aggRows[0], named, setAxis, cooc, coocAxis }),
+      });
     }
 
     // ---- default: every tag as one row, 開始日順 — the whole 年表. Archived

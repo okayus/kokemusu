@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { MAX_TAGS_PER_POST, normalizeTagName, parseTagNames, parseTagsParam } from "./tag";
+import {
+  MAX_TAGS_PER_POST,
+  normalizeTagName,
+  parseFocusParam,
+  parseTagNames,
+  parseTagsParam,
+} from "./tag";
 
 describe("normalizeTagName", () => {
   it("trims, NFKC-folds and lowercases", () => {
@@ -74,5 +80,24 @@ describe("parseTagsParam", () => {
     const ids = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`).join(",");
     expect(parseTagsParam(ids(MAX_TAGS_PER_POST))).toHaveLength(MAX_TAGS_PER_POST);
     expect(parseTagsParam(ids(MAX_TAGS_PER_POST + 1))).toBeNull();
+  });
+});
+
+describe("parseFocusParam — the timeline's 選んだ石, the same list from 1 id", () => {
+  it("takes one stone (the everyday axis) or a list in request order", () => {
+    expect(parseFocusParam("a")).toEqual(["a"]);
+    expect(parseFocusParam("b,a")).toEqual(["b", "a"]);
+    expect(parseFocusParam(" b , a ")).toEqual(["b", "a"]);
+    expect(parseFocusParam("a,a,b")).toEqual(["a", "b"]);
+  });
+
+  it("rejects the same shapes as ?tags= — empty segments, overlong ids, more than a 苔片 can carry", () => {
+    expect(parseFocusParam("")).toBeNull();
+    expect(parseFocusParam("a,,b")).toBeNull();
+    expect(parseFocusParam("a,b,")).toBeNull();
+    expect(parseFocusParam("x".repeat(65))).toBeNull();
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`).join(",");
+    expect(parseFocusParam(ids(MAX_TAGS_PER_POST))).toHaveLength(MAX_TAGS_PER_POST);
+    expect(parseFocusParam(ids(MAX_TAGS_PER_POST + 1))).toBeNull();
   });
 });

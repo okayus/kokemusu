@@ -43,15 +43,33 @@ export function parseTagNames(raws: string[]): TagInput[] {
 export const MAX_TAGS_PER_POST = 20;
 
 /**
+ * The comma-separated id list both wire params share: trimmed, deduped, in
+ * request order, capped at MAX_TAGS_PER_POST; null on an empty segment, an
+ * overlong id, or fewer than `atLeast` unique ids.
+ */
+function parseIdList(raw: string, atLeast: number): string[] | null {
+  const parts = raw.split(",").map((s) => s.trim());
+  if (parts.some((p) => p.length === 0 || p.length > 64)) return null;
+  const ids = [...new Set(parts)];
+  if (ids.length < atLeast || ids.length > MAX_TAGS_PER_POST) return null;
+  return ids;
+}
+
+/**
  * `?tags=` parsed into 2..MAX_TAGS_PER_POST unique ids in request order, or
  * null for a shape the routes answer 400 to: an empty segment, an overlong id,
  * or a set that isn't a combination (fewer than 2 after dedupe — one tag is
  * each route's single-tag form's job).
  */
 export function parseTagsParam(raw: string): string[] | null {
-  const parts = raw.split(",").map((s) => s.trim());
-  if (parts.some((p) => p.length === 0 || p.length > 64)) return null;
-  const ids = [...new Set(parts)];
-  if (ids.length < 2 || ids.length > MAX_TAGS_PER_POST) return null;
-  return ids;
+  return parseIdList(raw, 2);
+}
+
+/**
+ * The timeline's `?focus=` — 選んだ石 (docs/plans/tabs-and-stones.md): the same
+ * list as `?tags=` but from 1 id, since one stone is the 年表's everyday axis
+ * and the graph adds stones to it one tap at a time.
+ */
+export function parseFocusParam(raw: string): string[] | null {
+  return parseIdList(raw, 1);
 }

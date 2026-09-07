@@ -179,8 +179,10 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
   `MIN(first_day)` / `MAX(last_day)` / `COUNT(*)`（[visualization.md](visualization.md) §8）。
   - **組み合わせ行（タグ集合 AND、n ≧ 2）**: `pt.tag_id IN (:t1 … :tn)` で引き、post ごとに
     `HAVING COUNT(DISTINCT pt.tag_id) = n` で「全部付いた苔片」に絞り、外側で MIN/MAX/COUNT。
-  - **フォーカス（1 タグで絞った共起タグ別の内訳）**: 共起クエリと同じ自己 JOIN を
-    `a.tag_id = :focus` で絞って `b.tag_id` で GROUP BY し、各共起タグの MIN/MAX/COUNT を一括で取る。
+  - **フォーカス（選んだ石の集合 S で絞った共起タグ別の内訳、n ≧ 1。2026-09-07 に 1 タグから集合へ —
+    [plans/tabs-and-stones.md](plans/tabs-and-stones.md)）**: 組み合わせ行と同じ `HAVING COUNT(DISTINCT pt.tag_id) = n` で
+    「S が全部付いた苔片」を引き、S 自身の行はその苔片の MIN/MAX/COUNT、共起の行はその苔片の `pt.tag_id NOT IN S` を
+    `tag_id` で GROUP BY した各タグの MIN/MAX/COUNT（5 文を 1 batch）。n = 1 は #30 以来の 1 タグのフォーカスと同じ結果。
   - **活動月（月セグメント棒）**: 同じ JOIN から `first_day` / `last_day` を取り、コアで最初の月〜最後の月を列挙して
     各月に +1（続く苔片は触れる各月に 1 → **`months` の和は `count` 以上**。単日だけなら等しい）。
     span の集計と同じ batch（＝同じスナップショット）で読む。

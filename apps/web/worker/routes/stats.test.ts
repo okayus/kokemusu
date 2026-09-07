@@ -5,6 +5,7 @@ import { app } from "../index";
 import { testEnv } from "../test-support";
 import {
   MAX_WINDOW_DAYS,
+  buildFocusRows,
   buildGraph,
   buildHeatmap,
   heatmapTotals,
@@ -240,9 +241,10 @@ describe("heatmapTotals — the window's 苔片 by 向き, per 苔片 like `tota
 });
 
 describe("timelineQuerySchema — the three forms and nothing between", () => {
-  it("accepts each form alone", () => {
+  it("accepts each form alone — focus as one id or a list (選んだ石)", () => {
     expect(timelineQuerySchema.safeParse({}).success).toBe(true);
     expect(timelineQuerySchema.safeParse({ focus: "some-tag-id" }).success).toBe(true);
+    expect(timelineQuerySchema.safeParse({ focus: "a,b" }).success).toBe(true);
     expect(timelineQuerySchema.safeParse({ tags: "a,b" }).success).toBe(true);
   });
 
@@ -252,14 +254,136 @@ describe("timelineQuerySchema — the three forms and nothing between", () => {
 
   it("rejects empty and absurdly long values before any parsing", () => {
     expect(timelineQuerySchema.safeParse({ focus: "" }).success).toBe(false);
-    expect(timelineQuerySchema.safeParse({ focus: "x".repeat(65) }).success).toBe(false);
+    expect(timelineQuerySchema.safeParse({ focus: "a,".repeat(700) + "b" }).success).toBe(false);
     expect(timelineQuerySchema.safeParse({ tags: "" }).success).toBe(false);
     expect(timelineQuerySchema.safeParse({ tags: "a,".repeat(700) + "b" }).success).toBe(false);
   });
+
+  it("leaves the shape of the ids to core — an overlong id passes the gate and fails the parser", () => {
+    // Same split as ?tags=: the schema caps the whole string, parseFocusParam
+    // (core/tag.test.ts) rejects the segment, and the route answers 400 either way.
+    expect(timelineQuerySchema.safeParse({ focus: "x".repeat(65) }).success).toBe(true);
+  });
 });
 
-// parseTagsParam's tests live in core/tag.test.ts — the `?tags=` wire 規約
-// moved to core when posts' filter started sharing it (2026-09-03).
+// parseTagsParam's and parseFocusParam's tests live in core/tag.test.ts — the
+// `?tags=` wire 規約 moved to core when posts' filter started sharing it
+// (2026-09-03), and `?focus=` took the same list on 2026-09-07.
+
+describe("buildFocusRows — 選んだ石 as one row, then set × each co-occurring stone", () => {
+  const raw = (id: string, first: string, last: string, count: number) => ({
+    id,
+    name: id.toUpperCase(),
+    norm: id,
+    first,
+    last,
+    count,
+  });
+  const named = (...ids: string[]) => ids.map((id) => ({ id, name: id.toUpperCase() }));
+
+  it("draws the #30 one-stone form: the stone, then stone × co-occurring stones in 年表 order", () => {
+    const rows = buildFocusRows({
+      ids: ["ts"],
+      agg: { first: "2026-09-01", last: "2026-09-05", count: 3 },
+      named: named("ts"),
+      setAxis: [
+        { firstDay: "2026-09-01", lastDay: "2026-09-01" },
+        { firstDay: "2026-09-03", lastDay: "2026-09-03" },
+        { firstDay: "2026-09-05", lastDay: "2026-09-05" },
+      ],
+      // Handed back in whatever order SQLite grouped them; the fold sorts.
+      cooc: [raw("hono", "2026-09-05", "2026-09-05", 1), raw("d1", "2026-09-03", "2026-09-05", 2)],
+      coocAxis: [
+        { tagId: "d1", firstDay: "2026-09-03", lastDay: "2026-09-03" },
+        { tagId: "d1", firstDay: "2026-09-05", lastDay: "2026-09-05" },
+        { tagId: "hono", firstDay: "2026-09-05", lastDay: "2026-09-05" },
+      ],
+    });
+    expect(rows).toEqual([
+      {
+        tags: [{ id: "ts", name: "TS" }],
+        firstDay: "2026-09-01",
+        lastDay: "2026-09-05",
+        count: 3,
+        months: [{ month: "2026-09", count: 3 }],
+      },
+      {
+        tags: [
+          { id: "ts", name: "TS" },
+          { id: "d1", name: "D1" },
+        ],
+        firstDay: "2026-09-03",
+        lastDay: "2026-09-05",
+        count: 2,
+        months: [{ month: "2026-09", count: 2 }],
+      },
+      {
+        tags: [
+          { id: "ts", name: "TS" },
+          { id: "hono", name: "HONO" },
+        ],
+        firstDay: "2026-09-05",
+        lastDay: "2026-09-05",
+        count: 1,
+        months: [{ month: "2026-09", count: 1 }],
+      },
+    ]);
+  });
+
+  it("keeps the set in request order on every row, whatever order the names came back", () => {
+    const rows = buildFocusRows({
+      ids: ["vue", "案件"],
+      agg: { first: "2026-01-10", last: "2026-03-20", count: 12 },
+      named: named("案件", "vue"),
+      setAxis: [{ firstDay: "2026-01-10", lastDay: "2026-03-20" }],
+      cooc: [raw("hono", "2026-02-01", "2026-02-28", 5)],
+      coocAxis: [{ tagId: "hono", firstDay: "2026-02-01", lastDay: "2026-02-28" }],
+    });
+    expect(rows.map((r) => r.tags.map((t) => t.id))).toEqual([
+      ["vue", "案件"],
+      ["vue", "案件", "hono"],
+    ]);
+    // A 続く苔片 across three months: the set row's months add up to more than its count (ADR-0005).
+    expect(rows[0]?.months).toEqual([
+      { month: "2026-01", count: 1 },
+      { month: "2026-02", count: 1 },
+      { month: "2026-03", count: 1 },
+    ]);
+  });
+
+  it("is just the set row when nothing else grows on those 苔片", () => {
+    const rows = buildFocusRows({
+      ids: ["a", "b"],
+      agg: { first: "2026-09-02", last: "2026-09-02", count: 1 },
+      named: named("a", "b"),
+      setAxis: [{ firstDay: "2026-09-02", lastDay: "2026-09-02" }],
+      cooc: [],
+      coocAxis: [],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.tags.map((t) => t.id)).toEqual(["a", "b"]);
+  });
+
+  it("is empty, not an error, when no 苔片 carries the whole set or an id names no stone", () => {
+    const base = {
+      named: named("a", "b"),
+      setAxis: [],
+      cooc: [],
+      coocAxis: [],
+    };
+    // COUNT over no rows — SQLite still returns one aggregate row, all null but the 0.
+    expect(buildFocusRows({ ids: ["a", "b"], agg: { first: null, last: null, count: 0 }, ...base })).toEqual([]);
+    expect(buildFocusRows({ ids: ["a", "b"], agg: undefined, ...base })).toEqual([]);
+    // A foreign or dead id: nothing can carry it, and its name is not the user's to echo.
+    expect(
+      buildFocusRows({
+        ids: ["a", "ghost"],
+        agg: { first: "2026-09-02", last: "2026-09-02", count: 1 },
+        ...base,
+      }),
+    ).toEqual([]);
+  });
+});
 
 describe("buildTagSpans", () => {
   const raw = (id: string, norm: string, first: string | null, last: string | null, count = 1) => ({
