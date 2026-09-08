@@ -115,6 +115,7 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 | first_day | text | **積み上がる最初の「日」**（`YYYY-MM-DD`、日本時間）。**平文メタデータ ＝ 可視化・絞り込み・並びの軸**（[ADR-0005](adr/0005-post-axis-is-day-range.md)）。いま積んだ苔片は `dayKey(created_at)`、過去に積む苔片はリクエストの日 |
 | last_day | text | **最後の「日」**。単日は `first_day` と同じ値（NULL にしない ＝ COALESCE 不要）。`first_day ≤ last_day ≤ 今日`。続く苔片（[CONTEXT.md](../CONTEXT.md)）は `first_day < last_day` |
 | kind | text? | **向き**（[CONTEXT.md](../CONTEXT.md)）: `input` / `output` / `both`。null ＝ 未分類（既存行・付けなかった苔片）。平文メタデータ（総草の色相） |
+| thickness | integer? | **厚み**（[CONTEXT.md](../CONTEXT.md)、[ADR-0007](adr/0007-spanning-post-amount-is-days-times-thickness.md)、未実装 — `0006`）: 続く苔片の 1〜100（%）。null ＝ 厚みなし ＝ 量 1（既存行・振り返りの 1 枚）。単日は常に null。平文メタデータ。量 ＝ 日数 × 厚み は読むときに出し、保存しない |
 | created_at | integer | epoch ms。**投稿した瞬間**（他テーブルと同じ意味）。時刻を持つ唯一の列で、§5 の時間帯分布の出どころ。画面が時刻を出すのは `first_day = last_day = dayKey(created_at)` の苔片だけ |
 | updated_at | integer | |
 
@@ -172,11 +173,12 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 
 - **総草 日次ヒートマップ**（ヒートマップはタグで分けない、[visualization.md](visualization.md) §1）:
   `post` を窓との重なりで絞って `first_day` / `last_day` / `kind` を取り（JOIN 不要＝タグ無しの苔片も入る）、
-  コアの純粋関数で窓との交差の各日に +1（続く苔片は在った各日に数える）。日ごとに 入（`input` + `both`）と
+  コアの純粋関数で窓との交差の各日に +1（続く苔片は在った各日に数える。厚みは読まない — ADR-0007）。日ごとに 入（`input` + `both`）と
   出（`output` + `both`）も数えて色相にする。「計 N 片」は窓に重なる苔片の数（マスの合計ではない）。
   読み時の TZ 変換は無い（SQLite の `date()` / `strftime()` は UTC 基準 —— そもそも日は書く側でしか切らない）。
 - **タグのタイムライン（打ち込み期間）**: `post_tags` JOIN `post` を `tag_id` で GROUP BY し
   `MIN(first_day)` / `MAX(last_day)` / `COUNT(*)`（[visualization.md](visualization.md) §8）。
+  厚み（ADR-0007、未実装）が入れば行に量の和も持つ（`first_day` / `last_day` / `thickness` を取って core で 日数 × 厚み。枚数は残す）。
   - **組み合わせ行（タグ集合 AND、n ≧ 2）**: `pt.tag_id IN (:t1 … :tn)` で引き、post ごとに
     `HAVING COUNT(DISTINCT pt.tag_id) = n` で「全部付いた苔片」に絞り、外側で MIN/MAX/COUNT。
   - **フォーカス（選んだ石の集合 S で絞った共起タグ別の内訳、n ≧ 1。2026-09-07 に 1 タグから集合へ —
@@ -184,13 +186,13 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
     「S が全部付いた苔片」を引き、S 自身の行はその苔片の MIN/MAX/COUNT、共起の行はその苔片の `pt.tag_id NOT IN S` を
     `tag_id` で GROUP BY した各タグの MIN/MAX/COUNT（5 文を 1 batch）。n = 1 は #30 以来の 1 タグのフォーカスと同じ結果。
   - **活動月（月セグメント棒）**: 同じ JOIN から `first_day` / `last_day` を取り、コアで最初の月〜最後の月を列挙して
-    各月に +1（続く苔片は触れる各月に 1 → **`months` の和は `count` 以上**。単日だけなら等しい）。
+    各月に +1（続く苔片は触れる各月に 1 → **`months` の和は `count` 以上**。単日だけなら等しい）。厚みが入れば各月 その月に重なる日数 × 厚み（和は量以上）。
     span の集計と同じ batch（＝同じスナップショット）で読む。
 - **累積（積み上げ）**: 上記を日付昇順で累積和。
 - **ストリーク**: タグ別に投稿のある日付集合を取り、連続日数を計算（純粋関数でやる）。
 - **内訳**: 期間内のタグ別件数。向きの比率（吸う／出す）も同じ材料。
 - **時間帯/曜日分布**: `created_at`（投稿した瞬間 —— 時刻を持つ唯一の列）から hour / weekday を取り集計。
-- **タグ共起（タグ関係グラフ）**: `post_tags a JOIN post_tags b ON a.post_id = b.post_id AND a.tag_id < b.tag_id` を `(a.tag_id, b.tag_id)` で GROUP BY → 共起回数＝エッジの重み。ノードの大きさはタグ別件数（続く苔片も 1）。期間は重なりで絞る（`last_day >= 期間の初日`。去年始まって今年まで続く苔片は「今年」に入る — [visualization.md](visualization.md) §6）。
+- **タグ共起（タグ関係グラフ）**: `post_tags a JOIN post_tags b ON a.post_id = b.post_id AND a.tag_id < b.tag_id` を `(a.tag_id, b.tag_id)` で GROUP BY → 共起回数＝エッジの重み。ノードの大きさはタグ別件数（続く苔片も 1）→ 2026-09-09 からは量の和（ADR-0007、未実装）: `(tag_id, first_day, last_day, thickness)` を取って core で足し、期間は重なった日数でクリップ。橋も同じ。期間は重なりで絞る（`last_day >= 期間の初日`。去年始まって今年まで続く苔片は「今年」に入る — [visualization.md](visualization.md) §6）。
 
 > パフォーマンス: 1ユーザーの個人日記規模なら素朴な集計で十分。必要になったら日次集計テーブル（マテビュー的な `daily_tag_count`）を足す。
 
@@ -202,7 +204,7 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 `attachment`（Phase 4）は**葉テーブルなので後から追加しても既存テーブルを再構築しない** ＝ 必要になってから足す。
 逆に **`user` / `post` / `tag` は CASCADE の親**なので、NOT NULL にしたい列は `0001` で決めきる（後から NOT NULL 列を
 足す・型を変える・rename するとテーブル再構築 → 子行が消える。`cloudflare-d1-drizzle-migration`）。
-NULLABLE 列の追加は安全。**列の drop も安全** ── SQLite は再構築せずその場で落とす（索引付きの列は落とせないので
+NULLABLE 列の追加は安全（`0006` が `post.thickness` をそう足す予定 — ADR-0007）。**列の drop も安全** ── SQLite は再構築せずその場で落とす（索引付きの列は落とせないので
 `DROP INDEX` が先）。`0003` が `post.deleted_at` をそう消し、`post_tags` の行は 1 行も減っていない。
 
 ✅ **`0004_post_day_axis.sql`（A1、2026-09-06 merge #43 で本番 D1 に適用）＝ `post` の唯一の再構築**（[ADR-0005](adr/0005-post-axis-is-day-range.md)）:

@@ -34,6 +34,8 @@
   [features.md](features.md) §3、[visualization.md](visualization.md) §6 / §8、[CONTEXT.md](../CONTEXT.md)。API は #52、UI は同日の後続 PR）。
 - **過去に積む・続く苔片・向き**（2026-09-06 決定、[ADR-0005](adr/0005-post-axis-is-day-range.md)。順番は
   A1 軸を「日」に ✅ #43 → B 向き ✅ #46 → A2 過去に積む・続く苔片 ✅ #47。計画は完了したので plans から削除、経緯は log）。
+- **厚み**（2026-09-09 決定、[ADR-0007](adr/0007-spanning-post-amount-is-days-times-thickness.md)。続く苔片の量 ＝ 日数 × 厚み。
+  PR 1 列 ＋ API ＋ core → PR 2 集計 → PR 3 UI、[plans/thickness.md](plans/thickness.md)。エクスポートより先）。
 - 累積（積み上げ）グラフ、ストリーク、内訳・時間帯分布。
 - タグ運用（リネーム・統合・別名・アーカイブ・色/絵文字）。
 - 振り返りサマリー（週/月）。
@@ -85,6 +87,10 @@
 11. ~~**インプット／アウトプットの持ち方**~~ → ✅ **タグではなく `post.kind` 列（`input` / `output` / `both`、null ＝ 未分類）。
     総草は濃さ ＝ 件数のまま、色相 ＝ 向き（青緑／赤茶／緑）**（2026-09-06、[CONTEXT.md](../CONTEXT.md)「向き」）。組み込みタグに
     すると §6 の石のつながりが 2 つの巨大な石に潰れ、§1「タグで分けない」にも抵触する。
+12. ~~**続く苔片の量（期間で積むと 1 回分にしかならない）**~~ → ✅ **続く苔片に任意の「厚み」（期間のうち打ち込んでいた日の割合、1〜100%）を
+    持たせ、量 ＝ 日数 × 厚み。無ければ ADR-0005 のまま 1 片。石・橋・年表・累積が量を読み、総草と「計 N 片」は枚数のまま。期間はクリップ**
+    （2026-09-09、[ADR-0007](adr/0007-spanning-post-amount-is-days-times-thickness.md)）。用語は [CONTEXT.md](../CONTEXT.md)「厚み」「量」。
+    実装は [plans/thickness.md](plans/thickness.md)。
 
 ## 次のアクション
 
