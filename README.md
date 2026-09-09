@@ -33,6 +33,7 @@
 | [docs/tech-stack.md](docs/tech-stack.md) | 技術選定とデプロイ方式 |
 | [docs/dev-environment.md](docs/dev-environment.md) | 開発サンドボックス・GitHub token 注入・Workers Builds キーレスデプロイ・デプロイ骨格 |
 | [docs/data-model.md](docs/data-model.md) | データモデル |
+| [docs/senders.md](docs/senders.md) | 送り側（別アプリ・CLI・エージェント）が読む API 投稿の契約。`docs/senders/posts.schema.json` はコードから生成 |
 | [docs/roadmap.md](docs/roadmap.md) | ロードマップ（MVP → 拡張） |
 | [docs/status.md](docs/status.md) | **いま**のハブ（40 行上限。次の 3 手・詰まり・進行中 PR。セッション開始時に自動注入） |
 | [docs/log.md](docs/log.md) | 節目のログ（追記専用・新しい順・1 行 1 節目） |

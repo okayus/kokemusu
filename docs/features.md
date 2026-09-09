@@ -152,6 +152,7 @@
 - ルート: `POST /api/posts`（スコープ `post:write`）。body は UI の投稿と同じ形（`body`・`tags`。2026-09-06 からは任意の
   `firstDay` / `lastDay` / `kind` も —— 送り側は「昨日の分」を昨日に積め、向きを付けられる。受け側は検証するだけ）。送り側固有のフィールドは持たず、
   **知らないキーは 400**（`title` は 2026-09-06 に消えた — [ADR-0006](adr/0006-no-post-title.md)。黙って捨てると送り側が気づけない）。
+  **送り側が読む契約は [senders.md](senders.md)**（＋ 生成物 `senders/posts.schema.json`、[ADR-0008](adr/0008-sender-contract-is-published-by-the-receiver.md)）。この節は設計の説明で、上限や鍵の正は生成物。
   スモークテスト用に `GET /api/auth/me` も PAT で読める（whoami。返るのは id と表示名だけ）。**それ以外の route に PAT は届かない**
   （タイムライン閲覧・stats・tags は `403 session_required` —— post:write のトークンが漏れても日記は読めない）。
 - セッション（Cookie）でも PAT でも同じ route が通る。認証ミドルウェアは PAT を Cookie より先に判定し、Bearer 付きリクエストは CSRF の Origin チェックを免除（Cookie という ambient credential が無いので偽造できない）。
