@@ -3,7 +3,14 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { decodeCursor, encodeCursor } from "../core/cursor";
 import { decryptBody, encryptBody, importBodyKey } from "../core/crypto";
-import { canStackOn, dayKey, isDayKey, type DayKey } from "../core/day";
+import { dayKey, isDayKey, type DayKey } from "../core/day";
+import {
+  decodeStacking,
+  encodeStacking,
+  parseStacking,
+  patchStacking,
+  thicknessSchema,
+} from "../core/stacking";
 import { POST_KINDS, type PostKind } from "../core/kind";
 import { MAX_TAGS_PER_POST, normalizeTagName, parseTagNames, parseTagsParam } from "../core/tag";
 import { createDb, type Db } from "../db";
@@ -38,13 +45,19 @@ export const createPostSchema = z.strictObject({
   kind: z.enum(POST_KINDS).nullable().optional(),
   // The days to stack on (ADR-0005, features.md §1): calendar days here, the
   // order and the bounds in the handler, which knows today — `firstDay ≤
-  // lastDay ≤ today`, no earlier than core's floor (canStackOn); a 400 for
+  // lastDay ≤ today`, no earlier than core's floor (parseStacking); a 400 for
   // anything else. On POST an omitted `firstDay` is today and an omitted
   // `lastDay` is `firstDay`; on PATCH an omitted half keeps the row's own
   // day (an edit that says nothing about the days moves nothing — the way
   // to lengthen a 続く苔片 is a PATCH naming its new `lastDay`).
   firstDay: z.string().refine(isDayKey, "must be a YYYY-MM-DD calendar day").optional(),
   lastDay: z.string().refine(isDayKey, "must be a YYYY-MM-DD calendar day").optional(),
+  // 厚み (ADR-0007): a whole 1..100, null, or nothing — zod holds the shape and
+  // the range. What it MEANS with the days is core's (parseStacking): a range
+  // must carry one and a single day must not, else 400; on PATCH absent keeps
+  // the row's, null says none (with the days that make it a single day), a
+  // number replaces it (patchStacking).
+  thickness: thicknessSchema.nullable().optional(),
 });
 
 // The two tag filter forms: `?tag=` = one tag by (normalized) name —
@@ -109,6 +122,8 @@ type PostItem = {
   /** First and last 「日」 this 苔片 was there (ADR-0005) — `YYYY-MM-DD` in APP_TZ, equal for a single day. */
   firstDay: DayKey;
   lastDay: DayKey;
+  /** 厚み of a 続く苔片, a whole 1..100 (ADR-0007); null ⇔ a single day — the row's own shape. */
+  thickness: number | null;
   /** The day it was written on, `dayKey(createdAt)`. 「いま積んだ」 = all three days equal; the client only compares. */
   postedDay: DayKey;
   /** 向き (core/kind.ts); null = 未分類. */
@@ -202,13 +217,15 @@ export const postRoutes = new Hono<Env>()
     const now = Date.now();
     // The one place the zone enters (core/day.ts): today's 「日」 is where a
     // 苔片 lands when the body names no day, and the ceiling for one that does
-    // — a past day, or a range that makes it a 続く苔片 (ADR-0005). The days
-    // are checked against today AFTER the schema, since only this handler
-    // knows today; a failed check is the same 400 as a malformed body.
+    // — a past day, or a range that makes it a 続く苔片 (ADR-0005). The days and
+    // the 厚み are READ into a Stacking after the schema (core/stacking.ts —
+    // only this handler knows today), and a body naming nothing the type has
+    // a case for — a range without a 厚み, a single day with one, a day that
+    // has not come — is the same 400 as a malformed one (ADR-0007).
     const today = dayKey(now);
-    const firstDay = parsed.data.firstDay ?? today;
-    const lastDay = parsed.data.lastDay ?? firstDay;
-    if (!canStackOn({ firstDay, lastDay }, today)) return fail(c, "validation_error");
+    const stacking = parseStacking(parsed.data, today);
+    if (stacking === null) return fail(c, "validation_error");
+    const days = encodeStacking(stacking);
     const kind = parsed.data.kind ?? null;
     const { newTags, resolved } = await resolveTagRows(db, userId, wanted, now);
 
@@ -219,8 +236,7 @@ export const postRoutes = new Hono<Env>()
       userId,
       body: await encryptBody(parsed.data.body, key),
       bodyFormat: "markdown",
-      firstDay,
-      lastDay,
+      ...days,
       kind,
       createdAt: now,
       updatedAt: now,
@@ -244,8 +260,7 @@ export const postRoutes = new Hono<Env>()
       bodyFormat: row.bodyFormat ?? "markdown",
       createdAt: now,
       updatedAt: now,
-      firstDay,
-      lastDay,
+      ...days,
       postedDay: today,
       kind,
       tags: resolved,
@@ -339,6 +354,7 @@ export const postRoutes = new Hono<Env>()
         bodyFormat: post.bodyFormat,
         firstDay: post.firstDay,
         lastDay: post.lastDay,
+        thickness: post.thickness,
         kind: post.kind,
         createdAt: post.createdAt,
         updatedAt: post.updatedAt,
@@ -366,6 +382,8 @@ export const postRoutes = new Hono<Env>()
 
     // A decrypt failure (wrong BODY_KEY generation, tampered row) throws and
     // becomes a bare 500 in app.onError — fail closed, never a partial page.
+    // The days go out the same way: read as a Stacking and written back, so a
+    // row the CHECKs would have refused (decodeStacking) fails the page too.
     const posts: PostItem[] = await Promise.all(
       page.map(async (r) => ({
         id: r.id,
@@ -373,8 +391,7 @@ export const postRoutes = new Hono<Env>()
         bodyFormat: r.bodyFormat,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
-        firstDay: r.firstDay,
-        lastDay: r.lastDay,
+        ...encodeStacking(decodeStacking(r)),
         postedDay: dayKey(r.createdAt),
         kind: r.kind,
         tags: tagsByPost.get(r.id) ?? [],
@@ -423,6 +440,7 @@ export const postRoutes = new Hono<Env>()
           bodyFormat: post.bodyFormat,
           firstDay: post.firstDay,
           lastDay: post.lastDay,
+          thickness: post.thickness,
           createdAt: post.createdAt,
         })
         .from(post)
@@ -432,14 +450,17 @@ export const postRoutes = new Hono<Env>()
     if (!owned) return fail(c, "not_found");
 
     const now = Date.now();
-    // The days: a half the body leaves out keeps the row's own, so an edit
-    // that says nothing about them moves nothing; whatever results is held to
-    // the same rule as a new 苔片 (canStackOn) — this is where a 続く苔片 is
-    // lengthened, and it may not be lengthened past today.
+    // The days and the 厚み (patchStacking): what the body leaves out keeps the
+    // row's own, so an edit that says nothing about them moves nothing, and
+    // the 厚み is three-valued (absent = keep, null = none, a number = replace).
+    // Whatever results is read by the same rule as a new 苔片 — this is where
+    // a 続く苔片 is lengthened, its 厚み riding along, and it may not be
+    // lengthened past today; shortening one to a day while its 厚み stays, or
+    // lengthening a day without saying its 厚み, is the same 400 (ADR-0007).
     const today = dayKey(now);
-    const firstDay = parsed.data.firstDay ?? owned.firstDay;
-    const lastDay = parsed.data.lastDay ?? owned.lastDay;
-    if (!canStackOn({ firstDay, lastDay }, today)) return fail(c, "validation_error");
+    const stacking = patchStacking(decodeStacking(owned), parsed.data, today);
+    if (stacking === null) return fail(c, "validation_error");
+    const days = encodeStacking(stacking);
     const { newTags, resolved } = await resolveTagRows(db, userId, wanted, now);
 
     // Encrypt at the last moment, like create — plaintext never rides an error.
@@ -453,7 +474,7 @@ export const postRoutes = new Hono<Env>()
     await db.batch([
       db
         .update(post)
-        .set({ body: encryptedBody, firstDay, lastDay, kind, updatedAt: now })
+        .set({ body: encryptedBody, ...days, kind, updatedAt: now })
         .where(eq(post.id, owned.id)),
       ...newTags.map((t) => db.insert(tag).values(t)),
       db.delete(postTags).where(eq(postTags.postId, owned.id)),
@@ -466,8 +487,7 @@ export const postRoutes = new Hono<Env>()
       bodyFormat: owned.bodyFormat,
       createdAt: owned.createdAt,
       updatedAt: now,
-      firstDay,
-      lastDay,
+      ...days,
       // The day it was written on never moves — an edit is not a new 苔片.
       postedDay: dayKey(owned.createdAt),
       kind,

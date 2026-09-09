@@ -37,20 +37,42 @@ describe("daysLabel / postedLabel — the card's words for a 苔片 not stacked 
   });
 });
 
-describe("stackDaysInput — two fields, one wire shape", () => {
-  it("names no days when both are empty", () => {
+describe("stackDaysInput — two fields, one wire shape, the 厚み riding along", () => {
+  it("names no days when both are empty — and so no 厚み either", () => {
     expect(stackDaysInput("", "")).toEqual({});
+    expect(stackDaysInput("", "", 60)).toEqual({});
   });
 
-  it("makes one filled field a single day, whichever it is", () => {
-    expect(stackDaysInput("2026-09-05", "")).toEqual({ firstDay: "2026-09-05", lastDay: "2026-09-05" });
-    expect(stackDaysInput("", "2026-09-05")).toEqual({ firstDay: "2026-09-05", lastDay: "2026-09-05" });
+  it("makes one filled field a single day, whichever it is, with no 厚み (null)", () => {
+    const single = { firstDay: "2026-09-05", lastDay: "2026-09-05", thickness: null };
+    expect(stackDaysInput("2026-09-05", "")).toEqual(single);
+    expect(stackDaysInput("", "2026-09-05")).toEqual(single);
+    expect(stackDaysInput("2026-09-05", "2026-09-05")).toEqual(single);
   });
 
-  it("passes a range through", () => {
+  it("sends a range with the 苔片's own 厚み, or 毎日 (100) for one that has none yet", () => {
     expect(stackDaysInput("2026-09-05", "2026-09-06")).toEqual({
       firstDay: "2026-09-05",
       lastDay: "2026-09-06",
+      thickness: 100,
+    });
+    expect(stackDaysInput("2026-09-05", "2026-09-06", null)).toEqual({
+      firstDay: "2026-09-05",
+      lastDay: "2026-09-06",
+      thickness: 100,
+    });
+    expect(stackDaysInput("2026-09-05", "2026-09-06", 60)).toEqual({
+      firstDay: "2026-09-05",
+      lastDay: "2026-09-06",
+      thickness: 60,
+    });
+  });
+
+  it("drops the 厚み when a 続く苔片 is shortened to one day", () => {
+    expect(stackDaysInput("2026-09-06", "2026-09-06", 60)).toEqual({
+      firstDay: "2026-09-06",
+      lastDay: "2026-09-06",
+      thickness: null,
     });
   });
 });

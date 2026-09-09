@@ -43,6 +43,13 @@
       "when": 1788691274097,
       "tag": "0005_drop_post_title",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1788917089329,
+      "tag": "0006_post_thickness",
+      "breakpoints": true
     }
   ]
 }

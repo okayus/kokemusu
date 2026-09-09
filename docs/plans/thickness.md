@@ -3,7 +3,7 @@
 決定は [ADR-0007](../adr/0007-spanning-post-amount-is-days-times-thickness.md) と [CONTEXT.md](../../CONTEXT.md)（続く苔片・厚み・量）。
 ここは実装の割り方と落とし穴だけ。完了したらこのファイルは削除（経緯は log）。
 
-## PR 1 — 再構築 ＋ core ＋ API（`claude/thickness-api`。migration を含むので人の merge、auto-merge は arm しない）
+## PR 1 — 再構築 ＋ core ＋ API（`claude/thickness-api`。migration を含むので人の merge、auto-merge は arm しない）— ✅ 実装済み（2026-09-09、人の merge 待ち）
 
 - `worker/db/schema.ts`: `thickness: integer("thickness")` と `check()`（`drizzle-orm/sqlite-core`）3 つ ——
   `post_days_ordered`: `first_day <= last_day`、`post_thickness_iff_span`: `(first_day = last_day) = (thickness IS NULL)`、
@@ -66,7 +66,9 @@
   「60% · 731 日のうち 439 日分」（日を伸ばせば追随）。単日に戻れば欄は消える。
 - `draft.ts` に `thickness: number`（初期 100。範囲でなければ送らない。旧形は 100）。
 - 送信: `stackDaysInput` を `stackingInput(fields)` に —— 範囲なら `{ firstDay, lastDay, thickness }`、単日なら
-  `{ firstDay, lastDay, thickness: null }`（PATCH で縮めるときの null）、空なら `{}`。
+  `{ firstDay, lastDay, thickness: null }`（PATCH で縮めるときの null）、空なら `{}`。**PR 1 のつなぎ**: 画面が壊れないように
+  `stackDaysInput(first, last, current)` が既にこの形を送る（範囲 ＝ `current ?? 100`、単日 ＝ null。積むは 100 固定、編集は
+  `p.thickness`）。PR 3 はこの `100` をスライダーの値に置き換えるだけ。
 - カードの日の並びに「· 厚み 60%」、編集フォームの summary「日: … · 厚み 60%」。
 - 使い捨て spec でライト / ダーク / 390px を目視（memory: kokemusu-visual-check-via-scratch-spec）。docs の「未実装」を ✅ に。
 

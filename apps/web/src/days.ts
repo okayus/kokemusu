@@ -55,13 +55,23 @@ export function postedLabel(postedDay: string, lastDay: string): string {
  * (the server's default: today on 積む, the row's own on 直す); one filled =
  * that single day; both = the range. Never an inverted pair from here — the
  * fields bound each other (`min` / `max`), so the browser refuses one first.
+ *
+ * The 厚み rides with the days (ADR-0007) — a range must declare one and a
+ * single day must have none — so a single day sends null (what shortening a
+ * 続く苔片 to one day needs, and harmless on a day) and a range sends the
+ * 苔片's own (`current`) or, for a new one, 100: 毎日, the value the 厚み
+ * slider will start from once there is one (plans/thickness.md PR 3 — until
+ * then every range stacked from here is 毎日).
  */
 export function stackDaysInput(
   firstField: string,
   lastField: string,
-): { firstDay?: string; lastDay?: string } {
+  current: number | null = null,
+): { firstDay?: string; lastDay?: string; thickness?: number | null } {
   if (firstField === "" && lastField === "") return {};
-  return { firstDay: firstField || lastField, lastDay: lastField || firstField };
+  const firstDay = firstField || lastField;
+  const lastDay = lastField || firstField;
+  return { firstDay, lastDay, thickness: firstDay === lastDay ? null : (current ?? 100) };
 }
 
 /** What the feed orders by: (first_day, created_at, id) DESC — the server's page order (ADR-0005). */

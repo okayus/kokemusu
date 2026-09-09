@@ -28,7 +28,7 @@
   （最初の日 ＝ 最後の日 ＝ 積んだ日）だけ時刻を出し、それ以外は「2025/03/01」「2025/03/01 〜 2026/01/31」に小さく「9/6 に積む」
   （年が違えば「2026/9/6 に積む」）を添える。向きも日も下書きに退避する。API の body は `firstDay` / `lastDay`（省略 ＝ 今日、
   `lastDay` 省略 ＝ `firstDay`）で PAT も同じ。
-- **厚み**（[CONTEXT.md](../CONTEXT.md)、2026-09-09 決定 — [ADR-0007](adr/0007-spanning-post-amount-is-days-times-thickness.md)。未実装 — [plans/thickness.md](plans/thickness.md)）:
+- **厚み**（[CONTEXT.md](../CONTEXT.md)、2026-09-09 決定 — [ADR-0007](adr/0007-spanning-post-amount-is-days-times-thickness.md)。DB ＋ API は ✅ 2026-09-09（`0006` ＋ `worker/core/stacking.ts`）、集計と UI は未実装 — [plans/thickness.md](plans/thickness.md)。それまで画面から積む範囲は 100%（毎日）で送る）:
   続く苔片は「厚み」（期間のうち打ち込んでいた日の割合、1〜100%）を必ず持ち、量 ＝ 日数 × 厚み で石が育ち年表が太る
   （総草は在った各日 +1 のまま）。積む日の欄で「いつ」と「〜いつまで」が違う日になったときだけ、その下にスライダー「厚み」
   （初期値 100、目盛り 毎日 100 / 平日 71 / 仕事 60 / 週 1 14）と換算「60% · 731 日のうち 439 日分」が現れ、単日に戻せば消える。

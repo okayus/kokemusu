@@ -73,6 +73,48 @@ test("PAT: mint → Bearer post lands encrypted → write-only wall → revoke k
   });
   expect(stale.status()).toBe(400);
 
+  // The 厚み (ADR-0007) is read with the days, never defaulted: a single day
+  // carrying one, and a range carrying none (absent or null), each say
+  // something a 苔片 cannot mean and are 400 — bodies read before they are
+  // judged, as above. A range with one is a 続く苔片 that answers with it and
+  // stores it in plaintext next to the days.
+  const thickOnDay = await sender.post("/api/posts", {
+    headers: bearer,
+    data: { body: "単日に厚み", firstDay: yesterday, thickness: 60 },
+  });
+  expect(thickOnDay.status()).toBe(400);
+  const rangeAlone = await sender.post("/api/posts", {
+    headers: bearer,
+    data: { body: "範囲だけ", firstDay: yesterday, lastDay: today },
+  });
+  expect(rangeAlone.status()).toBe(400);
+  const rangeNull = await sender.post("/api/posts", {
+    headers: bearer,
+    data: { body: "範囲に null", firstDay: yesterday, lastDay: today, thickness: null },
+  });
+  expect(rangeNull.status()).toBe(400);
+  const spanned = await sender.post("/api/posts", {
+    headers: bearer,
+    data: { body: "厚み 60 の続く苔片", firstDay: yesterday, lastDay: today, thickness: 60 },
+  });
+  expect(spanned.status()).toBe(201);
+  const spannedItem = (await spanned.json()) as {
+    id: string;
+    firstDay: string;
+    lastDay: string;
+    thickness: number | null;
+  };
+  expect([spannedItem.firstDay, spannedItem.lastDay, spannedItem.thickness]).toEqual([
+    yesterday,
+    today,
+    60,
+  ]);
+  expect(
+    queryRows<{ thickness: number | null }>(
+      `SELECT thickness FROM post WHERE id = '${spannedItem.id}'`,
+    ),
+  ).toEqual([{ thickness: 60 }]);
+
   const created = await sender.post("/api/posts", {
     headers: bearer,
     data: {
@@ -88,10 +130,13 @@ test("PAT: mint → Bearer post lands encrypted → write-only wall → revoke k
     kind: string | null;
     firstDay: string;
     lastDay: string;
+    thickness: number | null;
     postedDay: string;
   };
   const createdId = createdItem.id;
   expect(createdItem.kind).toBe("input");
+  // A single day has no 厚み — null on the wire, exactly the row's shape.
+  expect(createdItem.thickness).toBeNull();
   expect([createdItem.firstDay, createdItem.lastDay, createdItem.postedDay]).toEqual([
     yesterday,
     yesterday,

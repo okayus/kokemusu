@@ -12,10 +12,12 @@
 //     place, so it is subtractive without being a rebuild (drop the index
 //     first: an indexed column cannot be dropped). `migrations.test.ts` is the
 //     guard — it fails on the rebuild markers in any generated file.
-//     The one exception on record is 0004 (ADR-0005): `post` gained its NOT
-//     NULL day axis while the data was small, with `post_tags` stashed in a
-//     plain table across the `DROP TABLE post` and restored after the rename.
-//     The guard exempts that file alone and pins its statement order instead.
+//     The exceptions on record, both while the data was small and both with
+//     `post_tags` stashed in a plain table across the `DROP TABLE post` and
+//     restored after the rename: 0004 (ADR-0005) gave `post` its NOT NULL day
+//     axis, and 0006 (ADR-0007) carved the 厚み CHECKs into it — a CHECK cannot
+//     be added in place either. The guard exempts those two files alone and
+//     pins their statement order instead.
 //  2. Timestamps are epoch ms in a plain `integer` (docs/data-model.md 規約),
 //     not Drizzle's `timestamp_ms` mode: the domain functions (`dayKey`) take
 //     numbers, and the wire format stays JSON-native.
@@ -27,7 +29,8 @@
 // and `title` (the 見出し, retired by ADR-0006) in 0005 the same way — no index
 // covered it, so the one DROP COLUMN was the whole migration.
 
-import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { check, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { POST_KINDS } from "../core/kind";
 
 /** The single user of this instance. Passkey-only, so no password column. */
@@ -128,6 +131,11 @@ export const apiToken = sqliteTable(
  * or span the days it was there (続く苔片, CONTEXT.md). Both are JST calendar
  * days as `YYYY-MM-DD` text, so comparing the strings IS comparing the days and
  * the read side never converts a zone — `dayKey()` runs on the write side only.
+ *
+ * The days are one of two shapes (core/stacking.ts `Stacking`, ADR-0007): a
+ * single day, or a range with a 厚み. The three CHECKs below are that sum type
+ * carved into the table, so no row can be a third thing — NULL `thickness`
+ * means "single day" and nothing else.
  */
 export const post = sqliteTable(
   "post",
@@ -145,6 +153,12 @@ export const post = sqliteTable(
     // class of bug ADR-0003 retired). Writers keep first_day <= last_day <= today.
     firstDay: text("first_day").notNull(),
     lastDay: text("last_day").notNull(),
+    // 厚み (CONTEXT.md, ADR-0007): of a 続く苔片, 1..100 — the share of its days
+    // it was worked on, so its 量 is days × thickness / 100, computed on read
+    // (core/stacking.ts `amountOf`) and never stored. NULL ⇔ `first_day =
+    // last_day` (post_thickness_iff_span below): a single day has no 厚み — it
+    // IS one day at 100% — so the NULL is not a sentinel but the other case.
+    thickness: integer("thickness"),
     // 向き (core/kind.ts): input / output / both. NULL = 未分類 — every row from
     // before 0004, and any 苔片 stacked without one. The enum is TypeScript-only
     // (no CHECK constraint), so widening it later is not a rebuild.
@@ -165,6 +179,15 @@ export const post = sqliteTable(
     // `first_day <= to` half of every period overlap. 0004 replaced
     // post_user_id_created_at_idx with it.
     index("post_user_id_first_day_created_at_idx").on(t.userId, t.firstDay, t.createdAt),
+    // The `Stacking` sum type (core/stacking.ts) as constraints, so the table
+    // itself cannot hold a shape the type has no case for. Changing any of
+    // them is a rebuild (rule 1) — they are meant to be permanent.
+    // 1. A range runs forwards (day keys of 4-digit years order as strings).
+    check("post_days_ordered", sql`${t.firstDay} <= ${t.lastDay}`),
+    // 2. Exactly the ranges carry a 厚み: single day ⇔ NULL.
+    check("post_thickness_iff_span", sql`(${t.firstDay} = ${t.lastDay}) = (${t.thickness} IS NULL)`),
+    // 3. A 厚み is 1..100 (core's branded `Thickness`).
+    check("post_thickness_range", sql`${t.thickness} IS NULL OR ${t.thickness} BETWEEN 1 AND 100`),
   ],
 );
 

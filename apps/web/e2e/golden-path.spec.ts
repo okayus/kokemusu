@@ -15,7 +15,13 @@ type HeatmapWire = {
 };
 
 type PostsWire = {
-  posts: { body: string; firstDay: string; lastDay: string; postedDay: string }[];
+  posts: {
+    body: string;
+    firstDay: string;
+    lastDay: string;
+    thickness: number | null;
+    postedDay: string;
+  }[];
   today: string;
 };
 
@@ -669,12 +675,16 @@ test("register → post → today's moss darkens → reload → logout → login
   const todaysPosts = (await (
     await page.request.get("/api/posts", { params: { from: todayKey, to: todayKey } })
   ).json()) as PostsWire;
+  // A range from the composer carries 厚み 100 (毎日) until the slider lands
+  // (plans/thickness.md PR 3); a single day carries none (ADR-0007).
   expect(todaysPosts.posts.find((p) => p.body === "二日続いた苔片")).toMatchObject({
     body: "二日続いた苔片",
     firstDay: yesterday,
     lastDay: todayKey,
+    thickness: 100,
     postedDay: todayKey,
   });
+  expect(yesterdaysPosts.posts.map((p) => p.thickness)).toEqual([null, null]);
   await periodChip.click();
 
   // An inverted pair never leaves the browser: いつ's max is 〜いつまで, so a
@@ -723,6 +733,14 @@ test("register → post → today's moss darkens → reload → logout → login
     await attempt("POST", "/api/posts", { body: "逆転", firstDay: todayKey, lastDay: yesterday }),
   ).toBe(400);
   expect(await attempt("POST", "/api/posts", { body: "古すぎ", firstDay: "1900-01-01" })).toBe(400);
+  // The 厚み (ADR-0007) through the session, as through a PAT (pat.spec.ts):
+  // a single day may not carry one, a range must.
+  expect(
+    await attempt("POST", "/api/posts", { body: "単日に厚み", firstDay: yesterday, thickness: 60 }),
+  ).toBe(400);
+  expect(
+    await attempt("POST", "/api/posts", { body: "範囲だけ", firstDay: yesterday, lastDay: todayKey }),
+  ).toBe(400);
   const spanRowId = queryRows<{ id: string }>(
     `SELECT id FROM post WHERE first_day = '${yesterday}' AND last_day = '${todayKey}'`,
   )[0]?.id;
@@ -737,10 +755,23 @@ test("register → post → today's moss darkens → reload → logout → login
       lastDay: yesterday,
     }),
   ).toBe(400);
+  // An edit keeps the 厚み it does not mention: shortening the 続く苔片 to one
+  // day without saying `thickness: null` leaves a day with a 厚み (400), and
+  // taking the 厚み off the range alone leaves a range without one (400).
+  expect(
+    await attempt("PATCH", `/api/posts/${spanRowId ?? ""}`, {
+      body: "縮める",
+      firstDay: todayKey,
+      lastDay: todayKey,
+    }),
+  ).toBe(400);
+  expect(
+    await attempt("PATCH", `/api/posts/${spanRowId ?? ""}`, { body: "厚みだけ外す", thickness: null }),
+  ).toBe(400);
   expect(queryRows<{ c: number }>("SELECT COUNT(*) AS c FROM post")[0]?.c).toBe(7);
   expect(
-    queryRows<{ first_day: string; last_day: string }>(
-      `SELECT first_day, last_day FROM post WHERE id = '${spanRowId ?? ""}'`,
+    queryRows<{ first_day: string; last_day: string; thickness: number | null }>(
+      `SELECT first_day, last_day, thickness FROM post WHERE id = '${spanRowId ?? ""}'`,
     ),
-  ).toEqual([{ first_day: yesterday, last_day: todayKey }]);
+  ).toEqual([{ first_day: yesterday, last_day: todayKey, thickness: 100 }]);
 });
