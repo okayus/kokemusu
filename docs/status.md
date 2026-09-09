@@ -6,20 +6,21 @@
 
 ## フェーズ
 
-**Phase 2 — 可視化の柱 3 本 ＋ 書く面のダイアログ化（#41）＋ 軸を「日」に（#43）＋ 向き（#46）＋ 過去に積む・続く苔片（#47）＋ 右下の丸い「積む」（#48）＋ 見出し廃止（#49、ADR-0006）＋ タグ欄のチップ ＋ 候補（#50）まで本番稼働、実データ目視も済み。** 回帰検知は `pnpm e2e`（4 spec）、目視は使い捨て spec。
+**Phase 2 — 可視化の柱 3 本 ＋ 書く面（#41〜#51）＋ 見かた 2 つと選んだ石（#52 #53）まで本番稼働（#51〜#53 の実データ目視は残）。** 次は「厚み」（ADR-0007、`docs/plans/thickness.md`）。回帰検知は `pnpm e2e`（4 spec）、目視は使い捨て spec。
 
 ## 次の 3 手
 
-1. **エクスポート**（#41 の比較表の推し。`main` から `claude/export`）: まず `grill-with-docs` で 形式（JSON / Markdown / 両方）・範囲（全期間 / `from`〜`to`）・出し方（ブラウザでダウンロード / R2 / PR）・復号の扱い（本文を復号して出す ＝ セッションのみ、PAT 不可）・ADR-0003 の「誤削除の受け皿」としての位置づけ を決めて ADR に落とす → その後に実装（route は session-only ＋ `no-store`、UI は設定パネルのボタン）。
-2. **skill 書き戻し**（log #32〜#50 の罠。0004 の drizzle-kit と 0005 のガード誤爆は `cloudflare-d1-drizzle-migration`、使い捨て spec の seed 束ね・zz spec の巻き込み・React SSR の属性順と属性名・`getByText` の strict・blur でレイアウトが動くとクリックが消える は `playwright-e2e-in-docker-sandbox` / `cloudflare-workers-e2e-playwright` へ）。
-3. **累積グラフ**（visualization.md の残り）→ `Idempotency-Key`（mazuoboeru の二重投稿を観測してから、ADR-0002）。
+1. **厚み PR 1**（#54 の merge 後、`main` から `claude/thickness-api`。plans/thickness.md の PR 1）: `schema.ts` に `thickness` ＋ `check()` 3 つ → `0006` は 0004 の recipe で**手書き**の再構築（post_tags 退避・backfill 100・PRAGMA 無し）→ guard の免除 2 本目 → e2e sqlite の写しでリハーサル → `core/stacking.ts`（直和 ＋ parse / decode / encode / amountOf）→ routes ＋ 法則のテスト。migration を含むので人の merge。
+2. **厚み PR 2 集計 → PR 3 UI**（plans/thickness.md）。その後 **エクスポート**（`grill-with-docs` で 形式・範囲・出し方・復号・ADR-0003 の受け皿 を決めて ADR → 実装）。
+3. **skill 書き戻し**（log #32〜#50 の罠 → `cloudflare-d1-drizzle-migration` / `playwright-e2e-in-docker-sandbox` / `cloudflare-workers-e2e-playwright`）→ 累積グラフ → `Idempotency-Key`。
 
 ## 詰まり・人手待ち
 
-- **本番 `0005` の事後確認（ホスト）**: `SELECT COUNT(*) FROM post` が merge 前と同じ、`SELECT name FROM pragma_table_info('post')` に `title` が無い。ローカルは `pnpm dev` の前に `pnpm db:migrate`。
-- **mazuoboeru が `title` を送っていたら外す**（別リポ。ADR-0006 で知らないキーは 400 = 日次 push が落ちる。題が要るなら本文の 1 行目へ）。`KOKEMUSU_PAT` / `KOKEMUSU_URL` は mazuoboeru の wrangler に。着地したら二重投稿を観測 → `Idempotency-Key`。
-- okayus-skills#41（e2e 0.4.0 / sandbox 0.2.0 / passkey 0.2.1）の内容確認と merge。
+- **#54 の merge（人手、docs のみ）**。merge 後にホストで `SELECT COUNT(*) FROM post WHERE first_day < last_day`（0006 の backfill 100 の対象。長い振り返りの 1 枚があれば PR 1 の後に画面で直す）。
+- **本番 `0005` の事後確認（ホスト）**: `COUNT(*)` が merge 前と同じ、`pragma_table_info('post')` に `title` が無い。ローカルは `pnpm db:migrate`。
+- **mazuoboeru が `title` を送っていたら外す**（ADR-0006 で 400）。着地したら二重投稿を観測 → `Idempotency-Key`。
+- okayus-skills#41（e2e 0.4.0 / sandbox 0.2.0 / passkey 0.2.1）の確認と merge。
 
 ## 進行中 PR
 
-- なし（この handoff commit は `claude/handoff-2026-09-06` にローカルのみ → 次のブランチへ cherry-pick）。
+- **#54** `claude/spanning-post-thickness` — ADR-0007 ＋ CONTEXT.md ＋ plans/thickness.md ＋ docs（人の merge。この handoff commit も同乗）。
