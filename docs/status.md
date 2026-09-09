@@ -18,9 +18,9 @@
 
 - **本番 `0006` の事後確認（ホスト）**: `post` / `post_tags` の COUNT が merge 前と同じ、`(first_day = last_day) <> (thickness IS NULL)` が 0 件、`pragma_table_info('post')` に `thickness`（`title` は無い）、`sqlite_master` の `post` に CHECK 3 つ。merge 前の export は無し（続く苔片 0 件）。
 - **画面から積む範囲は PR 3 まで 100%（毎日）で送る**（`stackDaysInput` のつなぎ）。範囲を送る送り側は `thickness` 必須（mazuoboeru は単日で影響なし）。
-- **mazuoboeru が `title` を送っていたら外す**（ADR-0006 で 400）。着地したら二重投稿を観測 → `Idempotency-Key`。
+- **送り側 mazuoboeru は `title` を送っていた（09-06 から毎晩 400）**。修正 PR は mazuoboeru 側。着地後に二重投稿を観測 → `Idempotency-Key`。
 - okayus-skills#41（e2e 0.4.0 / sandbox 0.2.0 / passkey 0.2.1）の確認と merge。
 
 ## 進行中 PR
 
-- なし（この handoff commit は次の feature PR に同乗）。
+- 送り側契約の公開（`docs/senders.md` ＋ 生成 schema、ADR-0008。人間 merge。handoff commit 同乗）。

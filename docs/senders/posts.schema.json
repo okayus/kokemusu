@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/okayus/kokemusu/main/docs/senders/posts.schema.json",
+  "title": "kokemusu — POST /api/posts の body",
+  "description": "apps/web/worker/routes/posts.ts の createPostSchema から apps/web/worker/senders-contract.test.ts が生成する。手で編集しない（pnpm test が一致を検査し、更新は vitest -u）。日の順序と「今日まで」、厚みと日数の関係は JSON Schema では表せないので、各 description と docs/senders.md にある。",
+  "type": "object",
+  "properties": {
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20000,
+      "description": "本文（Markdown）。1〜20,000 文字（UTF-16 単位）で、空白だけの本文は 400。保存時に受け側が暗号化する（ADR-0001）。"
+    },
+    "tags": {
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "description": "石（タグ）の名前の配列。最大 20 個、各 1〜100 文字。表記ゆれは受け側が正規化（trim ＋ NFKC ＋ 小文字）して同じ石に落とし、正規化して空になる名前は 400。省略 ＝ タグなし。送り側は出所をここで名乗る（例: [\"mazuoboeru\"]）。"
+    },
+    "kind": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "input",
+            "output",
+            "both"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "向き: input（吸う）/ output（出す）/ both。省略または null ＝ 未分類。"
+    },
+    "firstDay": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "積む最初の「日」（日本時間の YYYY-MM-DD、実在する暦日）。省略 ＝ 受け側の今日。lastDay 以前で、今日より後は 400、今日から 1200 か月より前も 400。前日分を翌日に送るならここに前日を入れる（苔片は送った日ではなく在った日に積む）。"
+    },
+    "lastDay": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "最後の「日」（同じ形式）。省略 ＝ firstDay（単日）。firstDay より後なら続く苔片で、thickness が必須。今日より後は 400。"
+    },
+    "thickness": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "厚み: 1〜100 の整数（%）。続く苔片（firstDay < lastDay）には必須、単日（firstDay ＝ lastDay）には付けられない（付けると 400）。null ＝ 無し（単日と同じ意味）。"
+    }
+  },
+  "required": [
+    "body"
+  ],
+  "additionalProperties": false
+}

@@ -19,7 +19,7 @@
 
 - **デプロイ = Cloudflare Workers + D1、経路は Workers Builds（キーレス）**: GitHub に Cloudflare トークンを置かない。`main` は ruleset（PR 必須・required check `ci`・force push 禁止・bypass なし）。リポは **public**（私的データ・`.dev.vars`・`.docker/sandbox.env`・D1 ダンプは決してリポに入れない）。
 - **本番 URL = `https://kokemusu.shiraoka.workers.dev`**（subdomain なしの URL は存在しない）。**WebAuthn の RP_ID = `kokemusu.shiraoka.workers.dev`** を初回パスキー登録前に固定する（変更すると登録済みパスキーが全部無効。custom domain へ移るなら登録より前）。`wrangler.jsonc` の `name` / `vars.RP_ID` / `vars.ORIGIN` は変更しない。
-- **アプリ認証 = パスキー（single-user）、API 自動投稿 = PAT（Bearer）**。受け側 = kokemusu が発行し、送り側を知らない（ADR-0002）。
+- **アプリ認証 = パスキー（single-user）、API 自動投稿 = PAT（Bearer）**。受け側 = kokemusu が発行し、送り側を知らない（ADR-0002）。**送り側が読む契約は `docs/senders.md` ＋ 生成物 `docs/senders/posts.schema.json`**（`createPostSchema` から `pnpm test` が生成・一致検査。wire を変える PR は `vitest -u` で再生成 → 変更履歴 → 公開送り側の確認。上限や鍵を他所に転記しない — ADR-0008）。
 - **本文は Phase 1 からアプリ層で暗号化**（鍵 `BODY_KEY` = Worker Secret、1Password にも控える。見出し `title` は 2026-09-06 に廃止 — ADR-0006）。日時・タグ等のメタデータは平文で可視化集計と両立（ADR-0001）。端末側 E2E は不採用。
 - **React 19 + Vite + TS ／ Hono ／ D1 + Drizzle**、wrangler 4 + `@cloudflare/vite-plugin` 1.x、**node は host / sandbox / CI / Workers Builds とも 24**。pnpm workspace: `apps/web` に SPA（`src/`）+ Worker（`worker/`）+ `drizzle/` + `wrangler.jsonc`。`packages/core` はロジックが生えたら。型は `wrangler types`（`pnpm check` = `wrangler types && tsc --noEmit`、`worker-configuration.d.ts` は gitignore）。単体テストは Cloudflare plugin を通さず Node で `app.request()`。ローカルは `apps/web/.dev.vars`（`.dev.vars.example` をコピー、`RP_ID=localhost`）。
 - 開発はサンドボックス（Docker + egress firewall）内。ホスト側 dev ポート **5273**。
