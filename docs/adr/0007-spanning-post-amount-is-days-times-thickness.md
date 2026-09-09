@@ -34,6 +34,8 @@ date: 2026-09-09
 
 - `post` に NULLABLE の整数列 `thickness`（% の整数、NULL ＝ 厚みなし）を additive に足す（`0006`、再構築ではない）。
   CHECK は持たず値域は zod（1〜100）。index 無し。
+  NULL は保存と wire の表現であって意味ではない: core は 数え方 `sheet | thick(厚み)` と 積む日々 `単日 | 続く(数え方)` の直和で持ち、
+  NULL ↔ sheet の読み替えは境界の decode / encode 1 対だけに閉じる（単日に厚みは表現できない ＝ 検証ではなく型で無い）。
 - `POST` / `PATCH /api/posts` の body に `thickness?: number | null`。単日（`firstDay = lastDay`）に非 null の厚みが付く
   結果になる要求は 400。PAT も同じ。応答の苔片に `thickness`。単日が厚みを持たないのは、1 日では「1 枚」と「1 日 × 100%」が
   同じ 量 1 になり、表現を 1 つに絞るため（100% ＝ 毎日 1 枚積んだのと同じ、が厚みの基準）。単日を後から伸ばすと厚みの無い
