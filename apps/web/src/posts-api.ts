@@ -15,6 +15,8 @@ export type PostItem = {
   /** First and last JST 「日」 this 苔片 was there (`YYYY-MM-DD`, ADR-0005) — server-decided; equal for a single day. */
   firstDay: string;
   lastDay: string;
+  /** 厚み of a 続く苔片, a whole 1..100 (ADR-0007); null ⇔ a single day (`firstDay === lastDay`). */
+  thickness: number | null;
   /** The JST day it was written on. 「いま積んだ」 = all three days equal — the client only compares. */
   postedDay: string;
   /** 向き (kind.ts); null = 未分類. */
@@ -39,6 +41,11 @@ export type PostInput = {
   // The server holds them to first ≤ last ≤ today (400 otherwise).
   firstDay?: string;
   lastDay?: string;
+  // 厚み (ADR-0007), read with the days: a range must carry one (a whole
+  // 1..100) and a single day must not (null or omitted). On 直す, omitted = the
+  // row's own, null = none — sent with the days that make it a single day.
+  // Anything else is a 400, never a silent default.
+  thickness?: number | null;
 };
 
 export const createPost = (input: PostInput): Promise<PostItem> => postJson("/api/posts", input);

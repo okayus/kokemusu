@@ -4,7 +4,7 @@ import {
   addDays,
   bucketSpansByDay,
   bucketSpansByMonth,
-  canStackOn,
+  countDays,
   dayKey,
   dayOfWeek,
   earliestStackDay,
@@ -366,43 +366,32 @@ describe("earliestStackDay — the floor under the days a 苔片 may be stacked 
   });
 });
 
-describe("canStackOn — first ≤ last ≤ today, no earlier than the floor, never a throw", () => {
-  const today = "2026-09-06";
-  const span = (firstDay: string, lastDay = firstDay) => ({ firstDay, lastDay });
-
-  it("takes today, a past day, and a range ending today or earlier", () => {
-    expect(canStackOn(span("2026-09-06"), today)).toBe(true);
-    expect(canStackOn(span("2026-09-05"), today)).toBe(true);
-    expect(canStackOn(span("2026-09-05", "2026-09-06"), today)).toBe(true);
-    expect(canStackOn(span("2025-03-01", "2026-01-31"), today)).toBe(true);
-    expect(canStackOn(span("1926-10-01", "2026-09-06"), today)).toBe(true);
+describe("countDays — inclusive calendar days between two keys, no walk", () => {
+  it("counts one day for a single day and both ends of a pair", () => {
+    expect(countDays("2026-09-06", "2026-09-06")).toBe(1);
+    expect(countDays("2026-09-05", "2026-09-06")).toBe(2);
+    expect(countDays("2026-01-01", "2026-12-31")).toBe(365);
   });
 
-  it("refuses a day that has not come — the last day may not pass today", () => {
-    expect(canStackOn(span("2026-09-07"), today)).toBe(false);
-    expect(canStackOn(span("2026-09-06", "2026-09-07"), today)).toBe(false);
+  it("knows the leap day: 2022-04-01 .. 2024-03-31 is 731 days (the ADR-0007 example)", () => {
+    expect(countDays("2022-04-01", "2024-03-31")).toBe(731);
+    expect(countDays("2024-02-28", "2024-03-01")).toBe(3);
+    expect(countDays("2025-02-28", "2025-03-01")).toBe(2);
   });
 
-  it("refuses an inverted pair", () => {
-    expect(canStackOn(span("2026-09-06", "2026-09-05"), today)).toBe(false);
+  it("agrees with enumerateDays, and is 0 for an inverted pair rather than a throw", () => {
+    for (const [from, to] of [
+      ["2026-08-30", "2026-09-06"],
+      ["2023-12-25", "2024-01-05"],
+      ["1926-10-01", "2026-09-06"],
+    ] as const) {
+      expect(countDays(from, to)).toBe(enumerateDays(from, to).length);
+    }
+    expect(countDays("2026-09-06", "2026-09-05")).toBe(0);
   });
 
-  it("refuses a first day below the floor, by one day", () => {
-    expect(canStackOn(span("1926-09-30", "1926-09-30"), today)).toBe(false);
-    expect(canStackOn(span("1926-09-30", "2026-09-06"), today)).toBe(false);
-    expect(canStackOn(span("0001-01-01"), today)).toBe(false);
-  });
-
-  it("refuses anything that is not a calendar day, without throwing", () => {
-    expect(canStackOn(span("2026-02-30"), today)).toBe(false);
-    expect(canStackOn(span("2026-9-6"), today)).toBe(false);
-    expect(canStackOn(span("2026-09-06", "yesterday"), today)).toBe(false);
-    expect(canStackOn(span(""), today)).toBe(false);
-    expect(canStackOn(span("2026-09-06"), "today")).toBe(false);
-  });
-
-  it("moves with today: the same past day is fine today and gone once the floor passes it", () => {
-    expect(canStackOn(span("1926-10-01"), "2026-09-06")).toBe(true);
-    expect(canStackOn(span("1926-10-01"), "2026-10-01")).toBe(false);
+  it("rejects a malformed key", () => {
+    expect(() => countDays("2026-9-6", "2026-09-06")).toThrow(RangeError);
+    expect(() => countDays("2026-09-06", "2026-02-30")).toThrow(RangeError);
   });
 });

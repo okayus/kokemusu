@@ -872,12 +872,13 @@ function PostEntry(props: {
     setError(null);
     try {
       // Blank date fields name no days, and a PATCH naming none keeps the
-      // row's own — the days only move when the form says where to.
+      // row's own — the days only move when the form says where to. The 厚み
+      // rides with them: the 苔片's own for a range, none for a single day.
       const updated = await updatePost(p.id, {
         body: input.body,
         tags: input.tags,
         kind: input.kind,
-        ...stackDaysInput(input.days.firstDay, input.days.lastDay),
+        ...stackDaysInput(input.days.firstDay, input.days.lastDay, p.thickness),
       });
       setEditing(false);
       props.onUpdated(updated);

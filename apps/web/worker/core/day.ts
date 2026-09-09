@@ -271,7 +271,7 @@ export function enumerateMonths(from: DayKey, to: DayKey): MonthKey[] {
  * floor exists for the read side, not for taste: a 苔片 further back would be
  * stored without complaint and then throw in the 年表's month walk on every
  * request after. The composer mirrors it as the date fields' `min`
- * (src/days.ts); the route is the check that counts.
+ * (src/days.ts); `parseStacking` (core/stacking.ts) is the check that counts.
  *
  * @throws RangeError on a malformed `today`.
  */
@@ -282,20 +282,17 @@ export function earliestStackDay(today: DayKey): DayKey {
 }
 
 /**
- * Whether a 苔片 may be stacked on these days as of `today` (features.md §1,
- * ADR-0005): both real calendar days, `firstDay ≤ lastDay ≤ today` — nothing
- * is stacked on a day that has not come; a 続く苔片 still going ends on today
- * and is lengthened later — and `firstDay` no earlier than `earliestStackDay`.
- * Day keys of 4-digit years order as strings, so the comparisons are string
- * comparisons. A validator: false, never a throw, whatever came off the wire.
+ * How many calendar days `from`..`to` holds, both inclusive — 1 for a single
+ * day, 0 for an inverted pair (an empty span, like `enumerateDays`). The 量 of
+ * a 続く苔片 is this × its 厚み (core/stacking.ts), so it is one subtraction on
+ * the UTC carrier, not a walk, and has no width ceiling.
+ *
+ * @throws RangeError on a malformed key.
  */
-export function canStackOn(span: DaySpan, today: DayKey): boolean {
-  if (!isDayKey(span.firstDay) || !isDayKey(span.lastDay) || !isDayKey(today)) return false;
-  return (
-    earliestStackDay(today) <= span.firstDay &&
-    span.firstDay <= span.lastDay &&
-    span.lastDay <= today
-  );
+export function countDays(from: DayKey, to: DayKey): number {
+  const start = civilToUtcMs(requireCivil(from));
+  const end = civilToUtcMs(requireCivil(to));
+  return end < start ? 0 : (end - start) / MS_PER_DAY + 1;
 }
 
 /**

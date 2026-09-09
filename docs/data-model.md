@@ -14,7 +14,7 @@ SQLite / D1 前提。1インスタンス＝1ユーザーだが、認証情報の
 過去の日に積む・続く苔片を作る側も ✅ 同日 #47: create / PATCH の body に `firstDay` / `lastDay`（`YYYY-MM-DD`）。create は省略 ＝ 今日・
 `lastDay` 省略 ＝ `firstDay`、PATCH は省略した側を据え置き（日を言わない編集は日を動かさない）。どちらも結果を
 `最初の日 ≤ 最後の日 ≤ 今日` かつ **今日から 1200 か月以内**（`enumerateMonths` の上限 ＝ 年表の月展開が throw しない床。
-コアの `canStackOn` / `earliestStackDay`）で検証し、外れれば 400。応答の `postedDay` ＝ `dayKey(created_at)` は編集でも動かない。
+コアの `parseStacking` / `earliestStackDay`。2026-09-09 からは厚みも同じ関数が読む — ADR-0007）で解釈し、型にならなければ 400。応答の `postedDay` ＝ `dayKey(created_at)` は編集でも動かない。
 
 2026-09-03 更新: **`api_token` を実装**（`drizzle/0002_api_token.sql`。葉テーブルの追加のみ = 既存テーブル再構築なしを
 生成 SQL とテスト `migrations.test.ts` の両方で確認）。`PAT_PEPPER` は fail closed —— 未設定なら発行が 503・Bearer 検証は
@@ -115,7 +115,7 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 | first_day | text | **積み上がる最初の「日」**（`YYYY-MM-DD`、日本時間）。**平文メタデータ ＝ 可視化・絞り込み・並びの軸**（[ADR-0005](adr/0005-post-axis-is-day-range.md)）。いま積んだ苔片は `dayKey(created_at)`、過去に積む苔片はリクエストの日 |
 | last_day | text | **最後の「日」**。単日は `first_day` と同じ値（NULL にしない ＝ COALESCE 不要）。`first_day ≤ last_day ≤ 今日`。続く苔片（[CONTEXT.md](../CONTEXT.md)）は `first_day < last_day` |
 | kind | text? | **向き**（[CONTEXT.md](../CONTEXT.md)）: `input` / `output` / `both`。null ＝ 未分類（既存行・付けなかった苔片）。平文メタデータ（総草の色相） |
-| thickness | integer? | **厚み**（[CONTEXT.md](../CONTEXT.md)、[ADR-0007](adr/0007-spanning-post-amount-is-days-times-thickness.md)、未実装 — `0006` の再構築）: 続く苔片の 1〜100（%）。**NULL ⇔ 単日**で、CHECK `(first_day = last_day) = (thickness IS NULL)`・`thickness IS NULL OR thickness BETWEEN 1 AND 100`（`first_day <= last_day` も同時に刻む）が DB でも守る。平文メタデータ。量 ＝ 日数 × 厚み は読むときに出し、保存しない |
+| thickness | integer? | **厚み**（[CONTEXT.md](../CONTEXT.md)、[ADR-0007](adr/0007-spanning-post-amount-is-days-times-thickness.md)、✅ 2026-09-09 `0006` の再構築で追加）: 続く苔片の 1〜100（%）。**NULL ⇔ 単日**で、CHECK `(first_day = last_day) = (thickness IS NULL)`・`thickness IS NULL OR thickness BETWEEN 1 AND 100`（`first_day <= last_day` も同時に刻む）が DB でも守る。平文メタデータ。量 ＝ 日数 × 厚み は読むときに出し、保存しない |
 | created_at | integer | epoch ms。**投稿した瞬間**（他テーブルと同じ意味）。時刻を持つ唯一の列で、§5 の時間帯分布の出どころ。画面が時刻を出すのは `first_day = last_day = dayKey(created_at)` の苔片だけ |
 | updated_at | integer | |
 
@@ -212,15 +212,18 @@ NULLABLE 列の追加は安全。**列の drop も安全** ── SQLite は再�
 `ALTER TABLE post ADD first_day text NOT NULL` で吐く（SQLite は default 無しの NOT NULL 追加を拒む）ので、再構築 SQL は drizzle-kit の型どおりに
 **手書き**した: `post_tags_keep` に退避 → `__new_post` へ backfill → `DROP TABLE post` / RENAME / index → `INSERT OR IGNORE` で `post_tags` を復元 →
 `post_tags_keep` を落とす。退避が要るのは D1 が `PRAGMA foreign_keys=OFF` を無視して **`post_tags` を cascade で消す**から（ローカル SQLite は
-PRAGMA を尊重するので挙動が割れる → PRAGMA は書かない）。`migrations.test.ts` の再構築マーカー検査はこの 1 本だけ免除し、文の並びを固定。
+PRAGMA を尊重するので挙動が割れる → PRAGMA は書かない）。`migrations.test.ts` の再構築マーカー検査はこの 1 本だけ免除し（2026-09-09 の `0006` が 2 本目）、文の並びを固定。
 backfill は `date((created_at + 32400000) / 1000, 'unixepoch')` の 1 回限り（Tokyo に DST が無いので正しい。恒常コードでは使わない）。
 リハーサルは `.wrangler/e2e` の写し（親子行のある fixture）に `--persist-to` で当てて行数不変を確認、本番は `cloudflare-d1-drizzle-migration` の
 runbook（merge 前に export → Workers Builds が適用 → 事後に `post` / `post_tags` の COUNT 一致）で。
 
-**`0006_post_thickness.sql`（[ADR-0007](adr/0007-spanning-post-amount-is-days-times-thickness.md)、未実装）＝ 2 度目の再構築**: `thickness` と CHECK 3 つ
+✅ **`0006_post_thickness.sql`（[ADR-0007](adr/0007-spanning-post-amount-is-days-times-thickness.md)、2026-09-09 実装）＝ 2 度目の再構築**: `thickness` と CHECK 3 つ
 （`first_day <= last_day`・`(first_day = last_day) = (thickness IS NULL)`・値域）を刻むために 0004 と同じ recipe（退避 → `__new_post` →
-backfill ＝ 続く苔片は 100・単日は NULL → DROP / RENAME / index → 復元）を手書きし、guard の免除リストに 2 本目として載せる。
-持ち主が既存データを壊してよいと決めたので、backfill の 100 は merge 後に画面で直す。CHECK の式を変えるときはまた再構築。
+backfill ＝ 続く苔片は 100・単日は NULL → DROP / RENAME / index → 復元）を**手書き**した（drizzle-kit 0.31 は CHECK の追加を
+`PRAGMA foreign_keys=OFF` 付き・退避なしの再構築で吐く。snapshot はそのまま、SQL だけ書き換え）。guard の免除リストの 2 本目で、文の並びと
+PRAGMA 無しを固定。リハーサルは `.wrangler/e2e` の写しで 0004 と同じ（`post` / `post_tags` の行数不変、`sqlite_master` に CHECK 3 つ、
+続く苔片が 100・単日が NULL、単日への `UPDATE thickness` と 0 / 101 / 逆転 が CHECK で落ちる）。本番の続く苔片は merge 直前の時点で 0 件
+（backfill の対象なし）。CHECK の式を変えるときはまた再構築。
 
 ## インデックス（目安）
 

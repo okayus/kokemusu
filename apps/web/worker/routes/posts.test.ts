@@ -136,6 +136,7 @@ describe("createPostSchema", () => {
         kind: "input",
         firstDay: "2026-09-01",
         lastDay: "2026-09-05",
+        thickness: 60,
       }).success,
     ).toBe(true);
   });
@@ -177,8 +178,8 @@ describe("createPostSchema", () => {
   });
 
   // The days' ORDER and ceiling (first ≤ last ≤ today, the floor) are the
-  // handler's, which knows today — core/day.ts `canStackOn` carries that table.
-  // The schema's share is the spelling: calendar days or nothing.
+  // handler's, which knows today — core/stacking.ts `parseStacking` carries
+  // that table. The schema's share is the spelling: calendar days or nothing.
   it("takes the days to stack on as calendar days — either, both, or neither", () => {
     expect(createPostSchema.safeParse({ body: "x", firstDay: "2026-09-05" }).success).toBe(true);
     expect(createPostSchema.safeParse({ body: "x", lastDay: "2026-09-05" }).success).toBe(true);
@@ -201,6 +202,26 @@ describe("createPostSchema", () => {
     }
     expect(createPostSchema.safeParse({ body: "x", firstDay: null }).success).toBe(false);
     expect(createPostSchema.safeParse({ body: "x", firstDay: 20260905 }).success).toBe(false);
+  });
+
+  // What a 厚み MEANS with the days — a range must carry one, a single day
+  // must not, PATCH's absent / null / number — is core's (stacking.test.ts).
+  // The schema's share is the shape: a whole 1..100, null, or nothing.
+  it("takes a 厚み as a whole 1..100, null or nothing, and no other spelling (ADR-0007)", () => {
+    const range = { body: "x", firstDay: "2026-09-01", lastDay: "2026-09-05" };
+    for (const thickness of [1, 60, 100, null]) {
+      const parsed = createPostSchema.safeParse({ ...range, thickness });
+      expect(parsed.success, String(thickness)).toBe(true);
+      if (parsed.success) expect(parsed.data.thickness).toBe(thickness);
+    }
+    const absent = createPostSchema.safeParse(range);
+    expect(absent.success).toBe(true);
+    if (absent.success) expect(absent.data.thickness).toBeUndefined();
+    for (const thickness of [0, 101, 60.5, -1, "60", "", true, [60], {}]) {
+      expect(createPostSchema.safeParse({ ...range, thickness }).success, String(thickness)).toBe(
+        false,
+      );
+    }
   });
 });
 
