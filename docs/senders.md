@@ -89,6 +89,7 @@ wire を変える PR は、ここに挙げた実装を raw GitHub で読んで�
 
 ## 変更履歴（wire）
 
+- 2026-09-11 `tags` の上限を 20 → **99 個**に（D1 の bound parameter 100 − タグ解決の `user_id` 1 個。#57）。他は不変。
 - 2026-09-09 `thickness` を追加（続く苔片に必須、単日に不可 — ADR-0007、#55）。この文書と schema.json を公開（ADR-0008）。
 - 2026-09-06 `title` を廃止、知らないキーは 400（ADR-0006、#49）。`firstDay` / `lastDay` / `kind` を追加（ADR-0005、#46 #47）。
 - 2026-09-03 `POST /api/posts` を PAT（`post:write`）で開放（ADR-0002）。
