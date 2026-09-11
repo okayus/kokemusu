@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { MAX_TAGS_PER_POST } from "./core/tag";
 import { createPostSchema } from "./routes/posts";
 
 // The contract a 送り側 reads (docs/senders.md, ADR-0008) has two halves: the
@@ -30,7 +31,7 @@ type Field = keyof z.infer<typeof createPostSchema>;
 // createPostSchema fail `tsc` here until it is described.
 const FIELD_DOCS: Record<Field, string> = {
   body: "本文（Markdown）。1〜20,000 文字（UTF-16 単位）で、空白だけの本文は 400。保存時に受け側が暗号化する（ADR-0001）。",
-  tags: "石（タグ）の名前の配列。最大 20 個、各 1〜100 文字。表記ゆれは受け側が正規化（trim ＋ NFKC ＋ 小文字）して同じ石に落とし、正規化して空になる名前は 400。省略 ＝ タグなし。送り側は出所をここで名乗る（例: [\"mazuoboeru\"]）。",
+  tags: `石（タグ）の名前の配列。最大 ${MAX_TAGS_PER_POST} 個、各 1〜100 文字。表記ゆれは受け側が正規化（trim ＋ NFKC ＋ 小文字）して同じ石に落とし、正規化して空になる名前は 400（重複は正規化後にまとめる）。省略 ＝ タグなし。送り側は出所をここで名乗る（例: ["mazuoboeru"]）。`,
   kind: "向き: input（吸う）/ output（出す）/ both。省略または null ＝ 未分類。",
   firstDay:
     "積む最初の「日」（日本時間の YYYY-MM-DD、実在する暦日）。省略 ＝ 受け側の今日。lastDay 以前で、今日より後は 400、今日から 1200 か月より前も 400。前日分を翌日に送るならここに前日を入れる（苔片は送った日ではなく在った日に積む）。",
@@ -99,6 +100,10 @@ describe("docs/senders/posts.schema.json (the published sender contract)", () =>
     // The mazuoboeru daily shape, and the smallest body.
     expect(accepts({ body: "- 回答: 3問", tags: ["mazuoboeru"], firstDay: "2026-09-08" })).toBe(true);
     expect(accepts({ body: "苔" })).toBe(true);
+    // The tag cap as published: full is fine, one more is not (core/tag.ts derives it).
+    const tags = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`);
+    expect(accepts({ body: "苔", tags: tags(MAX_TAGS_PER_POST) })).toBe(true);
+    expect(accepts({ body: "苔", tags: tags(MAX_TAGS_PER_POST + 1) })).toBe(false);
     // The retired 見出し (ADR-0006) — the drift this file exists to catch.
     expect(accepts({ body: "苔", title: "まず覚える 2026-09-03" })).toBe(false);
     // Shapes the route's zod refuses before the handler: the schema agrees.

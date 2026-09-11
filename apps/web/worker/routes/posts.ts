@@ -21,7 +21,9 @@ import type { Env } from "../types";
 
 // Size caps: UTF-16 units, mirrored by the composer's maxLength. Generous for
 // a diary, small enough that an encrypted body stays a modest TEXT value.
-// (MAX_TAGS_PER_POST lives in core/tag.ts — the `?tags=` set shares the cap.)
+// (MAX_TAGS_PER_POST lives in core/tag.ts, derived from D1's bound parameters
+// per statement against resolveTagRows below; the `?tags=` set has its own
+// cap there, MAX_TAGS_PER_SET.)
 const MAX_BODY_CHARS = 20_000;
 const MAX_TAG_CHARS = 100;
 

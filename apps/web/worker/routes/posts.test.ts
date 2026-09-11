@@ -1,5 +1,6 @@
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
+import { MAX_TAGS_PER_POST } from "../core/tag";
 import { app } from "../index";
 import { TEST_ORIGIN, testEnv } from "../test-support";
 import { createPostSchema, listPostsQuerySchema, periodCondition } from "./posts";
@@ -157,10 +158,13 @@ describe("createPostSchema", () => {
     expect(createPostSchema.safeParse({ body: "x", extra: 1 }).success).toBe(false);
   });
 
-  it("rejects too many tags and an empty tag string", () => {
+  it("takes MAX_TAGS_PER_POST tags, rejects one more and an empty tag string", () => {
+    const tags = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`);
+    expect(createPostSchema.safeParse({ body: "x", tags: tags(MAX_TAGS_PER_POST) }).success).toBe(
+      true,
+    );
     expect(
-      createPostSchema.safeParse({ body: "x", tags: Array.from({ length: 21 }, () => "t") })
-        .success,
+      createPostSchema.safeParse({ body: "x", tags: tags(MAX_TAGS_PER_POST + 1) }).success,
     ).toBe(false);
     expect(createPostSchema.safeParse({ body: "x", tags: [""] }).success).toBe(false);
   });

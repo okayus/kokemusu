@@ -10,8 +10,12 @@ import type { TagSummary } from "./posts-api";
  */
 export const normalizeTagName = (raw: string): string => raw.normalize("NFKC").trim().toLowerCase();
 
-/** One 苔片 carries at most this many stones (worker/core/tag.ts MAX_TAGS_PER_POST). */
-export const MAX_TAGS = 20;
+/**
+ * One 苔片 carries at most this many stones — a mirror of worker/core/tag.ts
+ * MAX_TAGS_PER_POST (D1's 100 bound parameters per statement, minus the
+ * user_id the tag lookup binds), like normalizeTagName above.
+ */
+export const MAX_TAGS = 99;
 
 /** Half/full-width commas and 読点 — the old comma field's separators, kept for typing and pasting. */
 const SEPARATOR = /[,，、]/;
