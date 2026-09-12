@@ -18,9 +18,16 @@ import {
   stoneNames,
   useComposeShortcut,
   type ComposeRequest,
-  type DaysFields,
 } from "./Compose";
-import { isStackedNow, placeInFeed, postedLabel, stackDaysInput } from "./days";
+import {
+  EVERY_DAY,
+  isStackedNow,
+  placeInFeed,
+  postedLabel,
+  stackingInput,
+  thicknessLabel,
+  type DaysFields,
+} from "./days";
 import { clearDraft } from "./draft";
 import { HeatmapSection } from "./Heatmap";
 import { KIND_LABELS, parseKind, type PostKind } from "./kind";
@@ -71,7 +78,7 @@ type Notice = { text: string; action?: { label: string; run: () => void } };
 
 /** What the edit form's date fields mean: the days as they are, lengthened or moved here. */
 const EDIT_DAYS_HINT =
-  "範囲を伸ばすと、その日々に在った続く苔片になります。今日より先には伸ばせません。";
+  "範囲にすると、その日々に在った続く苔片になり、厚み（そのうち打ち込んでいた日の割合）を添えます。今日より先には伸ばせません。";
 
 export function App() {
   const auth = useAuth();
@@ -816,6 +823,13 @@ function Timeline(props: {
   );
 }
 
+/** The edit form's date fields and slider from the 苔片: its days, and its 厚み — 毎日 for a single day, which has none. */
+const daysFieldsOf = (p: PostItem): DaysFields => ({
+  firstDay: p.firstDay,
+  lastDay: p.lastDay,
+  thickness: p.thickness ?? EVERY_DAY,
+});
+
 /**
  * One 苔片: the read view with 編集/削除, or the inline edit form (the
  * composer's mirror — the same fields, uncontrolled so やめる simply
@@ -836,12 +850,10 @@ function PostEntry(props: {
   const [editing, setEditing] = useState(false);
   // 編集中の本文・日・タグは state（本文はプレビューが要り、日は 2 欄が互いを縛り、
   // タグはチップと候補を持つ）。向きだけ form のまま。「編集」を押した時点の値で
-  // 毎回蒔き直すので、やめる ＝ 捨てる が保たれる。
+  // 毎回蒔き直すので、やめる ＝ 捨てる が保たれる。厚みのスライダーは苔片の
+  // 厚みから、単日（厚み無し）を範囲に伸ばすときは 毎日 から始まる。
   const [editBody, setEditBody] = useState(p.body);
-  const [editDays, setEditDays] = useState<DaysFields>({
-    firstDay: p.firstDay,
-    lastDay: p.lastDay,
-  });
+  const [editDays, setEditDays] = useState<DaysFields>(() => daysFieldsOf(p));
   const [editTags, setEditTags] = useState<TagsFields>({ tags: stoneNames(p.tags), text: "" });
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -873,12 +885,12 @@ function PostEntry(props: {
     try {
       // Blank date fields name no days, and a PATCH naming none keeps the
       // row's own — the days only move when the form says where to. The 厚み
-      // rides with them: the 苔片's own for a range, none for a single day.
+      // rides with them: the slider's for a range, none for a single day.
       const updated = await updatePost(p.id, {
         body: input.body,
         tags: input.tags,
         kind: input.kind,
-        ...stackDaysInput(input.days.firstDay, input.days.lastDay, p.thickness),
+        ...stackingInput(input.days),
       });
       setEditing(false);
       props.onUpdated(updated);
@@ -926,6 +938,7 @@ function PostEntry(props: {
             idPrefix={`edit-${p.id}`}
             firstDay={editDays.firstDay}
             lastDay={editDays.lastDay}
+            thickness={editDays.thickness}
             today={props.today}
             hint={EDIT_DAYS_HINT}
             onChange={setEditDays}
@@ -974,8 +987,9 @@ function PostEntry(props: {
     <li className="post">
       <div className="post-meta">
         {/* 「いま積んだ」 shows the moment; a 苔片 stacked on a past day, or a
-            続く苔片, shows its days and — small — the day it was written on
-            (features.md §1). The days are the server's keys, compared only. */}
+            続く苔片, shows its days — a 続く苔片 its 厚み too (ADR-0007) — and,
+            small, the day it was written on (features.md §1). The days are the
+            server's keys, compared only. */}
         {isStackedNow(p) ? (
           <time className="hint" dateTime={new Date(p.createdAt).toISOString()}>
             {fmtDate(p.createdAt)}
@@ -990,6 +1004,7 @@ function PostEntry(props: {
                   <time dateTime={p.lastDay}>{slashDay(p.lastDay)}</time>
                 </>
               )}
+              {p.thickness !== null && ` · ${thicknessLabel(p.thickness)}`}
             </span>
             <span className="hint post-posted">
               <time dateTime={p.postedDay}>{postedLabel(p.postedDay, p.lastDay)}</time> に積む
@@ -1038,7 +1053,7 @@ function PostEntry(props: {
           disabled={busy}
           onClick={() => {
             setEditBody(p.body);
-            setEditDays({ firstDay: p.firstDay, lastDay: p.lastDay });
+            setEditDays(daysFieldsOf(p));
             setEditTags({ tags: stoneNames(p.tags), text: "" });
             setEditing(true);
           }}
