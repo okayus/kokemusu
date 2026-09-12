@@ -45,7 +45,12 @@
   伸ばすのに厚み無し 400・縮めて厚み残り 400・縮めて null は 200・`lastDay` だけで伸ばしても厚みは残る。
   e2e の PAT spec に「単日 ＋ `thickness` は 400」「範囲だけは 400」「範囲 ＋ 60 は 201 で応答に 60」。
 
-## PR 2 — 集計（`claude/thickness-stats`。auto-merge 可）
+## PR 2 — 集計（`claude/thickness-stats`。auto-merge 可）— ✅ 実装済み（2026-09-12）
+
+実装で決めたこと（plan との差分）: `months` は `{ month, amount }`（`count` は行にだけ残す）。月は日を分割するので **months の和は量に等しい**
+（ADR の「量以上」は等号で成立）。`amountByMonth` は `Stacking` を受けるので `core/stacking.ts` 側（`day.ts` に `lastDayOfMonth` を足した）。
+graph の SQL は GROUP BY を外して苔片 × 石 / 苔片 × 組 の行を返す（1 苔片に 99 タグなら組は 4851 行 — 個人日記の規模では問題にしない。
+増えたら共起の下限で間引く、visualization.md §6）。石と橋の名前は「量 N」、年表の棒の title は「N 片」のまま。SPA 側の写しは `src/amount.ts`。
 
 - `/api/stats/graph`: ノード・橋を `COUNT` から量の和へ。SQL は `(tag_id, first_day, last_day, thickness)` の行、橋は
   `(a, b, first_day, last_day, thickness)` の行を返し、`decodeStacking` → `amountOf` をクリップ付き（from ＝ `periodStartDay`、

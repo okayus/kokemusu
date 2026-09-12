@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type Ref } from "react";
+import { formatAmount, formatThickness } from "./amount";
 import type { TagSummary } from "./posts-api";
-import { getTimeline, type MonthCount, type TagTimeline, type TimelineRow } from "./stats-api";
+import { getTimeline, type MonthAmount, type TagTimeline, type TimelineRow } from "./stats-api";
 
 // 石の年表 (docs/visualization.md §8): one horizontal bar per tag set — first
 // 苔片 to last 苔片 — sorted by start day so it reads as a 年表. Tapping a
@@ -24,14 +25,15 @@ export type Domain = { from: string; to: string };
 /** A day range, first and last inclusive — all the bar geometry needs. */
 export type DayRange = { firstDay: string; lastDay: string };
 
-/** A row's data: the range, the 苔片 count, and its 活動月 — the month segments (§8). */
-export type Span = DayRange & { count: number; months: MonthCount[] };
+/** A row's data: the range, the 苔片 count, their 量 (ADR-0007), and its 活動月 by 量 — the month segments (§8). */
+export type Span = DayRange & { count: number; amount: number; months: MonthAmount[] };
 
 /** A row on the wire → the chart's span. */
 export const toSpan = (r: TimelineRow): Span => ({
   firstDay: r.firstDay,
   lastDay: r.lastDay,
   count: r.count,
+  amount: r.amount,
   months: r.months,
 });
 
@@ -81,7 +83,7 @@ const monthLastDay = (month: string) => {
   return `${month}-${String(last).padStart(2, "0")}`;
 };
 
-export type MonthSegment = MonthCount & { x: number; w: number };
+export type MonthSegment = MonthAmount & { x: number; w: number };
 
 /**
  * The month segments of a bar (visualization.md §8): one per 活動月, each cut
@@ -192,12 +194,15 @@ export function axisTicks(domain: Domain, axisPx: number): AxisTick[] {
   return [];
 }
 
-/** 「N 片 · d日/片」 — count plus density (期間 ÷ 件数), the "細く長く vs 太く短く" discriminator. */
+/**
+ * 「量 N · 厚み x%」 (visualization.md §8, ADR-0007): the row's 量 and the 厚み
+ * measured over its period — 量 ÷ days, the same word a 続く苔片 declares its
+ * own in — the "細く長く vs 太く短く" discriminator. Several 苔片 on a day put
+ * it past 100%, and it is shown so. The count stays in the bar's title.
+ */
 export function rowNote(span: Span): string {
   const days = dayIndex(span.lastDay) - dayIndex(span.firstDay) + 1;
-  const per = days / span.count;
-  const density = per >= 10 ? String(Math.round(per)) : per.toFixed(1);
-  return `${span.count} 片 · ${density}日/片`;
+  return `量 ${formatAmount(span.amount)} · 厚み ${formatThickness(span.amount, days)}`;
 }
 
 /**
@@ -213,9 +218,9 @@ export function spanTitle(span: Span): string {
   return crossed > 1 ? `${base} · 活動 ${span.months.length}/${crossed} か月` : base;
 }
 
-/** Hover text of one month segment. */
-export function monthTitle(m: MonthCount): string {
-  return `${m.month} · ${m.count} 片`;
+/** Hover text of one month segment: the month and the 量 in it. */
+export function monthTitle(m: MonthAmount): string {
+  return `${m.month} · 量 ${formatAmount(m.amount)}`;
 }
 
 // ------------------------------------------------- rows = server + ad-hoc mix

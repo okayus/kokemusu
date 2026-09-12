@@ -178,7 +178,8 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
   読み時の TZ 変換は無い（SQLite の `date()` / `strftime()` は UTC 基準 —— そもそも日は書く側でしか切らない）。
 - **タグのタイムライン（打ち込み期間）**: `post_tags` JOIN `post` を `tag_id` で GROUP BY し
   `MIN(first_day)` / `MAX(last_day)` / `COUNT(*)`（[visualization.md](visualization.md) §8）。
-  厚み（ADR-0007、未実装）が入れば行に量の和も持つ（`first_day` / `last_day` / `thickness` を取って core で 日数 × 厚み。枚数は残す）。
+  厚み（ADR-0007、✅ 2026-09-12）: 行は量の和 `amount` も持つ（軸の行から `first_day` / `last_day` / `thickness` を同じ batch で取り、
+  core の `decodeStacking` → `amountOf` で 日数 × 厚み を足す — `rowAmounts`。枚数 `count` は残す。CHECK が守るはずの形が崩れた行は throw ＝ 500）。
   - **組み合わせ行（タグ集合 AND、n ≧ 2）**: `pt.tag_id IN (:t1 … :tn)` で引き、post ごとに
     `HAVING COUNT(DISTINCT pt.tag_id) = n` で「全部付いた苔片」に絞り、外側で MIN/MAX/COUNT。
   - **フォーカス（選んだ石の集合 S で絞った共起タグ別の内訳、n ≧ 1。2026-09-07 に 1 タグから集合へ —
@@ -186,13 +187,18 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
     「S が全部付いた苔片」を引き、S 自身の行はその苔片の MIN/MAX/COUNT、共起の行はその苔片の `pt.tag_id NOT IN S` を
     `tag_id` で GROUP BY した各タグの MIN/MAX/COUNT（5 文を 1 batch）。n = 1 は #30 以来の 1 タグのフォーカスと同じ結果。
   - **活動月（月セグメント棒）**: 同じ JOIN から `first_day` / `last_day` を取り、コアで最初の月〜最後の月を列挙して
-    各月に +1（続く苔片は触れる各月に 1 → **`months` の和は `count` 以上**。単日だけなら等しい）。厚みが入れば各月 その月に重なる日数 × 厚み（和は量以上）。
+    各月の量にする（✅ 2026-09-12、ADR-0007。単日は 1、続く苔片は その月に重なる日数 × 厚み — core の `amountByMonth`。
+    月は日を分割するので **`months` の和は行の `amount` に等しい**。2026-09-06〜11 は各月 +1 の枚数で、和は `count` 以上だった）。
     span の集計と同じ batch（＝同じスナップショット）で読む。
 - **累積（積み上げ）**: 上記を日付昇順で累積和。
 - **ストリーク**: タグ別に投稿のある日付集合を取り、連続日数を計算（純粋関数でやる）。
 - **内訳**: 期間内のタグ別件数。向きの比率（吸う／出す）も同じ材料。
 - **時間帯/曜日分布**: `created_at`（投稿した瞬間 —— 時刻を持つ唯一の列）から hour / weekday を取り集計。
-- **タグ共起（タグ関係グラフ）**: `post_tags a JOIN post_tags b ON a.post_id = b.post_id AND a.tag_id < b.tag_id` を `(a.tag_id, b.tag_id)` で GROUP BY → 共起回数＝エッジの重み。ノードの大きさはタグ別件数（続く苔片も 1）→ 2026-09-09 からは量の和（ADR-0007、未実装）: `(tag_id, first_day, last_day, thickness)` を取って core で足し、期間は重なった日数でクリップ。橋も同じ。期間は重なりで絞る（`last_day >= 期間の初日`。去年始まって今年まで続く苔片は「今年」に入る — [visualization.md](visualization.md) §6）。
+- **タグ共起（タグ関係グラフ）**: ノードも橋も量の和（ADR-0007、✅ 2026-09-12）。GROUP BY はせず、ノードは `post_tags ⋈ post ⋈ tag` から
+  苔片 × 石 の行 `(tag_id, first_day, last_day, thickness)`、橋は `post_tags a JOIN post_tags b ON a.post_id = b.post_id AND a.tag_id < b.tag_id` から
+  苔片 × 組 の行 `(a, b, first_day, last_day, thickness)` を取り、core（`buildGraph`）で `decodeStacking` → `amountOf` を足す。期間は
+  初日〜今日 の窓でクリップ（全期間は窓なし）。wire は `count` → `amount`。（2026-09-03〜11 は `COUNT(*)` の GROUP BY で、続く苔片も 1。）
+  期間は重なりで絞る（`last_day >= 期間の初日`。去年始まって今年まで続く苔片は「今年」に入る — [visualization.md](visualization.md) §6）。
 
 > パフォーマンス: 1ユーザーの個人日記規模なら素朴な集計で十分。必要になったら日次集計テーブル（マテビュー的な `daily_tag_count`）を足す。
 

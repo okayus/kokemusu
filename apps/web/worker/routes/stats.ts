@@ -18,7 +18,6 @@ import { z } from "zod";
 import {
   addDays,
   bucketSpansByDay,
-  bucketSpansByMonth,
   dayKey,
   dayOfWeek,
   enumerateDays,
@@ -28,6 +27,14 @@ import {
   type MonthKey,
 } from "../core/day";
 import { isInput, isOutput, type PostKind } from "../core/kind";
+import {
+  amountByMonth,
+  amountOf,
+  decodeStacking,
+  totalAmount,
+  type DayWindow,
+  type StackingRow,
+} from "../core/stacking";
 import { parseFocusParam, parseTagsParam } from "../core/tag";
 import { createDb } from "../db";
 import { post, postTags, tag } from "../db/schema";
@@ -137,8 +144,8 @@ export function heatmapTotals(spans: Iterable<HeatmapSpan>): HeatmapTotals {
 // (ADR-0001) and the 年表 draws even while the key is missing. The axis is the
 // 「日」 range itself (ADR-0005): SQL takes MIN(first_day) / MAX(last_day) / COUNT
 // for the span — day keys order as strings, no zone in the read — and hands
-// each 苔片's two days over for the month segments, which core walks month by
-// month (`monthCounts`).
+// each 苔片's two days and 厚み over for the 量 (ADR-0007), which core sums
+// for the row and per month for the segments (`rowAmounts`).
 
 // The three forms: no param = one row per tag, `?focus=` = the chosen stones —
 // 選んだ石, one id since #30 and a comma list since 2026-09-07
@@ -157,18 +164,25 @@ export const timelineQuerySchema = z
 export type TimelineTag = { id: string; name: string };
 
 /**
- * 苔片 per 活動月 on the wire: the JST `YYYY-MM` and its count. Sparse — only
- * months holding a 苔片 — and ascending; the counts add up to the row's count.
+ * 量 per 活動月 on the wire: the JST `YYYY-MM` and the 量 of the row's 苔片 in
+ * it (ADR-0007: a single day 1, a 続く苔片 that month's days × its 厚み). Sparse
+ * — only months holding a 苔片 — and ascending; the amounts add up to the
+ * row's `amount`.
  */
-export type MonthCount = { month: MonthKey; count: number };
+export type MonthAmount = { month: MonthKey; amount: number };
 
-/** One row of the 年表: the tag set, its first/last day (JST), the 苔片 count, and its 活動月 (the month segments). */
+/**
+ * One row of the 年表: the tag set, its first/last day (JST), the 苔片 count
+ * (枚数 — 「N 片」 stays an honest count), their 量, and its 活動月 (the month
+ * segments, by 量).
+ */
 export type TimelineRow = {
   tags: TimelineTag[];
   firstDay: DayKey;
   lastDay: DayKey;
   count: number;
-  months: MonthCount[];
+  amount: number;
+  months: MonthAmount[];
 };
 
 /** What the grouped SQL hands back per tag; `norm` rides along as the tiebreaker. */
@@ -216,32 +230,43 @@ export function buildTagSpans(raws: RawTagSpan[]): TagSpan[] {
   return spans.map(({ norm: _norm, ...span }) => span);
 }
 
+/** The 量 side of a row: its 苔片's 量 summed, and per 活動月. */
+export type RowAmounts = { amount: number; months: MonthAmount[] };
+
+/** No 苔片 at all — a row the axis has nothing for (cannot happen: same batch, same snapshot). */
+const NO_AMOUNTS: RowAmounts = { amount: 0, months: [] };
+
 /**
- * Fold 苔片 spans into a row's `months` — its 活動月 with their counts, sparse
- * and ascending, so the client paints exactly these and nothing in between
+ * Fold a row's 苔片 into its 量 (ADR-0007): the sum — no window, a row's own
+ * MIN/MAX is its whole period — and the 活動月 with their 量, sparse and
+ * ascending, so the client paints exactly these and nothing in between
  * (visualization.md §8: a single bar shows a gap as if it were one stretch).
- * A 続く苔片 is in every month it touches, so the counts add up to AT LEAST the
- * row's `count` — equal while every 苔片 is a single day (ADR-0005).
+ * A 続く苔片 is in every month it touches with that month's days × its 厚み, so
+ * the months add up to `amount`. The rows are decoded here: one the CHECKs
+ * would have refused throws (core/stacking.ts decodeStacking) rather than
+ * drawing a 苔片 as something it is not.
  */
-export function monthCounts(spans: Iterable<DaySpan>): MonthCount[] {
-  return [...bucketSpansByMonth(spans)]
+export function rowAmounts(rows: Iterable<StackingRow>): RowAmounts {
+  const stackings = Array.from(rows, (r) => decodeStacking(r));
+  const months = [...amountByMonth(stackings)]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([month, count]) => ({ month, count }));
+    .map(([month, amount]) => ({ month, amount }));
+  return { amount: totalAmount(stackings), months };
 }
 
-/** What the raw axis SQL hands back: one row per (苔片, tag) link, with the 苔片's days. */
-export type AxisRow = DaySpan & { tagId: string };
+/** What the raw axis SQL hands back: one row per (苔片, tag) link, with the 苔片's days and 厚み. */
+export type AxisRow = StackingRow & { tagId: string };
 
-/** `monthCounts` per tag — for the forms whose rows are one per tag. */
-export function monthCountsByTag(rows: Iterable<AxisRow>): Map<string, MonthCount[]> {
-  const spans = new Map<string, DaySpan[]>();
+/** `rowAmounts` per tag — for the forms whose rows are one per tag. */
+export function rowAmountsByTag(rows: Iterable<AxisRow>): Map<string, RowAmounts> {
+  const byTag = new Map<string, StackingRow[]>();
   for (const r of rows) {
-    const span = { firstDay: r.firstDay, lastDay: r.lastDay };
-    const list = spans.get(r.tagId);
-    if (list === undefined) spans.set(r.tagId, [span]);
-    else list.push(span);
+    const row = { firstDay: r.firstDay, lastDay: r.lastDay, thickness: r.thickness };
+    const list = byTag.get(r.tagId);
+    if (list === undefined) byTag.set(r.tagId, [row]);
+    else list.push(row);
   }
-  return new Map([...spans].map(([tagId, list]) => [tagId, monthCounts(list)]));
+  return new Map([...byTag].map(([tagId, list]) => [tagId, rowAmounts(list)]));
 }
 
 /** What the focus form's batch hands back, in the order its statements were sent. */
@@ -252,11 +277,11 @@ export type FocusMaterials = {
   agg: { first: DayKey | null; last: DayKey | null; count: number } | undefined;
   /** The set's stones as the user's own tags — a missing id means no such stone. */
   named: TimelineTag[];
-  /** The set's 苔片, one span each — the set row's 活動月. */
-  setAxis: DaySpan[];
+  /** The set's 苔片, their days and 厚み — the set row's 量 and 活動月. */
+  setAxis: StackingRow[];
   /** Every OTHER stone on those 苔片, grouped — the set×stone rows. */
   cooc: RawTagSpan[];
-  /** Those other stones' links with the 苔片's days — the set×stone rows' 活動月. */
+  /** Those other stones' links with the 苔片's days and 厚み — the set×stone rows' 量 and 活動月. */
   coocAxis: AxisRow[];
 };
 
@@ -276,31 +301,40 @@ export function buildFocusRows(m: FocusMaterials): TimelineRow[] {
     return hit ? [hit] : [];
   });
   if (set.length !== m.ids.length) return [];
-  const months = monthCountsByTag(m.coocAxis);
+  const setAmounts = rowAmounts(m.setAxis);
+  const byTag = rowAmountsByTag(m.coocAxis);
   return [
     {
       tags: set,
       firstDay: agg.first,
       lastDay: agg.last,
       count: agg.count,
-      months: monthCounts(m.setAxis),
+      amount: setAmounts.amount,
+      months: setAmounts.months,
     },
-    ...buildTagSpans(m.cooc).map((s) => ({
-      tags: [...set, s.tag],
-      firstDay: s.firstDay,
-      lastDay: s.lastDay,
-      count: s.count,
-      months: months.get(s.tag.id) ?? [],
-    })),
+    ...buildTagSpans(m.cooc).map((s) => {
+      const amounts = byTag.get(s.tag.id) ?? NO_AMOUNTS;
+      return {
+        tags: [...set, s.tag],
+        firstDay: s.firstDay,
+        lastDay: s.lastDay,
+        count: s.count,
+        amount: amounts.amount,
+        months: amounts.months,
+      };
+    }),
   ];
 }
 
 // ---------------------------------------------------------------------------
 // タグ関係グラフ (visualization.md §6): stones and the moss bridging them.
-// Node = tag, its count = 苔片 carrying it in the period (the stone's size —
-// §6's replacement for a per-tag heatmap); edge = two tags on the same 苔片,
-// its count = co-occurrence. Same plaintext-metadata-only diet as the rest of
-// this file: `post_tags` and `last_day`, never a body (ADR-0001).
+// Node = tag, its 量 = that of the 苔片 carrying it in the period (the stone's
+// size — §6's replacement for a per-tag heatmap); edge = two tags on the same
+// 苔片, its 量 = that of the 苔片 carrying both. 量, not count, since ADR-0007:
+// a 続く苔片 grows its stones by its days × 厚み, and 今月 / 今年 take only the
+// days inside the period (SQL hands the days and 厚み over, core clips and
+// sums). Same plaintext-metadata-only diet as the rest of this file:
+// `post_tags` and the day columns, never a body (ADR-0001).
 
 /** 今月 / 今年 / 全期間 — the three windows §6 offers. Absent = 全期間. */
 export const graphQuerySchema = z.object({
@@ -317,34 +351,65 @@ export function periodStartDay(period: "month" | "year", todayMs: number): DayKe
   return period === "month" ? `${today.slice(0, 7)}-01` : `${today.slice(0, 4)}-01-01`;
 }
 
-/** A stone on the wire: display bits + how many 苔片 grew on it in the period. */
-export type GraphNode = { id: string; name: string; color: string | null; count: number };
+/** A stone on the wire: display bits + the 量 of the 苔片 that grew on it in the period (a fraction, rounded only for display). */
+export type GraphNode = { id: string; name: string; color: string | null; amount: number };
 
-/** A bridge on the wire: the two stones' ids (`a` < `b`, one row per pair) + shared 苔片 count. */
-export type GraphEdge = { a: string; b: string; count: number };
-
-/** What the grouped node SQL hands back; `norm` rides along as the tiebreaker. */
-export type RawGraphNode = GraphNode & { norm: string };
+/** A bridge on the wire: the two stones' ids (`a` < `b`, one row per pair) + the 量 of the 苔片 they share. */
+export type GraphEdge = { a: string; b: string; amount: number };
 
 /**
- * Order the grouped rows for the wire: nodes by count descending (ties by
- * norm, so the order is stable day-in day-out), edges by count descending
+ * What the node SQL hands back: one row per (苔片, stone) link in the period —
+ * the stone's display bits (`norm` rides along as the tiebreaker) and the
+ * 苔片's days and 厚み.
+ */
+export type GraphNodeRow = StackingRow & { id: string; name: string; norm: string; color: string | null };
+
+/** What the edge SQL hands back: one row per (苔片, pair) in the period, `a` < `b`. */
+export type GraphEdgeRow = StackingRow & { a: string; b: string };
+
+/**
+ * Fold the link rows into the map and order it for the wire. A stone's 量 is
+ * the sum over the 苔片 carrying it, a bridge's over the 苔片 carrying both,
+ * each 苔片 clipped to the period's `window` (none for 全期間) — so a 案件
+ * running since last year weighs in 今年 with this year's days only, and a
+ * 苔片 with several stones feeds each of them whole. Nodes come 量 descending
+ * (ties by norm, so the order is stable day-in day-out), edges 量 descending
  * (ties by pair). An edge whose end is not among the nodes cannot happen —
  * both queries walk the same posts — but is dropped rather than crashing the
- * chart, mirroring buildTagSpans' defensiveness.
+ * chart, mirroring buildTagSpans' defensiveness; a row the CHECKs would have
+ * refused throws (decodeStacking), like the 年表's.
  */
 export function buildGraph(
-  rawNodes: RawGraphNode[],
-  rawEdges: GraphEdge[],
+  nodeRows: Iterable<GraphNodeRow>,
+  edgeRows: Iterable<GraphEdgeRow>,
+  window?: DayWindow,
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const stones = new Map<string, GraphNode & { norm: string }>();
+  for (const r of nodeRows) {
+    const amount = amountOf(decodeStacking(r), window);
+    const stone = stones.get(r.id);
+    if (stone === undefined) {
+      stones.set(r.id, { id: r.id, name: r.name, color: r.color, amount, norm: r.norm });
+    } else {
+      stone.amount += amount;
+    }
+  }
+  const bridges = new Map<string, GraphEdge>();
+  for (const r of edgeRows) {
+    const amount = amountOf(decodeStacking(r), window);
+    const key = JSON.stringify([r.a, r.b]);
+    const bridge = bridges.get(key);
+    if (bridge === undefined) bridges.set(key, { a: r.a, b: r.b, amount });
+    else bridge.amount += amount;
+  }
   const byNorm = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
-  const nodes = [...rawNodes]
-    .sort((x, y) => y.count - x.count || byNorm(x.norm, y.norm))
+  const nodes = [...stones.values()]
+    .sort((x, y) => y.amount - x.amount || byNorm(x.norm, y.norm))
     .map(({ norm: _norm, ...node }) => node);
   const ids = new Set(nodes.map((node) => node.id));
-  const edges = rawEdges
+  const edges = [...bridges.values()]
     .filter((e) => ids.has(e.a) && ids.has(e.b))
-    .sort((x, y) => y.count - x.count || byNorm(x.a, y.a) || byNorm(x.b, y.b));
+    .sort((x, y) => y.amount - x.amount || byNorm(x.a, y.a) || byNorm(x.b, y.b));
   return { nodes, edges };
 }
 
@@ -391,8 +456,10 @@ export const statsRoutes = new Hono<Env>()
     // The axis's right edge for every form — the client never re-decides "today".
     const today = dayKey(Date.now());
 
-    // Shared SELECT list: span + count per tag, grouped. Which postTags column
-    // names the tag differs per form, so the join shape is built at each site.
+    // Shared SELECT list: span + count per tag, grouped (the count is the
+    // honest 枚数; the 量 is folded from the axis rows below). Which postTags
+    // column names the tag differs per form, so the join shape is built at
+    // each site.
     const spanColumns = {
       id: tag.id,
       name: tag.name,
@@ -402,11 +469,18 @@ export const statsRoutes = new Hono<Env>()
       count: count(),
     };
     const ownPosts = eq(post.userId, userId);
-    // The raw axis for the month segments (§8): one row per (苔片, tag) link
-    // with the 苔片's days, walked into months in core. Each form batches it
-    // with its span SQL — one D1 round trip, one snapshot — so a row's months
-    // cover exactly the 苔片 its count counts.
-    const axisColumns = { tagId: postTags.tagId, firstDay: post.firstDay, lastDay: post.lastDay };
+    // The raw axis for the 量 and the month segments (§8, ADR-0007): one row
+    // per (苔片, tag) link with the 苔片's days and 厚み, summed and walked into
+    // months in core. Each form batches it with its span SQL — one D1 round
+    // trip, one snapshot — so a row's 量 and months cover exactly the 苔片 its
+    // count counts.
+    const axisColumns = {
+      tagId: postTags.tagId,
+      firstDay: post.firstDay,
+      lastDay: post.lastDay,
+      thickness: post.thickness,
+    };
+    const setAxisColumns = { firstDay: post.firstDay, lastDay: post.lastDay, thickness: post.thickness };
 
     // ---- ?tags=t1,t2,…: the one AND row — posts carrying the whole set.
     if (parsed.data.tags !== undefined) {
@@ -428,10 +502,7 @@ export const statsRoutes = new Hono<Env>()
         .from(post)
         .where(inSet);
       // The set's 苔片 themselves — no tag column needed, the one row is the set.
-      const axisQuery = db
-        .select({ firstDay: post.firstDay, lastDay: post.lastDay })
-        .from(post)
-        .where(inSet);
+      const axisQuery = db.select(setAxisColumns).from(post).where(inSet);
       // The user filter is belt and braces against echoing a foreign name:
       // count ≥ 1 below proves every id is a real tag on the user's own posts.
       const namedQuery = db
@@ -454,12 +525,14 @@ export const statsRoutes = new Hono<Env>()
       });
       if (tagsInOrder.length !== ids.length) return c.json({ today, rows: [] });
 
+      const amounts = rowAmounts(axis);
       const row: TimelineRow = {
         tags: tagsInOrder,
         firstDay: agg.first,
         lastDay: agg.last,
         count: agg.count,
-        months: monthCounts(axis),
+        amount: amounts.amount,
+        months: amounts.months,
       };
       return c.json({ today, rows: [row] });
     }
@@ -485,10 +558,7 @@ export const statsRoutes = new Hono<Env>()
         .select({ first: min(post.firstDay), last: max(post.lastDay), count: count() })
         .from(post)
         .where(inSet);
-      const setAxisQuery = db
-        .select({ firstDay: post.firstDay, lastDay: post.lastDay })
-        .from(post)
-        .where(inSet);
+      const setAxisQuery = db.select(setAxisColumns).from(post).where(inSet);
       const namedQuery = db
         .select({ id: tag.id, name: tag.name })
         .from(tag)
@@ -537,14 +607,18 @@ export const statsRoutes = new Hono<Env>()
       .innerJoin(post, eq(postTags.postId, post.id))
       .where(ownPosts);
     const [raw, axis] = await db.batch([spanQuery, axisQuery]);
-    const months = monthCountsByTag(axis);
-    const rows: TimelineRow[] = buildTagSpans(raw).map((s) => ({
-      tags: [s.tag],
-      firstDay: s.firstDay,
-      lastDay: s.lastDay,
-      count: s.count,
-      months: months.get(s.tag.id) ?? [],
-    }));
+    const byTag = rowAmountsByTag(axis);
+    const rows: TimelineRow[] = buildTagSpans(raw).map((s) => {
+      const amounts = byTag.get(s.tag.id) ?? NO_AMOUNTS;
+      return {
+        tags: [s.tag],
+        firstDay: s.firstDay,
+        lastDay: s.lastDay,
+        count: s.count,
+        amount: amounts.amount,
+        months: amounts.months,
+      };
+    });
     return c.json({ today, rows });
   })
   // ---------------------------------------- tag graph (石のつながり, §6)
@@ -558,22 +632,25 @@ export const statsRoutes = new Hono<Env>()
     const ownPosts = eq(post.userId, userId);
     // 今月 / 今年 by overlap (ADR-0005): a 苔片 is in the period if it was still
     // there on the period's first day — `last_day >= 初日`; no 苔片 ends after
-    // today, so that is the whole test.
-    const inPeriod =
-      period === "all"
-        ? ownPosts
-        : and(ownPosts, gte(post.lastDay, periodStartDay(period, Date.now())));
+    // today, so that is the whole test. The same period is the window the 量
+    // is clipped to in core (ADR-0007): 初日 to today; 全期間 clips nothing.
+    const now = Date.now();
+    const window: DayWindow | undefined =
+      period === "all" ? undefined : { from: periodStartDay(period, now), to: dayKey(now) };
+    const inPeriod = window === undefined ? ownPosts : and(ownPosts, gte(post.lastDay, window.from));
 
-    // Per-stone counts, and the §6 self-join of data-model.md's 集計節:
-    // `a.tag_id < b.tag_id` hands each pair exactly one row. Batched — two
-    // statements, one D1 round trip, like the timeline's focus form.
+    // One row per (苔片, stone) link, and the §6 self-join of data-model.md's
+    // 集計節, one row per (苔片, pair): `a.tag_id < b.tag_id` hands each pair
+    // exactly once per 苔片. Not grouped — the 量 needs each 苔片's days and 厚み,
+    // and the summing is core's (buildGraph). Batched — two statements, one D1
+    // round trip, like the timeline's focus form.
+    const stacking = { firstDay: post.firstDay, lastDay: post.lastDay, thickness: post.thickness };
     const nodesQuery = db
-      .select({ id: tag.id, name: tag.name, norm: tag.norm, color: tag.color, count: count() })
+      .select({ id: tag.id, name: tag.name, norm: tag.norm, color: tag.color, ...stacking })
       .from(postTags)
       .innerJoin(post, eq(postTags.postId, post.id))
       .innerJoin(tag, eq(postTags.tagId, tag.id))
-      .where(inPeriod)
-      .groupBy(tag.id, tag.name, tag.norm, tag.color);
+      .where(inPeriod);
     const a = alias(postTags, "a");
     const b = alias(postTags, "b");
     const edgesQuery = db
@@ -583,13 +660,12 @@ export const statsRoutes = new Hono<Env>()
         // other and derail drizzle's positional mapping — so alias them apart.
         a: sql<string>`${a.tagId}`.as("a"),
         b: sql<string>`${b.tagId}`.as("b"),
-        count: count(),
+        ...stacking,
       })
       .from(a)
       .innerJoin(b, and(eq(b.postId, a.postId), lt(a.tagId, b.tagId)))
       .innerJoin(post, eq(a.postId, post.id))
-      .where(inPeriod)
-      .groupBy(a.tagId, b.tagId);
-    const [rawNodes, rawEdges] = await db.batch([nodesQuery, edgesQuery]);
-    return c.json(buildGraph(rawNodes, rawEdges));
+      .where(inPeriod);
+    const [nodeRows, edgeRows] = await db.batch([nodesQuery, edgesQuery]);
+    return c.json(buildGraph(nodeRows, edgeRows, window));
   });

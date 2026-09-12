@@ -12,12 +12,13 @@ import {
   buildTagSpans,
   graphQuerySchema,
   heatmapQuerySchema,
-  monthCounts,
-  monthCountsByTag,
   periodStartDay,
   resolveWindow,
+  rowAmounts,
+  rowAmountsByTag,
   timelineQuerySchema,
-  type RawGraphNode,
+  type GraphEdgeRow,
+  type GraphNodeRow,
 } from "./stats";
 
 // Same arrangement as posts.test.ts: the Node harness has no D1, so the route
@@ -280,24 +281,25 @@ describe("buildFocusRows — 選んだ石 as one row, then set × each co-occurr
     count,
   });
   const named = (...ids: string[]) => ids.map((id) => ({ id, name: id.toUpperCase() }));
+  const on = (firstDay: string, lastDay = firstDay, thickness: number | null = null) => ({
+    firstDay,
+    lastDay,
+    thickness,
+  });
+  const link = (tagId: string, firstDay: string, lastDay = firstDay, thickness: number | null = null) => ({
+    tagId,
+    ...on(firstDay, lastDay, thickness),
+  });
 
   it("draws the #30 one-stone form: the stone, then stone × co-occurring stones in 年表 order", () => {
     const rows = buildFocusRows({
       ids: ["ts"],
       agg: { first: "2026-09-01", last: "2026-09-05", count: 3 },
       named: named("ts"),
-      setAxis: [
-        { firstDay: "2026-09-01", lastDay: "2026-09-01" },
-        { firstDay: "2026-09-03", lastDay: "2026-09-03" },
-        { firstDay: "2026-09-05", lastDay: "2026-09-05" },
-      ],
+      setAxis: [on("2026-09-01"), on("2026-09-03"), on("2026-09-05")],
       // Handed back in whatever order SQLite grouped them; the fold sorts.
       cooc: [raw("hono", "2026-09-05", "2026-09-05", 1), raw("d1", "2026-09-03", "2026-09-05", 2)],
-      coocAxis: [
-        { tagId: "d1", firstDay: "2026-09-03", lastDay: "2026-09-03" },
-        { tagId: "d1", firstDay: "2026-09-05", lastDay: "2026-09-05" },
-        { tagId: "hono", firstDay: "2026-09-05", lastDay: "2026-09-05" },
-      ],
+      coocAxis: [link("d1", "2026-09-03"), link("d1", "2026-09-05"), link("hono", "2026-09-05")],
     });
     expect(rows).toEqual([
       {
@@ -305,7 +307,8 @@ describe("buildFocusRows — 選んだ石 as one row, then set × each co-occurr
         firstDay: "2026-09-01",
         lastDay: "2026-09-05",
         count: 3,
-        months: [{ month: "2026-09", count: 3 }],
+        amount: 3,
+        months: [{ month: "2026-09", amount: 3 }],
       },
       {
         tags: [
@@ -315,7 +318,8 @@ describe("buildFocusRows — 選んだ石 as one row, then set × each co-occurr
         firstDay: "2026-09-03",
         lastDay: "2026-09-05",
         count: 2,
-        months: [{ month: "2026-09", count: 2 }],
+        amount: 2,
+        months: [{ month: "2026-09", amount: 2 }],
       },
       {
         tags: [
@@ -325,7 +329,8 @@ describe("buildFocusRows — 選んだ石 as one row, then set × each co-occurr
         firstDay: "2026-09-05",
         lastDay: "2026-09-05",
         count: 1,
-        months: [{ month: "2026-09", count: 1 }],
+        amount: 1,
+        months: [{ month: "2026-09", amount: 1 }],
       },
     ]);
   });
@@ -333,21 +338,29 @@ describe("buildFocusRows — 選んだ石 as one row, then set × each co-occurr
   it("keeps the set in request order on every row, whatever order the names came back", () => {
     const rows = buildFocusRows({
       ids: ["vue", "案件"],
-      agg: { first: "2026-01-10", last: "2026-03-20", count: 12 },
+      agg: { first: "2026-01-10", last: "2026-03-20", count: 1 },
       named: named("案件", "vue"),
-      setAxis: [{ firstDay: "2026-01-10", lastDay: "2026-03-20" }],
-      cooc: [raw("hono", "2026-02-01", "2026-02-28", 5)],
-      coocAxis: [{ tagId: "hono", firstDay: "2026-02-01", lastDay: "2026-02-28" }],
+      setAxis: [on("2026-01-10", "2026-03-20", 100)],
+      cooc: [raw("hono", "2026-02-01", "2026-02-28", 1)],
+      coocAxis: [link("hono", "2026-02-01", "2026-02-28", 50)],
     });
     expect(rows.map((r) => r.tags.map((t) => t.id))).toEqual([
       ["vue", "案件"],
       ["vue", "案件", "hono"],
     ]);
-    // A 続く苔片 across three months: the set row's months add up to more than its count (ADR-0005).
+    // One 続く苔片 across three months at 100%: 22 + 28 + 20 days — the row's
+    // count stays 1, its 量 is the 70 days, and the months add up to it (ADR-0007).
+    expect([rows[0]?.count, rows[0]?.amount]).toEqual([1, 70]);
     expect(rows[0]?.months).toEqual([
-      { month: "2026-01", count: 1 },
-      { month: "2026-02", count: 1 },
-      { month: "2026-03", count: 1 },
+      { month: "2026-01", amount: 22 },
+      { month: "2026-02", amount: 28 },
+      { month: "2026-03", amount: 20 },
+    ]);
+    // February at 50%: 28 × 0.5.
+    expect([rows[1]?.count, rows[1]?.amount, rows[1]?.months]).toEqual([
+      1,
+      14,
+      [{ month: "2026-02", amount: 14 }],
     ]);
   });
 
@@ -356,7 +369,7 @@ describe("buildFocusRows — 選んだ石 as one row, then set × each co-occurr
       ids: ["a", "b"],
       agg: { first: "2026-09-02", last: "2026-09-02", count: 1 },
       named: named("a", "b"),
-      setAxis: [{ firstDay: "2026-09-02", lastDay: "2026-09-02" }],
+      setAxis: [on("2026-09-02")],
       cooc: [],
       coocAxis: [],
     });
@@ -382,6 +395,19 @@ describe("buildFocusRows — 選んだ石 as one row, then set × each co-occurr
         ...base,
       }),
     ).toEqual([]);
+  });
+
+  it("throws on a row the CHECKs would have refused — a broken store is not drawn", () => {
+    expect(() =>
+      buildFocusRows({
+        ids: ["a"],
+        agg: { first: "2026-09-01", last: "2026-09-02", count: 1 },
+        named: named("a"),
+        setAxis: [on("2026-09-01", "2026-09-02", null)],
+        cooc: [],
+        coocAxis: [],
+      }),
+    ).toThrow(RangeError);
   });
 });
 
@@ -422,41 +448,68 @@ describe("buildTagSpans", () => {
   });
 });
 
-describe("monthCounts — a row's 活動月: the months of the day axis, sparse and ascending", () => {
-  const on = (firstDay: string, lastDay = firstDay) => ({ firstDay, lastDay });
-
-  it("lists only months with a 苔片, oldest first, whatever order the rows came in", () => {
-    expect(monthCounts([on("2026-03-20"), on("2026-01-05"), on("2026-03-02")])).toEqual([
-      { month: "2026-01", count: 1 },
-      { month: "2026-03", count: 2 },
-    ]);
+describe("rowAmounts — a row's 量 and its 活動月 by 量, sparse and ascending", () => {
+  const on = (firstDay: string, lastDay = firstDay, thickness: number | null = null) => ({
+    firstDay,
+    lastDay,
+    thickness,
   });
 
-  it("counts a 続く苔片 in every month it touches — the months then add up to more than the 苔片", () => {
-    expect(monthCounts([on("2026-08-30", "2026-10-02")])).toEqual([
-      { month: "2026-08", count: 1 },
-      { month: "2026-09", count: 1 },
-      { month: "2026-10", count: 1 },
-    ]);
+  it("lists only months with a 苔片, oldest first, whatever order the rows came in — single days are 1 each", () => {
+    expect(rowAmounts([on("2026-03-20"), on("2026-01-05"), on("2026-03-02")])).toEqual({
+      amount: 3,
+      months: [
+        { month: "2026-01", amount: 1 },
+        { month: "2026-03", amount: 2 },
+      ],
+    });
   });
 
-  it("is empty for no 苔片", () => {
-    expect(monthCounts([])).toEqual([]);
+  it("gives a 続く苔片 each month its days × 厚み — the months add up to the row's 量 (ADR-0007)", () => {
+    // Aug 30–31, September, Oct 1–2 at 50%: 2 + 30 + 2 days.
+    expect(rowAmounts([on("2026-08-30", "2026-10-02", 50)])).toEqual({
+      amount: 17,
+      months: [
+        { month: "2026-08", amount: 1 },
+        { month: "2026-09", amount: 15 },
+        { month: "2026-10", amount: 1 },
+      ],
+    });
+  });
+
+  it("stacks single days and 続く苔片 alike, and keeps the count out of it — 3 苔片 can weigh 1.2", () => {
+    const { amount, months } = rowAmounts([on("2026-09-02"), on("2026-09-01", "2026-09-10", 1), on("2026-09-02")]);
+    expect(amount).toBeCloseTo(2.1, 12);
+    expect(months).toHaveLength(1);
+    expect(months[0]?.month).toBe("2026-09");
+    expect(months[0]?.amount).toBeCloseTo(2.1, 12);
+  });
+
+  it("is 0 and empty for no 苔片", () => {
+    expect(rowAmounts([])).toEqual({ amount: 0, months: [] });
+  });
+
+  it("throws on a row the CHECKs would have refused", () => {
+    expect(() => rowAmounts([on("2026-09-02", "2026-09-02", 60)])).toThrow(RangeError);
+    expect(() => rowAmounts([on("2026-09-05", "2026-09-02", 60)])).toThrow(RangeError);
   });
 });
 
-describe("monthCountsByTag — the same fold per stone", () => {
-  it("groups the axis rows by tag, each list sparse and ascending", () => {
-    const byTag = monthCountsByTag([
-      { tagId: "ts", firstDay: "2026-09-02", lastDay: "2026-09-02" },
-      { tagId: "moss", firstDay: "2026-09-02", lastDay: "2026-09-02" },
-      { tagId: "ts", firstDay: "2026-07-01", lastDay: "2026-07-01" },
+describe("rowAmountsByTag — the same fold per stone", () => {
+  it("groups the axis rows by tag, each 量 and months its own", () => {
+    const byTag = rowAmountsByTag([
+      { tagId: "ts", firstDay: "2026-09-02", lastDay: "2026-09-02", thickness: null },
+      { tagId: "moss", firstDay: "2026-09-02", lastDay: "2026-09-02", thickness: null },
+      { tagId: "ts", firstDay: "2026-07-01", lastDay: "2026-07-10", thickness: 60 },
     ]);
-    expect(byTag.get("ts")).toEqual([
-      { month: "2026-07", count: 1 },
-      { month: "2026-09", count: 1 },
-    ]);
-    expect(byTag.get("moss")).toEqual([{ month: "2026-09", count: 1 }]);
+    expect(byTag.get("ts")).toEqual({
+      amount: 7,
+      months: [
+        { month: "2026-07", amount: 6 },
+        { month: "2026-09", amount: 1 },
+      ],
+    });
+    expect(byTag.get("moss")).toEqual({ amount: 1, months: [{ month: "2026-09", amount: 1 }] });
     expect(byTag.has("ghost")).toBe(false);
   });
 });
@@ -490,40 +543,94 @@ describe("periodStartDay — 今月/今年 are cut in APP_TZ, like every other d
   });
 });
 
-describe("buildGraph", () => {
-  const rawNode = (
+describe("buildGraph — stones and bridges by 量, clipped to the period", () => {
+  const stone = (
     id: string,
-    norm: string,
-    count: number,
+    firstDay: string,
+    lastDay = firstDay,
+    thickness: number | null = null,
+    norm = id,
     color: string | null = null,
-  ): RawGraphNode => ({ id, name: id.toUpperCase(), norm, color, count });
+  ): GraphNodeRow => ({ id, name: id.toUpperCase(), norm, color, firstDay, lastDay, thickness });
+  const bridge = (
+    a: string,
+    b: string,
+    firstDay: string,
+    lastDay = firstDay,
+    thickness: number | null = null,
+  ): GraphEdgeRow => ({ a, b, firstDay, lastDay, thickness });
 
-  it("orders stones 苔片数 desc with norm ties, and keeps norm off the wire", () => {
+  it("sums each stone's 苔片 — a single day 1, a 続く苔片 its days × 厚み — and orders 量 desc with norm ties, norm kept off the wire", () => {
     const { nodes } = buildGraph(
-      [rawNode("b", "beta", 2), rawNode("c", "gamma", 5, "#3d6b4f"), rawNode("a", "alpha", 2)],
+      [
+        stone("b", "2026-09-01", "2026-09-01", null, "beta"),
+        stone("b", "2026-09-02", "2026-09-02", null, "beta"),
+        stone("c", "2026-08-28", "2026-09-06", 50, "gamma", "#3d6b4f"),
+        stone("a", "2026-09-01", "2026-09-01", null, "alpha"),
+        stone("a", "2026-09-03", "2026-09-03", null, "alpha"),
+      ],
       [],
     );
-    expect(nodes.map((n) => n.id)).toEqual(["c", "a", "b"]);
+    expect(nodes.map((n) => [n.id, n.amount])).toEqual([
+      ["c", 5],
+      ["a", 2],
+      ["b", 2],
+    ]);
     // The tag's own color rides along for the stone; nothing else is added.
-    expect(nodes[0]).toEqual({ id: "c", name: "C", color: "#3d6b4f", count: 5 });
+    expect(nodes[0]).toEqual({ id: "c", name: "C", color: "#3d6b4f", amount: 5 });
   });
 
-  it("orders bridges by co-occurrence desc, ties by pair", () => {
-    const nodes = [rawNode("a", "a", 9), rawNode("b", "b", 9), rawNode("c", "c", 9)];
+  it("clips every 苔片 to the window — 今月 sees only this month's days of a 案件 running since last year", () => {
+    const rows = [
+      stone("案件", "2025-11-01", "2026-09-02", 60),
+      stone("案件", "2026-09-02"),
+      stone("memo", "2026-08-31"),
+    ];
+    const all = buildGraph(rows, []);
+    expect(all.nodes.map((n) => [n.id, n.amount])).toEqual([
+      ["案件", 306 * 0.6 + 1],
+      ["memo", 1],
+    ]);
+    const month = buildGraph(rows, [], { from: "2026-09-01", to: "2026-09-02" });
+    // 2 days × 0.6 + the single day; the August memo weighs nothing here (the
+    // SQL would not even hand it over — `last_day >= 初日`).
+    expect(month.nodes.map((n) => [n.id, n.amount])).toEqual([
+      ["案件", 2.2],
+      ["memo", 0],
+    ]);
+  });
+
+  it("sums a bridge over the 苔片 carrying both, clipped the same way, ordered 量 desc then by pair", () => {
+    const nodes = [stone("a", "2026-09-01"), stone("b", "2026-09-01"), stone("c", "2026-09-01")];
     const { edges } = buildGraph(nodes, [
-      { a: "a", b: "c", count: 1 },
-      { a: "b", b: "c", count: 4 },
-      { a: "a", b: "b", count: 1 },
+      bridge("a", "c", "2026-09-01"),
+      bridge("b", "c", "2026-08-30", "2026-09-02", 100),
+      bridge("b", "c", "2026-09-01"),
+      bridge("a", "b", "2026-09-01"),
     ]);
     expect(edges).toEqual([
-      { a: "b", b: "c", count: 4 },
-      { a: "a", b: "b", count: 1 },
-      { a: "a", b: "c", count: 1 },
+      { a: "b", b: "c", amount: 5 },
+      { a: "a", b: "b", amount: 1 },
+      { a: "a", b: "c", amount: 1 },
     ]);
+    const month = buildGraph(nodes, [bridge("b", "c", "2026-08-30", "2026-09-02", 100)], {
+      from: "2026-09-01",
+      to: "2026-09-02",
+    });
+    expect(month.edges).toEqual([{ a: "b", b: "c", amount: 2 }]);
   });
 
   it("drops a bridge to a missing stone instead of crashing the map", () => {
-    const { edges } = buildGraph([rawNode("a", "a", 1)], [{ a: "a", b: "ghost", count: 1 }]);
+    const { edges } = buildGraph([stone("a", "2026-09-01")], [bridge("a", "ghost", "2026-09-01")]);
     expect(edges).toEqual([]);
+  });
+
+  it("throws on a row the CHECKs would have refused — a broken store is not drawn", () => {
+    expect(() => buildGraph([stone("a", "2026-09-01", "2026-09-01", 60)], [])).toThrow(RangeError);
+    expect(() => buildGraph([], [bridge("a", "b", "2026-09-01", "2026-09-05", null)])).toThrow(RangeError);
+  });
+
+  it("is empty for an empty period", () => {
+    expect(buildGraph([], [])).toEqual({ nodes: [], edges: [] });
   });
 });

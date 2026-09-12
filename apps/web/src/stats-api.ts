@@ -35,18 +35,24 @@ export type Heatmap = {
 export const getHeatmap = (): Promise<Heatmap> => request("/api/stats/heatmap");
 
 /**
- * 苔片 per 活動月: the JST `YYYY-MM` and its count. Sparse — only months with
- * a 苔片 — and ascending; the counts add up to the row's `count`.
+ * 量 per 活動月: the JST `YYYY-MM` and the 量 of the row's 苔片 in it (ADR-0007:
+ * a single day 1, a 続く苔片 that month's days × its 厚み). Sparse — only months
+ * with a 苔片 — and ascending; the amounts add up to the row's `amount`.
  */
-export type MonthCount = { month: string; count: number };
+export type MonthAmount = { month: string; amount: number };
 
-/** One row of the 年表: a tag set, its first/last JST day, the 苔片 count, and its 活動月 (the month segments, §8). */
+/**
+ * One row of the 年表: a tag set, its first/last JST day, the 苔片 count (「N 片」,
+ * an honest count), their 量 (a fraction — src/amount.ts formats it), and its
+ * 活動月 (the month segments, §8).
+ */
 export type TimelineRow = {
   tags: { id: string; name: string }[];
   firstDay: string;
   lastDay: string;
   count: number;
-  months: MonthCount[];
+  amount: number;
+  months: MonthAmount[];
 };
 
 /** `today` is server-decided (JST) — it is the axis's right edge in every view. */
@@ -66,13 +72,13 @@ export function getTimeline(opts: { focus?: string[]; tags?: string[] } = {}): P
   return request(`/api/stats/timeline${qs ? `?${qs}` : ""}`);
 }
 
-/** A stone in the relationship graph: display bits + 苔片 count in the period. */
-export type GraphNode = { id: string; name: string; color: string | null; count: number };
+/** A stone in the relationship graph: display bits + the 量 of its 苔片 in the period (ADR-0007, clipped to it). */
+export type GraphNode = { id: string; name: string; color: string | null; amount: number };
 
-/** A bridge: the two stones' ids (`a` < `b`) and how many 苔片 carry both tags. */
-export type GraphEdge = { a: string; b: string; count: number };
+/** A bridge: the two stones' ids (`a` < `b`) and the 量 of the 苔片 carrying both tags. */
+export type GraphEdge = { a: string; b: string; amount: number };
 
-/** The server owns the order: nodes and edges both come count-descending. */
+/** The server owns the order: nodes and edges both come 量-descending. */
 export type TagGraph = { nodes: GraphNode[]; edges: GraphEdge[] };
 
 /** 今月 / 今年 / 全期間 (visualization.md §6). The boundary is cut server-side in APP_TZ. */

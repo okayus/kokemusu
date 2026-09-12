@@ -95,7 +95,7 @@ test("register → post → today's moss darkens → reload → logout → login
   await expect(yearChart).toBeVisible();
   await expect(feedSection).toBeHidden();
   await expect(yearChart.locator("li.tl-row")).toHaveCount(2);
-  await expect(yearChart.locator(".tl-note").first()).toHaveText("1 片 · 1.0日/片");
+  await expect(yearChart.locator(".tl-note").first()).toHaveText("量 1 · 厚み 100%");
   await yearChart.getByRole("button", { name: "e2e", exact: true }).click();
   await expect(yearChart.getByText("「e2e」の内訳")).toBeVisible();
   const focusRows = yearChart.locator("li.tl-row");
@@ -112,12 +112,12 @@ test("register → post → today's moss darkens → reload → logout → login
   const graphChart = page.locator("section.tag-graph");
   await expect(graphChart.locator(".tg-node")).toHaveCount(2);
   await expect(graphChart.locator(".tg-edge")).toHaveCount(1);
-  // Anchored — the bridge's name ("e2e × 苔 · 1 片") contains a stone's too —
-  // and open on the count, which grows as the 苔片 below are stacked.
-  const mossStone = graphChart.getByRole("button", { name: /^苔 · \d+ 片$/ });
-  const e2eStone = graphChart.getByRole("button", { name: /^e2e · \d+ 片$/ });
+  // Anchored — the bridge's name ("e2e × 苔 · 量 1") contains a stone's too —
+  // and open on the 量, which grows as the 苔片 below are stacked.
+  const mossStone = graphChart.getByRole("button", { name: /^苔 · 量 \d+$/ });
+  const e2eStone = graphChart.getByRole("button", { name: /^e2e · 量 \d+$/ });
   // The bridge's name orders the pair by tag id (a < b), so match either spelling.
-  const bridge = graphChart.getByRole("button", { name: /^(e2e × 苔|苔 × e2e) · 1 片$/ });
+  const bridge = graphChart.getByRole("button", { name: /^(e2e × 苔|苔 × e2e) · 量 1$/ });
   await expect(mossStone).toHaveAttribute("aria-pressed", "false");
   await mossStone.click();
   await expect(mossStone).toHaveAttribute("aria-pressed", "true");
@@ -138,18 +138,18 @@ test("register → post → today's moss darkens → reload → logout → login
 
   // §6 on the wire, against the real sqlite: the self-join sees the one pair
   // (with `a` < `b`), and the JST period filter keeps a 苔片 posted "today"
-  // inside 今月.
+  // inside 今月. Stones and bridges carry a 量 (ADR-0007) — a single day's is 1.
   type GraphWire = {
-    nodes: { id: string; name: string; count: number }[];
-    edges: { a: string; b: string; count: number }[];
+    nodes: { id: string; name: string; amount: number }[];
+    edges: { a: string; b: string; amount: number }[];
   };
   const graph = (await (await page.request.get("/api/stats/graph")).json()) as GraphWire;
-  expect(graph.nodes.map((n) => [n.name, n.count]).sort()).toEqual([
+  expect(graph.nodes.map((n) => [n.name, n.amount]).sort()).toEqual([
     ["e2e", 1],
     ["苔", 1],
   ]);
   const pair = graph.nodes.map((n) => n.id).sort();
-  expect(graph.edges).toEqual([{ a: pair[0], b: pair[1], count: 1 }]);
+  expect(graph.edges).toEqual([{ a: pair[0], b: pair[1], amount: 1 }]);
   const monthGraph = (await (
     await page.request.get("/api/stats/graph?period=month")
   ).json()) as GraphWire;
@@ -166,7 +166,8 @@ test("register → post → today's moss darkens → reload → logout → login
       firstDay: string;
       lastDay: string;
       count: number;
-      months: { month: string; count: number }[];
+      amount: number;
+      months: { month: string; amount: number }[];
     }[];
   };
   const all = (await (await page.request.get("/api/stats/timeline")).json()) as TimelineWire;
@@ -176,13 +177,13 @@ test("register → post → today's moss darkens → reload → logout → login
     await page.request.get(`/api/stats/timeline?tags=${stoneIds.join(",")}`)
   ).json()) as TimelineWire;
   expect(combined.rows).toHaveLength(1);
-  expect(combined.rows[0]?.count).toBe(1);
+  expect([combined.rows[0]?.count, combined.rows[0]?.amount]).toEqual([1, 1]);
   expect(combined.rows[0]?.tags.map((t) => t.id)).toEqual(stoneIds);
 
   // 月セグメント棒 (visualization.md §8): every form carries each row's 活動月 —
-  // this JST month, the one 苔片 — folded in core from the raw axis, against
+  // this JST month, the one 苔片's 量 — folded in core from the raw axis, against
   // the real sqlite; on screen the bar paints one segment per row.
-  const thisMonth = [{ month: all.today.slice(0, 7), count: 1 }];
+  const thisMonth = [{ month: all.today.slice(0, 7), amount: 1 }];
   expect(all.rows.map((r) => r.months)).toEqual([thisMonth, thisMonth]);
   expect(combined.rows[0]?.months).toEqual(thisMonth);
   const focused = (await (
@@ -201,7 +202,7 @@ test("register → post → today's moss darkens → reload → logout → login
     await page.request.get(`/api/stats/timeline?focus=${pairIds.join(",")}`)
   ).json()) as TimelineWire;
   expect(pairFocus.rows).toHaveLength(1);
-  expect(pairFocus.rows[0]?.count).toBe(1);
+  expect([pairFocus.rows[0]?.count, pairFocus.rows[0]?.amount]).toEqual([1, 1]);
   expect(pairFocus.rows[0]?.tags.map((t) => t.id)).toEqual(pairIds);
   expect(pairFocus.rows[0]?.months).toEqual(thisMonth);
   expect((await page.request.get("/api/stats/timeline?focus=a,,b")).status()).toBe(400);
@@ -629,9 +630,10 @@ test("register → post → today's moss darkens → reload → logout → login
   // 続く苔片 (CONTEXT.md): いつ = yesterday, 〜いつまで = today. Each of its days
   // is +1 (today's cell is saturated at l4 already — its readout counts) while
   // the window counts it ONCE (計 7 片, not the cells' sum); the 年表 spans its
-  // stone from yesterday to today and lists the month(s) it touches; and 今日's
-  // window holds it — the overlap, on the wire and on screen. The dialog
-  // started clean: the past day was spent with the post, nothing carried over.
+  // stone from yesterday to today, weighs it 2 (two days at the composer's 100)
+  // over the month(s) it touches; and 今日's window holds it — the overlap, on
+  // the wire and on screen. The dialog started clean: the past day was spent
+  // with the post, nothing carried over.
   await stack.click();
   await expect(dialog.getByLabel("いつ", { exact: true })).toHaveValue("");
   await dialog.getByLabel("いつ", { exact: true }).fill(yesterday);
@@ -657,11 +659,17 @@ test("register → post → today's moss darkens → reload → logout → login
     (await (await page.request.get("/api/stats/timeline")).json()) as TimelineWire
   ).rows.find((r) => r.tags.length === 1 && r.tags[0]?.name === "続き");
   expect(spanRow).toBeDefined();
-  expect([spanRow?.firstDay, spanRow?.lastDay, spanRow?.count]).toEqual([yesterday, todayKey, 1]);
+  expect([spanRow?.firstDay, spanRow?.lastDay, spanRow?.count, spanRow?.amount]).toEqual([
+    yesterday,
+    todayKey,
+    1,
+    2,
+  ]);
   expect(spanRow?.months.map((m) => m.month)).toEqual([
     ...new Set([yesterday.slice(0, 7), todayKey.slice(0, 7)]),
   ]);
-  expect(spanRow?.months.every((m) => m.count === 1)).toBe(true);
+  // One day of it per month it touches, at 100 — the months add up to the 量.
+  expect(spanRow?.months.map((m) => m.amount)).toEqual(spanRow?.months.map(() => 2 / (spanRow?.months.length ?? 1)));
   // The 年表 is the other view (hidden here, still mounted): its row exists.
   await expect(yearChart.locator("li.tl-row", { hasText: "続き" })).toHaveCount(1);
   await today.click();
@@ -774,4 +782,52 @@ test("register → post → today's moss darkens → reload → logout → login
       `SELECT first_day, last_day, thickness FROM post WHERE id = '${spanRowId ?? ""}'`,
     ),
   ).toEqual([{ first_day: yesterday, last_day: todayKey, thickness: 100 }]);
+
+  // 量 (ADR-0007) through the whole stack, against the real sqlite: a 続く苔片
+  // of ten days at 厚み 60 — by fetch, since the composer still sends 100
+  // (plans/thickness.md PR 3) — weighs 6 while its 苔片 count is 1. The wire
+  // carries both, its months add up to the 量, 今月 clips the stone to this
+  // month's days of it; after a reload (a fetched 苔片 is news to the sections
+  // only then) the stone is named 量 6 and the 年表 row's note reads 量 6 ·
+  // 厚み 60% while the bar's title keeps the 1 片.
+  const tenDaysAgo = shiftDay(todayKey, -9);
+  expect(
+    await attempt("POST", "/api/posts", {
+      body: "六割の案件",
+      tags: ["案件"],
+      firstDay: tenDaysAgo,
+      lastDay: todayKey,
+      thickness: 60,
+    }),
+  ).toBe(201);
+  const stoneNamed = (g: GraphWire, name: string) => g.nodes.find((n) => n.name === name);
+  const weighed = (await (await page.request.get("/api/stats/graph")).json()) as GraphWire;
+  expect(stoneNamed(weighed, "案件")?.amount).toBe(6);
+  // 今月: the ten days' share inside this month × 0.6 — the same product the Worker forms.
+  const daysThisMonth = Math.min(10, +todayKey.slice(8, 10));
+  const weighedThisMonth = (await (
+    await page.request.get("/api/stats/graph?period=month")
+  ).json()) as GraphWire;
+  expect(stoneNamed(weighedThisMonth, "案件")?.amount).toBe((daysThisMonth * 60) / 100);
+  const weighedRow = (
+    (await (await page.request.get("/api/stats/timeline")).json()) as TimelineWire
+  ).rows.find((r) => r.tags.length === 1 && r.tags[0]?.name === "案件");
+  expect([weighedRow?.firstDay, weighedRow?.lastDay, weighedRow?.count, weighedRow?.amount]).toEqual([
+    tenDaysAgo,
+    todayKey,
+    1,
+    6,
+  ]);
+  expect(weighedRow?.months.reduce((sum, m) => sum + m.amount, 0)).toBeCloseTo(6, 9);
+  await page.reload();
+  await expect(graphChart.getByRole("button", { name: "案件 · 量 6", exact: true })).toBeVisible();
+  await viewLink("年表").click();
+  const weighedLi = yearChart.locator("li.tl-row", {
+    has: page.getByRole("button", { name: "案件", exact: true }),
+  });
+  await expect(weighedLi.locator(".tl-note")).toHaveText("量 6 · 厚み 60%");
+  await expect(weighedLi.locator("svg.tl-bar")).toHaveAttribute(
+    "aria-label",
+    new RegExp(`^${tenDaysAgo} 〜 ${todayKey} · 1 片`),
+  );
 });

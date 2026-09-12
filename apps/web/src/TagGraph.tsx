@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
+import { formatAmount } from "./amount";
 import type { TagSummary } from "./posts-api";
 import { getGraph, type GraphEdge, type GraphNode, type GraphPeriod, type TagGraph } from "./stats-api";
 
 // 石のつながり (docs/visualization.md §6): the co-occurrence network. A node is
-// a stone, grown by its 苔片 count — §6's stand-in for a per-tag heatmap; an
-// edge is moss bridging two stones that share 苔片, thicker the more they
-// share. Hand-written SVG over a hand-rolled deterministic force layout: tens
-// of stones need no library (§6 実装方針). The map is the 操作盤 of both views
+// a stone, grown by the 量 of its 苔片 — §6's stand-in for a per-tag heatmap; an
+// edge is moss bridging two stones that share 苔片, thicker the more 量 they
+// share. 量, not count, since ADR-0007: a 続く苔片 feeds its stones by its days
+// × 厚み, and 今月 / 今年 weigh only the days inside the period (the server
+// sums and clips; this file draws). Hand-written SVG over a hand-rolled
+// deterministic force layout: tens of stones need no library (§6 実装方針).
+// The map is the 操作盤 of both views
 // (features.md §3, 2026-09-07): a stone tap toggles it in or out of the
 // 選んだ石, a bridge tap toggles both its ends at once, and the set is read by
 // the 投稿一覧 (AND filter) and the 年表 (its axis) below — the page wires it up.
@@ -19,18 +23,20 @@ export const VIEW_H = 460;
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
 // Stones grow on a FIXED scale, like the heatmap's level ladder: the same size
-// means the same count in every period and every garden, and each 苔片 visibly
-// feeds its stone. Area ~ count via sqrt, floored to stay findable, capped so
-// one prolific stone cannot swallow the map.
+// means the same 量 in every period and every garden, and each 苔片 visibly
+// feeds its stone. Area ~ 量 via sqrt, floored to stay findable, capped so one
+// prolific stone cannot swallow the map (the cap is reached at 量 ≈ 46 — a
+// 案件 of a few months; whether the ladder wants a rethink for 量 is a call to
+// make on the real garden, ADR-0007).
 const R_MIN = 7;
 const R_GROW = 3.4;
 const R_MAX = 30;
 
-export const nodeRadius = (count: number) =>
-  round2(Math.min(R_MAX, R_MIN + R_GROW * Math.sqrt(count)));
+export const nodeRadius = (amount: number) =>
+  round2(Math.min(R_MAX, R_MIN + R_GROW * Math.sqrt(amount)));
 
 /** Bridges thicken on the same fixed terms: sqrt growth, capped. */
-export const edgeWidth = (count: number) => round2(Math.min(6, 1 + 0.9 * Math.sqrt(count)));
+export const edgeWidth = (amount: number) => round2(Math.min(6, 1 + 0.9 * Math.sqrt(amount)));
 
 export type LaidNode = { id: string; x: number; y: number; r: number };
 
@@ -60,7 +66,7 @@ export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[]): LaidNode[] 
   const cx = VIEW_W / 2;
   const cy = VIEW_H / 2;
   // Spiral seeding fills the disc evenly (a plain ring start survives the
-  // forces as a ring-shaped hollow), and since input is count-descending the
+  // forces as a ring-shaped hollow), and since input is 量-descending the
   // grown stones open near the centre with the young ones on the rim.
   const seedSpread = Math.min(VIEW_W, VIEW_H) / 2 - 40;
   const bodies: Body[] = nodes.map((node, i) => {
@@ -70,7 +76,7 @@ export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[]): LaidNode[] 
       id: node.id,
       x: cx + spread * Math.cos(angle),
       y: cy + spread * Math.sin(angle),
-      r: nodeRadius(node.count),
+      r: nodeRadius(node.amount),
       fx: 0,
       fy: 0,
     };
@@ -118,7 +124,7 @@ export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[]): LaidNode[] 
       const d = Math.max(0.01, Math.hypot(ux, uy));
       // FR attraction on the surface clearance (so several bridges cannot
       // squash their stones into each other), and uniform on purpose: the
-      // count already speaks through the bridge's thickness.
+      // 量 already speaks through the bridge's thickness.
       const slack = d - a.r - b.r - SPRING_REST;
       if (slack <= 0) continue;
       const pull = (slack * slack) / k / d;
@@ -157,12 +163,12 @@ export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[]): LaidNode[] 
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-/** Hover text and accessible name of a stone. */
-export const nodeTitle = (node: GraphNode) => `${node.name} · ${node.count} 片`;
+/** Hover text and accessible name of a stone: 「量 N」 (ADR-0007), the count is the 年表's. */
+export const nodeTitle = (node: GraphNode) => `${node.name} · 量 ${formatAmount(node.amount)}`;
 
-/** Hover text of a bridge: the pair and the 苔片 they share. */
-export const edgeTitle = (a: GraphNode, b: GraphNode, count: number) =>
-  `${a.name} × ${b.name} · ${count} 片`;
+/** Hover text of a bridge: the pair and the 量 they share. */
+export const edgeTitle = (a: GraphNode, b: GraphNode, amount: number) =>
+  `${a.name} × ${b.name} · 量 ${formatAmount(amount)}`;
 
 // ----------------------------------------------------------------- the chart
 
@@ -198,7 +204,7 @@ export function TagGraphChart(props: {
             b={nb}
             pa={pa}
             pb={pb}
-            count={e.count}
+            amount={e.amount}
             pressed={chosen.has(e.a) && chosen.has(e.b)}
             onBridgeTap={props.onBridgeTap}
           />
@@ -226,7 +232,7 @@ function Bridge(props: {
   b: GraphNode;
   pa: LaidNode;
   pb: LaidNode;
-  count: number;
+  amount: number;
   pressed: boolean;
   onBridgeTap: (a: TagSummary, b: TagSummary) => void;
 }) {
@@ -241,7 +247,7 @@ function Bridge(props: {
       role="button"
       tabIndex={0}
       aria-pressed={props.pressed}
-      aria-label={edgeTitle(a, b, props.count)}
+      aria-label={edgeTitle(a, b, props.amount)}
       onClick={tap}
       onKeyDown={(e) => {
         if (e.key === "Enter") tap();
@@ -251,7 +257,7 @@ function Bridge(props: {
         if (e.key === " ") tap();
       }}
     >
-      <title>{edgeTitle(a, b, props.count)}</title>
+      <title>{edgeTitle(a, b, props.amount)}</title>
       {/* An invisible fat stroke keeps a hairline bridge tappable. */}
       <line className="tg-hit-line" x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} strokeWidth={14} />
       <line
@@ -260,7 +266,7 @@ function Bridge(props: {
         y1={pa.y}
         x2={pb.x}
         y2={pb.y}
-        strokeWidth={edgeWidth(props.count)}
+        strokeWidth={edgeWidth(props.amount)}
       />
     </g>
   );
