@@ -13,18 +13,26 @@ import {
   type AdhocEntry,
   type ChartRow,
 } from "./TagTimeline";
-import type { MonthCount, TimelineRow } from "./stats-api";
+import type { MonthAmount, TimelineRow } from "./stats-api";
 
 // Same 流儀 as Heatmap.test.tsx: the chart is pure output of props, so the
 // geometry and structure a browser would be eyeballed for are asserted on the
 // static markup, and the layout math on the exported pure functions.
 
 const tag = (id: string, name = id) => ({ id, name });
-const m = (month: string, count = 1): MonthCount => ({ month, count });
-const span = (firstDay: string, lastDay: string, count: number, months: MonthCount[] = []) => ({
+const m = (month: string, amount = 1): MonthAmount => ({ month, amount });
+/** A span whose 量 is its count unless said otherwise — single days, the common case. */
+const span = (
+  firstDay: string,
+  lastDay: string,
+  count: number,
+  months: MonthAmount[] = [],
+  amount: number = count,
+) => ({
   firstDay,
   lastDay,
   count,
+  amount,
   months,
 });
 const chartRow = (id: string, s: ChartRow["span"]): ChartRow => ({
@@ -66,15 +74,15 @@ describe("monthSegments — the 活動月 cut to the span, on the bar's own axis
     const s = span("2026-01-15", "2026-03-10", 5, [m("2026-01", 3), m("2026-03", 2)]);
     expect(monthSegments(s, domain)).toEqual([
       // Jan 15–31 = 17 days, starting on day 14 of the axis.
-      { month: "2026-01", count: 3, x: 15.556, w: 18.889 },
+      { month: "2026-01", amount: 3, x: 15.556, w: 18.889 },
       // Mar 1–10 = 10 days from day 59; February is not there.
-      { month: "2026-03", count: 2, x: 65.556, w: 11.111 },
+      { month: "2026-03", amount: 2, x: 65.556, w: 11.111 },
     ]);
   });
 
   it("paints an interior month whole", () => {
     const s = span("2026-01-15", "2026-03-10", 6, [m("2026-01"), m("2026-02", 4), m("2026-03")]);
-    expect(monthSegments(s, domain)[1]).toEqual({ month: "2026-02", count: 4, x: 34.444, w: 31.111 });
+    expect(monthSegments(s, domain)[1]).toEqual({ month: "2026-02", amount: 4, x: 34.444, w: 31.111 });
   });
 
   it("skips a month the span does not reach instead of drawing off the bar", () => {
@@ -177,11 +185,21 @@ describe("axisTicks — labels for an axis of a given pixel width", () => {
   });
 });
 
-describe("rowNote — 件数 + 密度（期間 ÷ 件数）", () => {
-  it("shows one decimal under 10日/片 and rounds above", () => {
-    expect(rowNote(span("2026-09-01", "2026-09-10", 5))).toBe("5 片 · 2.0日/片");
-    expect(rowNote(span("2026-09-01", "2026-09-01", 1))).toBe("1 片 · 1.0日/片");
-    expect(rowNote(span("2026-01-01", "2026-04-10", 2))).toBe("2 片 · 50日/片");
+describe("rowNote — 「量 N · 厚み x%」, the 厚み measured over the row's period", () => {
+  it("reads a 続く苔片's own 厚み back, and a single day as 100%", () => {
+    expect(rowNote(span("2026-09-01", "2026-09-10", 1, [], 6))).toBe("量 6 · 厚み 60%");
+    expect(rowNote(span("2026-09-01", "2026-09-01", 1))).toBe("量 1 · 厚み 100%");
+    expect(rowNote(span("2022-04-01", "2024-03-31", 1, [], 438.6))).toBe("量 439 · 厚み 60%");
+  });
+
+  it("measures several single days over their spread — 5 in 10 days is 50%", () => {
+    expect(rowNote(span("2026-09-01", "2026-09-10", 5))).toBe("量 5 · 厚み 50%");
+    expect(rowNote(span("2026-01-01", "2026-04-10", 2))).toBe("量 2 · 厚み 2%");
+  });
+
+  it("passes 100% when a day holds several 苔片, and shows a 量 under 1 with a decimal", () => {
+    expect(rowNote(span("2026-09-01", "2026-09-01", 3))).toBe("量 3 · 厚み 300%");
+    expect(rowNote(span("2026-09-01", "2026-09-10", 1, [], 0.5))).toBe("量 0.5 · 厚み 5%");
   });
 });
 
@@ -203,12 +221,13 @@ describe("spanTitle", () => {
 
 describe("assembleRows — server rows + ad-hoc deep dives", () => {
   const base: TimelineRow[] = [
-    { tags: [tag("f")], firstDay: "2026-01-01", lastDay: "2026-09-01", count: 9, months: [] },
+    { tags: [tag("f")], firstDay: "2026-01-01", lastDay: "2026-09-01", count: 9, amount: 9, months: [] },
     {
       tags: [tag("f"), tag("a")],
       firstDay: "2026-02-01",
       lastDay: "2026-03-01",
       count: 4,
+      amount: 4,
       months: [],
     },
   ];
@@ -243,7 +262,7 @@ describe("TimelineChart markup", () => {
     );
     expect(html).toContain('x="0%" y="3" width="50%"');
     expect(html).toContain('x="50%" y="3" width="10%"');
-    expect(html).toContain("5 片 · 1.0日/片");
+    expect(html).toContain("量 5 · 厚み 100%");
     // The bar carries its period for hover and for assistive tech.
     expect(html).toContain('aria-label="2026-09-01 〜 2026-09-05 · 5 片"');
     expect(html).toContain("<title>2026-09-06 · 1 片</title>");
@@ -261,8 +280,8 @@ describe("TimelineChart markup", () => {
     expect(html.match(/class="tl-month"/g)).toHaveLength(2);
     expect(html).toContain('class="tl-month" x="0%" y="3" width="22.368%" height="10"');
     expect(html).toContain('class="tl-month" x="59.211%" y="3" width="13.158%" height="10"');
-    expect(html).toContain("<title>2026-01 · 3 片</title>");
-    expect(html).toContain("<title>2026-03 · 2 片</title>");
+    expect(html).toContain("<title>2026-01 · 量 3</title>");
+    expect(html).toContain("<title>2026-03 · 量 2</title>");
     // The segments sit in a group cut to the era's rounded outline, per bar.
     const clipId = html.match(/<clipPath id="([^"]+)"/)?.[1];
     expect(clipId).toBeDefined();

@@ -243,6 +243,19 @@ export function monthOf(day: DayKey): MonthKey {
 }
 
 /**
+ * The last day of a `YYYY-MM` month — the far edge of the window a 続く苔片's
+ * 量 is clipped to per 活動月 (core/stacking.ts `amountByMonth`). Day 0 of the
+ * next month on the UTC carrier, so February's is the 28th or the 29th by the
+ * calendar and nothing here knows which.
+ *
+ * @throws RangeError on a key that is not a month.
+ */
+export function lastDayOfMonth(month: MonthKey): DayKey {
+  const civil = requireCivil(`${month}-01`);
+  return toDayKey(utcMsToCivil(civilToUtcMs({ year: civil.year, month: civil.month + 1, day: 0 })));
+}
+
+/**
  * Every month from `from`'s to `to`'s, inclusive and ascending — the months a
  * 続く苔片 touches. An inverted pair is an empty span, like `enumerateDays`.
  *
@@ -338,23 +351,4 @@ export function bucketSpansByDay(
     }
   }
   return tallies;
-}
-
-/**
- * Fold 苔片 spans into "how many were there in each month" — `bucketSpansByDay`'s
- * sibling for the 年表's month segments (visualization.md §8). A 続く苔片 counts
- * once in every month it touches, so over a row these add up to AT LEAST the
- * row's 苔片 count — equal while every 苔片 is a single day.
- *
- * @throws RangeError as `bucketSpansByDay`, and on a span wider than MAX_SPAN_MONTHS.
- */
-export function bucketSpansByMonth(spans: Iterable<DaySpan>): Map<MonthKey, number> {
-  const counts = new Map<MonthKey, number>();
-  for (const span of spans) {
-    requireSpan(span);
-    for (const month of enumerateMonths(span.firstDay, span.lastDay)) {
-      counts.set(month, (counts.get(month) ?? 0) + 1);
-    }
-  }
-  return counts;
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  amountByMonth,
   amountOf,
   daySpanOf,
   decodeStacking,
@@ -9,6 +10,7 @@ import {
   patchStacking,
   spanDays,
   thicknessSchema,
+  totalAmount,
   type Stacking,
   type StackingRow,
 } from "./stacking";
@@ -263,6 +265,66 @@ describe("amountOf — 量 = days × 厚み, clipped to a window", () => {
     expect(amountOf(s, { from: "2026-01-16", to: "2026-02-15" })).toBe(8);
     // 2026 (this year) of the 2022–2024 案件: none. 2024 alone: Jan 1 .. Mar 31 = 91 days × 0.6.
     expect(amountOf(days("2022-04-01", "2024-03-31", 60), { from: "2024-01-01", to: "2024-12-31" })).toBe(54.6);
+  });
+});
+
+describe("totalAmount — several 苔片's 量 together, the same window on each", () => {
+  it("is 0 for none, n for n single days, and the sum of 続く苔片 at their 厚み", () => {
+    expect(totalAmount([])).toBe(0);
+    expect(totalAmount([day("2026-09-01"), day("2026-09-01"), day("2026-09-05")])).toBe(3);
+    expect(totalAmount([day("2026-09-05"), days("2022-04-01", "2024-03-31", 60)])).toBe(439.6);
+  });
+
+  it("clips every 苔片 to the window — a day outside it and a 続く苔片 it never touches weigh 0", () => {
+    const stackings = [day("2026-08-31"), day("2026-09-05"), days("2026-08-28", TODAY, 50)];
+    // The 続く苔片 has 6 of its 10 days in September.
+    expect(totalAmount(stackings, { from: "2026-09-01", to: TODAY })).toBe(4);
+    expect(totalAmount(stackings, { from: "2026-01-01", to: TODAY })).toBe(7);
+    expect(totalAmount(stackings, { from: "2026-09-07", to: "2026-09-30" })).toBe(0);
+  });
+});
+
+describe("amountByMonth — the 量 per 活動月, the months partitioning the days", () => {
+  it("puts a single day's 1 in its month, several in the same month adding up", () => {
+    expect(amountByMonth([day("2026-09-05")])).toEqual(new Map([["2026-09", 1]]));
+    expect(amountByMonth([day("2026-09-05"), day("2026-09-01"), day("2026-08-31")])).toEqual(
+      new Map([
+        ["2026-09", 2],
+        ["2026-08", 1],
+      ]),
+    );
+  });
+
+  it("gives a 続く苔片 each month's own days × 厚み — the months then add up to its 量", () => {
+    // Aug 28–31 = 4 days, Sep 1–6 = 6 days, at 50%.
+    expect(amountByMonth([days("2026-08-28", TODAY, 50)])).toEqual(
+      new Map([
+        ["2026-08", 2],
+        ["2026-09", 3],
+      ]),
+    );
+    // 2022-04 .. 2024-03 at 60%: 24 months, each its calendar days × 0.6 (April 18, February 2024 17.4).
+    const byMonth = amountByMonth([days("2022-04-01", "2024-03-31", 60)]);
+    expect(byMonth.size).toBe(24);
+    expect(byMonth.get("2022-04")).toBe(18);
+    expect(byMonth.get("2024-02")).toBeCloseTo(17.4, 12);
+    let sum = 0;
+    for (const v of byMonth.values()) sum += v;
+    expect(sum).toBeCloseTo(438.6, 9);
+  });
+
+  it("stacks 苔片 of both kinds in one month, sparse over the months none touched", () => {
+    const byMonth = amountByMonth([day("2026-09-05"), days("2026-06-30", "2026-07-01", 100), day("2026-09-01")]);
+    expect([...byMonth].sort()).toEqual([
+      ["2026-06", 1],
+      ["2026-07", 1],
+      ["2026-09", 2],
+    ]);
+    expect(byMonth.has("2026-08")).toBe(false);
+  });
+
+  it("is empty for none", () => {
+    expect(amountByMonth([])).toEqual(new Map());
   });
 });
 

@@ -35,7 +35,7 @@
 - **過去に積む・続く苔片・向き**（2026-09-06 決定、[ADR-0005](adr/0005-post-axis-is-day-range.md)。順番は
   A1 軸を「日」に ✅ #43 → B 向き ✅ #46 → A2 過去に積む・続く苔片 ✅ #47。計画は完了したので plans から削除、経緯は log）。
 - **厚み**（2026-09-09 決定、[ADR-0007](adr/0007-spanning-post-amount-is-days-times-thickness.md)。続く苔片の量 ＝ 日数 × 厚み。
-  PR 1 再構築 ＋ core ＋ API ✅ #55 → PR 2 集計 → PR 3 UI、[plans/thickness.md](plans/thickness.md)。エクスポートより先）。
+  PR 1 再構築 ＋ core ＋ API ✅ #55 → PR 2 集計 ✅ 2026-09-12 → PR 3 UI、[plans/thickness.md](plans/thickness.md)。エクスポートより先）。
 - 累積（積み上げ）グラフ、ストリーク、内訳・時間帯分布。
 - タグ運用（リネーム・統合・別名・アーカイブ・色/絵文字）。
 - 振り返りサマリー（週/月）。

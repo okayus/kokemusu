@@ -12,7 +12,16 @@
 // given. Everything here is pure; `today` is an argument.
 
 import { z } from "zod";
-import { countDays, earliestStackDay, isDayKey, type DayKey, type DaySpan } from "./day";
+import {
+  countDays,
+  earliestStackDay,
+  enumerateMonths,
+  isDayKey,
+  lastDayOfMonth,
+  type DayKey,
+  type DaySpan,
+  type MonthKey,
+} from "./day";
 
 /**
  * 厚み as declared: the share of a range's days it was worked on, a whole
@@ -162,6 +171,40 @@ export function amountOf(s: Stacking, window?: DayWindow): number {
   const to = window === undefined || s.lastDay < window.to ? s.lastDay : window.to;
   if (to < from) return 0;
   return (countDays(from, to) * s.thickness) / 100;
+}
+
+/**
+ * The 量 of several 苔片 together — a stone's, a bridge's, a 年表 row's — each
+ * clipped to the same window when one is given (the graph's 今月 / 今年; the
+ * 年表 and 全期間 give none). No 苔片 is 0.
+ */
+export function totalAmount(stackings: Iterable<Stacking>, window?: DayWindow): number {
+  let total = 0;
+  for (const s of stackings) total += amountOf(s, window);
+  return total;
+}
+
+/**
+ * The 量 of 苔片 per month they were there — the 年表's month axis
+ * (visualization.md §8), `bucketSpansByDay`'s sibling (core/day.ts) reading
+ * the 量 instead of counting: a `day` is 1 in its month, a 続く苔片 puts in
+ * each month it touches that month's days × its 厚み (`amountOf` clipped to
+ * the month). The months partition the days, so a row's months add up to its
+ * 量 — the 「和は量以上」 of ADR-0007 holds as equality. Sparse: a month no
+ * 苔片 touched is absent.
+ *
+ * @throws RangeError as `enumerateMonths` — a span wider than its ceiling.
+ */
+export function amountByMonth(stackings: Iterable<Stacking>): Map<MonthKey, number> {
+  const amounts = new Map<MonthKey, number>();
+  for (const s of stackings) {
+    const { firstDay, lastDay } = daySpanOf(s);
+    for (const month of enumerateMonths(firstDay, lastDay)) {
+      const inMonth = amountOf(s, { from: `${month}-01`, to: lastDayOfMonth(month) });
+      amounts.set(month, (amounts.get(month) ?? 0) + inMonth);
+    }
+  }
+  return amounts;
 }
 
 /**

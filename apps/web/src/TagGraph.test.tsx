@@ -16,13 +16,13 @@ import type { GraphEdge, GraphNode, TagGraph } from "./stats-api";
 // the layout on the exported pure functions — determinism above all, because a
 // map that reshuffles on every visit cannot be "watched growing".
 
-const node = (id: string, count: number): GraphNode => ({
+const node = (id: string, amount: number): GraphNode => ({
   id,
   name: id.toUpperCase(),
   color: null,
-  count,
+  amount,
 });
-const edge = (a: string, b: string, count = 1): GraphEdge => ({ a, b, count });
+const edge = (a: string, b: string, amount = 1): GraphEdge => ({ a, b, amount });
 
 const at = (laid: LaidNode[], id: string): LaidNode => {
   const hit = laid.find((p) => p.id === id);
@@ -31,19 +31,21 @@ const at = (laid: LaidNode[], id: string): LaidNode => {
 };
 
 describe("nodeRadius — stones grow on a fixed scale, like the heatmap's levels", () => {
-  it("grows monotonically with count and saturates", () => {
+  it("grows monotonically with 量 and saturates", () => {
     expect(nodeRadius(1)).toBeLessThan(nodeRadius(4));
     expect(nodeRadius(4)).toBeLessThan(nodeRadius(25));
     expect(nodeRadius(1000)).toBe(nodeRadius(10_000));
   });
 
-  it("keeps a one-苔片 stone visible", () => {
+  it("keeps a one-苔片 stone visible, and a clipped fraction of one smaller still", () => {
     expect(nodeRadius(1)).toBeGreaterThanOrEqual(7);
+    expect(nodeRadius(0.6)).toBeLessThan(nodeRadius(1));
+    expect(nodeRadius(0.6)).toBeGreaterThanOrEqual(7);
   });
 });
 
 describe("edgeWidth", () => {
-  it("thickens monotonically with co-occurrence and saturates", () => {
+  it("thickens monotonically with shared 量 and saturates", () => {
     expect(edgeWidth(1)).toBeLessThan(edgeWidth(4));
     expect(edgeWidth(4)).toBeLessThan(edgeWidth(16));
     expect(edgeWidth(100)).toBe(edgeWidth(1000));
@@ -109,9 +111,9 @@ describe("TagGraphChart markup", () => {
     );
   const html = render([]);
 
-  it("offers each stone as a keyboard-reachable button named with its count", () => {
-    expect(html).toContain('aria-label="A · 5 片"');
-    expect(html).toContain('aria-label="B · 1 片"');
+  it("offers each stone as a keyboard-reachable button named with its 量", () => {
+    expect(html).toContain('aria-label="A · 量 5"');
+    expect(html).toContain('aria-label="B · 量 1"');
     // 2 stones + 1 bridge: every tappable thing is a real tab stop.
     expect(html.match(/role="button"/g)).toHaveLength(3);
     expect(html.match(/tabindex="0"/g)).toHaveLength(3);
@@ -126,9 +128,9 @@ describe("TagGraphChart markup", () => {
 
   it("presses the chosen stones, and a bridge only once both its ends are chosen", () => {
     const one = render([{ id: "a", name: "A" }]);
-    expect(one).toMatch(/aria-pressed="true" aria-label="A · 5 片"/);
-    expect(one).toMatch(/aria-pressed="false" aria-label="B · 1 片"/);
-    expect(one).toMatch(/aria-pressed="false" aria-label="A × B · 2 片"/);
+    expect(one).toMatch(/aria-pressed="true" aria-label="A · 量 5"/);
+    expect(one).toMatch(/aria-pressed="false" aria-label="B · 量 1"/);
+    expect(one).toMatch(/aria-pressed="false" aria-label="A × B · 量 2"/);
     const both = render([
       { id: "b", name: "B" },
       { id: "a", name: "A" },
@@ -136,17 +138,28 @@ describe("TagGraphChart markup", () => {
     expect(both.match(/aria-pressed="true"/g)).toHaveLength(3);
   });
 
-  it("sizes stones by 苔片 count and bridges by co-occurrence", () => {
+  it("sizes stones by their 量 and bridges by the 量 they share", () => {
     expect(html).toContain(`r="${nodeRadius(5)}"`);
     expect(html).toContain(`r="${nodeRadius(1)}"`);
     expect(html).toContain(`stroke-width="${edgeWidth(2)}"`);
   });
 
+  it("names a stone's fractional 量 rounded for display only — 438.6 reads 量 439", () => {
+    const thick: TagGraph = { nodes: [node("案件", 438.6), node("memo", 0.5)], edges: [edge("案件", "memo", 0.5)] };
+    const html2 = renderToStaticMarkup(
+      <TagGraphChart graph={thick} selected={[]} onStoneTap={() => {}} onBridgeTap={() => {}} />,
+    );
+    expect(html2).toContain('aria-label="案件 · 量 439"');
+    expect(html2).toContain('aria-label="MEMO · 量 0.5"');
+    expect(html2).toContain('aria-label="案件 × MEMO · 量 0.5"');
+    expect(html2).toContain(`r="${nodeRadius(438.6)}"`);
+  });
+
   it("offers the bridge as a button named with the pair, with a fat hit stroke", () => {
     // Its landing is the 両タグ post list; a hairline bridge stays tappable
     // through the transparent 14px hit line.
-    expect(html).toContain('aria-label="A × B · 2 片"');
-    expect(html).toContain("<title>A × B · 2 片</title>");
+    expect(html).toContain('aria-label="A × B · 量 2"');
+    expect(html).toContain("<title>A × B · 量 2</title>");
     expect(html).toContain('class="tg-hit-line"');
     expect(html).not.toContain('aria-hidden="true"');
   });

@@ -3,7 +3,6 @@ import {
   APP_TZ,
   addDays,
   bucketSpansByDay,
-  bucketSpansByMonth,
   countDays,
   dayKey,
   dayOfWeek,
@@ -11,6 +10,7 @@ import {
   enumerateDays,
   enumerateMonths,
   isDayKey,
+  lastDayOfMonth,
   monthOf,
   parseDayKey,
 } from "./day";
@@ -196,6 +196,22 @@ describe("monthOf cuts a day to its month", () => {
   });
 });
 
+describe("lastDayOfMonth — the far edge of a month's window", () => {
+  it("knows 30, 31 and February's 28 or 29 from the calendar", () => {
+    expect(lastDayOfMonth("2026-09")).toBe("2026-09-30");
+    expect(lastDayOfMonth("2026-12")).toBe("2026-12-31");
+    expect(lastDayOfMonth("2026-02")).toBe("2026-02-28");
+    expect(lastDayOfMonth("2024-02")).toBe("2024-02-29");
+    expect(lastDayOfMonth("2100-02")).toBe("2100-02-28");
+  });
+
+  it("rejects a key that is not a month", () => {
+    expect(() => lastDayOfMonth("2026-13")).toThrow(RangeError);
+    expect(() => lastDayOfMonth("2026-9")).toThrow(RangeError);
+    expect(() => lastDayOfMonth("2026-09-01")).toThrow(RangeError);
+  });
+});
+
 describe("enumerateMonths lists the months a span touches", () => {
   it("is inclusive on both ends and ascending, across a year end", () => {
     expect(enumerateMonths("2026-09-15", "2026-09-20")).toEqual(["2026-09"]);
@@ -310,39 +326,6 @@ describe("bucketSpansByDay folds 苔片 onto the day axis", () => {
       { day: "2026-08-24", count: 0 },
       { day: "2026-08-25", count: 1 },
     ]);
-  });
-});
-
-describe("bucketSpansByMonth folds 苔片 onto the month axis", () => {
-  const span = (firstDay: string, lastDay: string) => ({ firstDay, lastDay });
-
-  it("counts per month, in ascending order of first appearance, and nothing for nothing", () => {
-    expect(bucketSpansByMonth([])).toEqual(new Map());
-    const counts = bucketSpansByMonth([
-      span("2026-08-31", "2026-08-31"),
-      span("2026-09-01", "2026-09-01"),
-      span("2026-09-15", "2026-09-15"),
-      span("2026-11-03", "2026-11-03"),
-    ]);
-    expect([...counts]).toEqual([
-      ["2026-08", 1],
-      ["2026-09", 2],
-      ["2026-11", 1],
-    ]);
-  });
-
-  it("a 続く苔片 across months counts once in each — the months add up to more than the 苔片", () => {
-    const counts = bucketSpansByMonth([span("2026-08-30", "2026-10-02"), span("2026-09-10", "2026-09-10")]);
-    expect([...counts]).toEqual([
-      ["2026-08", 1],
-      ["2026-09", 2],
-      ["2026-10", 1],
-    ]);
-    expect([...counts.values()].reduce((a, b) => a + b, 0)).toBeGreaterThan(2);
-  });
-
-  it("throws on an inverted span instead of miscounting", () => {
-    expect(() => bucketSpansByMonth([span("2026-10-01", "2026-09-30")])).toThrow(RangeError);
   });
 });
 
