@@ -627,17 +627,22 @@ test("register → post → today's moss darkens → reload → logout → login
   ]);
   await periodChip.click();
 
-  // 続く苔片 (CONTEXT.md): いつ = yesterday, 〜いつまで = today. Each of its days
-  // is +1 (today's cell is saturated at l4 already — its readout counts) while
-  // the window counts it ONCE (計 7 片, not the cells' sum); the 年表 spans its
-  // stone from yesterday to today, weighs it 2 (two days at the composer's 100)
-  // over the month(s) it touches; and 今日's window holds it — the overlap, on
-  // the wire and on screen. The dialog started clean: the past day was spent
-  // with the post, nothing carried over.
+  // 続く苔片 (CONTEXT.md): いつ = yesterday, 〜いつまで = today. The 厚み slider
+  // (ADR-0007, features.md §1) is not there for the one day and appears with
+  // the second, at 100 (毎日) with its 換算; left there, the 苔片 is stacked at
+  // 100. Each of its days is +1 (today's cell is saturated at l4 already — its
+  // readout counts) while the window counts it ONCE (計 7 片, not the cells'
+  // sum); the 年表 spans its stone from yesterday to today, weighs it 2 (two
+  // days at 100) over the month(s) it touches; and 今日's window holds it — the
+  // overlap, on the wire and on screen. The dialog started clean: the past day
+  // was spent with the post, nothing carried over.
   await stack.click();
   await expect(dialog.getByLabel("いつ", { exact: true })).toHaveValue("");
   await dialog.getByLabel("いつ", { exact: true }).fill(yesterday);
+  await expect(dialog.getByLabel("厚み", { exact: true })).toHaveCount(0);
   await dialog.getByLabel("〜いつまで").fill(todayKey);
+  await expect(dialog.getByLabel("厚み", { exact: true })).toHaveValue("100");
+  await expect(dialog.locator("output")).toHaveText("100% · 2 日のうち 2 日分");
   await dialog.getByLabel("いまの苔片").fill("二日続いた苔片");
   await fillTags(dialog, ["続き"]);
   await dialog.getByRole("button", { name: "積む", exact: true }).click();
@@ -677,14 +682,14 @@ test("register → post → today's moss darkens → reload → logout → login
   const spanCard = timeline.locator("li.post", { hasText: "二日続いた苔片" });
   await expect(spanCard).toBeVisible();
   await expect(spanCard.locator(".post-days")).toHaveText(
-    `${slashed(yesterday)} 〜 ${slashed(todayKey)}`,
+    `${slashed(yesterday)} 〜 ${slashed(todayKey)} · 厚み 100%`,
   );
   await expect(spanCard.locator(".post-posted")).toHaveText(`${shortDay(todayKey)} に積む`);
   const todaysPosts = (await (
     await page.request.get("/api/posts", { params: { from: todayKey, to: todayKey } })
   ).json()) as PostsWire;
-  // A range from the composer carries 厚み 100 (毎日) until the slider lands
-  // (plans/thickness.md PR 3); a single day carries none (ADR-0007).
+  // A range from the composer carries the slider's 厚み — 100 (毎日) untouched;
+  // a single day carries none (ADR-0007).
   expect(todaysPosts.posts.find((p) => p.body === "二日続いた苔片")).toMatchObject({
     body: "二日続いた苔片",
     firstDay: yesterday,
@@ -783,9 +788,39 @@ test("register → post → today's moss darkens → reload → logout → login
     ),
   ).toEqual([{ first_day: yesterday, last_day: todayKey, thickness: 100 }]);
 
+  // The 厚み from the screen (features.md §1): 編集 on the 続く苔片 folds its
+  // days as 「日: … · 厚み 100%」; opened, the slider stands at the 苔片's 100
+  // with its 換算, set to 60 the 換算 follows, and 保存 sends 60 — the card says
+  // so, the row holds it, and the 年表 row now weighs 2 days × 60% = 1.2.
+  await spanCard.getByRole("button", { name: "編集", exact: true }).click();
+  const spanEdit = page.locator("form.post-edit");
+  const spanFold = spanEdit.locator("details.compose-days > summary");
+  await expect(spanFold).toHaveText(`日: ${slashed(yesterday)} 〜 ${slashed(todayKey)} · 厚み 100%`);
+  await spanFold.click();
+  const thickness = spanEdit.getByLabel("厚み", { exact: true });
+  await expect(thickness).toHaveValue("100");
+  await expect(spanEdit.locator("output")).toHaveText("100% · 2 日のうち 2 日分");
+  await thickness.fill("60");
+  await expect(spanEdit.locator("output")).toHaveText("60% · 2 日のうち 1 日分");
+  await spanEdit.getByRole("button", { name: "保存" }).click();
+  await expect(spanEdit).toHaveCount(0);
+  await expect(spanCard.locator(".post-days")).toHaveText(
+    `${slashed(yesterday)} 〜 ${slashed(todayKey)} · 厚み 60%`,
+  );
+  expect(
+    queryRows<{ thickness: number | null }>(
+      `SELECT thickness FROM post WHERE id = '${spanRowId ?? ""}'`,
+    ),
+  ).toEqual([{ thickness: 60 }]);
+  const thinned = (
+    (await (await page.request.get("/api/stats/timeline")).json()) as TimelineWire
+  ).rows.find((r) => r.tags.length === 1 && r.tags[0]?.name === "続き");
+  expect(thinned?.count).toBe(1);
+  expect(thinned?.amount).toBeCloseTo(1.2, 9);
+
   // 量 (ADR-0007) through the whole stack, against the real sqlite: a 続く苔片
-  // of ten days at 厚み 60 — by fetch, since the composer still sends 100
-  // (plans/thickness.md PR 3) — weighs 6 while its 苔片 count is 1. The wire
+  // of ten days at 厚み 60 — by fetch, its days being past — weighs 6 while its
+  // 苔片 count is 1. The wire
   // carries both, its months add up to the 量, 今月 clips the stone to this
   // month's days of it; after a reload (a fetched 苔片 is news to the sections
   // only then) the stone is named 量 6 and the 年表 row's note reads 量 6 ·

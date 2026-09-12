@@ -441,6 +441,69 @@ dialog.compose h2 {
   margin: 0;
 }
 
+/* 厚み (features.md §1, ADR-0007): the third part of 積む日, there only while
+   いつ and 〜いつまで make a range. A native range slider — the moss accent-color
+   dresses it (modern-web-guidance/brand-consistent-forms) — with its 目盛り
+   from the datalist, the 換算 in an <output> beside the label, and the 目盛り's
+   names under the track, each a small button that sets the value. */
+.thickness-field {
+  flex-basis: 100%;
+}
+
+.thickness-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.thickness-head output {
+  font-size: 0.85rem;
+  color: var(--quiet);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The text-field dress (100% × 48px box) is not a slider's; the width stays. */
+.thickness-field input[type="range"] {
+  display: block;
+  inline-size: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  margin: 0.25rem 0 0;
+}
+
+/* The names sit where their ticks are: a tick at value v is under the thumb's
+   centre, thumb/2 + (v − 1)/99 × (track − thumb) from the start (--at is the
+   0..1 share, set inline). 毎日, at the end, hangs from the end edge instead
+   so nothing spills past the field. */
+.thickness-ticks {
+  position: relative;
+  block-size: 1.25rem;
+  --thumb: 16px;
+}
+
+.thickness-tick {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: calc(var(--thumb) / 2 + var(--at) * (100% - var(--thumb)));
+  translate: -50% 0;
+  min-height: 0;
+  padding: 0 0.2rem;
+  border: 0;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  color: var(--quiet);
+  white-space: nowrap;
+}
+
+.thickness-tick:last-child {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+  translate: 0 0;
+}
+
 /* In the edit form the fold sits among .field blocks: the same spacing. */
 .post-edit .compose-days {
   margin-block-end: 1.25rem;

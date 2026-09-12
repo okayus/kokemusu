@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ComposeDialog, DaysDisclosure, isComposeShortcut, stoneNames } from "./Compose";
+import { ComposeDialog, DaysDisclosure, DaysField, isComposeShortcut, stoneNames } from "./Compose";
 
 describe("isComposeShortcut — `n` opens the dialog only when the key would otherwise do nothing", () => {
   const plain = {
@@ -111,6 +111,8 @@ describe("ComposeDialog", () => {
     expect(html).toContain('<label for="post-first-day">いつ</label>');
     expect(html).toContain('<label for="post-last-day">〜いつまで</label>');
     expect(html).toContain("空のままなら今日に。");
+    // No range yet, so no 厚み (ADR-0007: a single day has none).
+    expect(html).not.toContain('type="range"');
   });
 
   it("orders the fields 本文 → 向き → タグ → 積む日, the days last (2026-09-06)", () => {
@@ -148,13 +150,93 @@ describe("ComposeDialog", () => {
   });
 });
 
+describe("DaysField — the 厚み slider, there only while the two fields make a range (ADR-0007)", () => {
+  const render = (firstDay: string, lastDay: string, thickness = 100, today: string | null = "2026-09-06") =>
+    renderToStaticMarkup(
+      <DaysField
+        idPrefix="x"
+        firstDay={firstDay}
+        lastDay={lastDay}
+        thickness={thickness}
+        today={today}
+        hint="ヒント"
+        onChange={() => {}}
+      />,
+    );
+
+  it("is a native range 1..100 in whole steps, at the slider's value, with the 目盛り as its datalist", () => {
+    const html = render("2022-04-01", "2024-03-31", 60);
+    const slider = inputTag(html, "x-thickness");
+    expect(slider).toContain('type="range"');
+    expect(slider).toContain('name="thickness"');
+    expect(slider).toContain('min="1"');
+    expect(slider).toContain('max="100"');
+    expect(slider).toContain('step="1"');
+    expect(slider).toContain('list="x-thickness-ticks"');
+    expect(slider).toContain('value="60"');
+    expect(slider).toContain('aria-describedby="x-thickness-note"');
+    expect(html).toContain('<label for="x-thickness">厚み</label>');
+    const ticks = html.match(/<datalist id="x-thickness-ticks">.*?<\/datalist>/)?.[0] ?? "";
+    for (const [value, label] of [
+      ["14", "週 1"],
+      ["60", "仕事"],
+      ["71", "平日"],
+      ["100", "毎日"],
+    ]) {
+      const option = ticks.match(new RegExp(`<option [^>]*value="${value}"[^>]*>`))?.[0] ?? "";
+      expect(option, value).toContain(`label="${label}"`);
+    }
+  });
+
+  it("shows the 換算 in an <output> for the slider — 731 days at 60% are 439", () => {
+    const html = render("2022-04-01", "2024-03-31", 60);
+    expect(html).toContain(
+      '<output id="x-thickness-note" for="x-thickness">60% · 731 日のうち 439 日分</output>',
+    );
+    expect(render("2026-09-05", "2026-09-06", 100)).toContain(">100% · 2 日のうち 2 日分</output>");
+  });
+
+  it("puts the 目盛り's names under the track as buttons that set the value, each placed by its share of the track", () => {
+    const html = render("2022-04-01", "2024-03-31", 60);
+    expect(html.match(/class="thickness-tick"/g)).toHaveLength(4);
+    expect(html).toContain('aria-label="週 1 14%"');
+    expect(html).toContain('aria-label="仕事 60%"');
+    expect(html).toContain('aria-label="平日 71%"');
+    expect(html).toContain('aria-label="毎日 100%"');
+    expect(html).toContain('style="--at:0"'.replace("0", String((14 - 1) / 99)));
+    expect(html).toContain('style="--at:1"');
+    // Never a submit: the tick is a value, not the form's button.
+    expect(html.match(/<button type="button" class="thickness-tick"/g)).toHaveLength(4);
+  });
+
+  it("shows no slider for a single day, one field, nothing, or an inverted pair — only a range has a 厚み", () => {
+    for (const [first, last] of [
+      ["2026-09-05", "2026-09-05"],
+      ["2026-09-05", ""],
+      ["", "2026-09-05"],
+      ["", ""],
+      ["2026-09-06", "2026-09-05"],
+    ]) {
+      const html = render(first ?? "", last ?? "", 60);
+      expect(html, `${first} / ${last}`).not.toContain('type="range"');
+      expect(html).not.toContain("<output");
+      expect(html).not.toContain("thickness-tick");
+    }
+  });
+
+  it("keeps the slider while today is unknown — the range is the fields' own, not the ceiling's", () => {
+    expect(inputTag(render("2026-09-01", "2026-09-05", 60, null), "x-thickness")).toContain('type="range"');
+  });
+});
+
 describe("DaysDisclosure — the edit form's fold, whose summary names the days while folded", () => {
-  const render = (firstDay: string, lastDay: string, defaultOpen = false) =>
+  const render = (firstDay: string, lastDay: string, defaultOpen = false, thickness = 100) =>
     renderToStaticMarkup(
       <DaysDisclosure
         idPrefix="edit-x"
         firstDay={firstDay}
         lastDay={lastDay}
+        thickness={thickness}
         today="2026-09-06"
         hint="ヒント"
         defaultOpen={defaultOpen}
@@ -162,14 +244,17 @@ describe("DaysDisclosure — the edit form's fold, whose summary names the days 
       />,
     );
 
-  it("reads 日を選ぶ with nothing chosen, the day or the range once chosen", () => {
+  it("reads 日を選ぶ with nothing chosen, the day or the range — with its 厚み — once chosen", () => {
     expect(render("", "")).toContain("<summary>日を選ぶ</summary>");
     expect(render("2026-09-05", "2026-09-05")).toContain("<summary>日: 2026/09/05</summary>");
     expect(render("2026-09-01", "2026-09-05")).toContain(
-      "<summary>日: 2026/09/01 〜 2026/09/05</summary>",
+      "<summary>日: 2026/09/01 〜 2026/09/05 · 厚み 100%</summary>",
     );
-    // One field alone is that single day.
-    expect(render("", "2026-09-05")).toContain("<summary>日: 2026/09/05</summary>");
+    expect(render("2026-09-01", "2026-09-05", false, 60)).toContain(
+      "<summary>日: 2026/09/01 〜 2026/09/05 · 厚み 60%</summary>",
+    );
+    // One field alone is that single day — and a single day has no 厚み to name.
+    expect(render("", "2026-09-05", false, 60)).toContain("<summary>日: 2026/09/05</summary>");
   });
 
   it("hides the group's legend — the summary is the name here, but a reader still gets one", () => {

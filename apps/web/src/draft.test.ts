@@ -12,6 +12,7 @@ describe("parseDraft", () => {
           kind: "input",
           firstDay: "2026-09-01",
           lastDay: "2026-09-05",
+          thickness: 60,
         }),
       ),
     ).toEqual({
@@ -21,14 +22,28 @@ describe("parseDraft", () => {
       kind: "input",
       firstDay: "2026-09-01",
       lastDay: "2026-09-05",
+      thickness: 60,
     });
   });
 
-  it("reads a draft saved before the 向き radio and 日を選ぶ as 未分類・今日", () => {
+  it("reads a draft saved before the 向き radio, 日を選ぶ and the 厚み slider as 未分類・今日・毎日", () => {
     expect(parseDraft(JSON.stringify({ body: "本文", tags: "" }))).toEqual({
       ...EMPTY_DRAFT,
       body: "本文",
     });
+    expect(EMPTY_DRAFT.thickness).toBe(100);
+  });
+
+  it("reads a 厚み that is not a whole 1..100 as 毎日 rather than dropping the draft", () => {
+    const thickness = (value: unknown) =>
+      parseDraft(JSON.stringify({ body: "本文", tags: "", thickness: value }))?.thickness;
+    expect(thickness(60)).toBe(60);
+    expect(thickness(1)).toBe(1);
+    expect(thickness(0)).toBe(100);
+    expect(thickness(101)).toBe(100);
+    expect(thickness(59.5)).toBe(100);
+    expect(thickness("60")).toBe(100);
+    expect(thickness(null)).toBe(100);
   });
 
   it("reads the old field's comma-separated tags as stones, and the chip field's array as it is", () => {
@@ -75,5 +90,9 @@ describe("isEmptyDraft", () => {
     expect(isEmptyDraft({ ...EMPTY_DRAFT, kind: "output" })).toBe(false);
     expect(isEmptyDraft({ ...EMPTY_DRAFT, firstDay: "2026-09-01" })).toBe(false);
     expect(isEmptyDraft({ ...EMPTY_DRAFT, lastDay: "2026-09-05" })).toBe(false);
+  });
+
+  it("does not count the 厚み — a moved slider with no range to show it is nothing to resume", () => {
+    expect(isEmptyDraft({ ...EMPTY_DRAFT, thickness: 60 })).toBe(true);
   });
 });

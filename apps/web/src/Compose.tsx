@@ -11,9 +11,18 @@
 // carry-over of tags to the next 苔片 (a forgotten stone would grow moss on the
 // wrong rock, and it counts in every visualization), and no carry-over of a
 // past day either.
-import { useEffect, useId, useRef, useState, type Ref } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type Ref } from "react";
 import { describeApiError, isApiError } from "./api";
-import { daysLabel, earliestStackDay, stackDaysInput } from "./days";
+import {
+  daysLabel,
+  earliestStackDay,
+  isRange,
+  stackingInput,
+  THICKNESS_TICKS,
+  thicknessLabel,
+  thicknessNote,
+  type DaysFields,
+} from "./days";
 import { EMPTY_DRAFT, loadDraft, saveDraft, type Draft } from "./draft";
 import { submitOnCmdEnter } from "./form";
 import { KIND_CHOICES, type PostKind } from "./kind";
@@ -176,8 +185,7 @@ export function KindField(props: {
   );
 }
 
-/** The two date fields as typed — `YYYY-MM-DD` the way the fields spell it, "" = not chosen. */
-export type DaysFields = { firstDay: string; lastDay: string };
+export type { DaysFields } from "./days";
 
 type DaysFieldProps = DaysFields & {
   /** Prefix for the two ids (the composer's and each edit form's must differ). */
@@ -204,12 +212,31 @@ type DaysFieldProps = DaysFields & {
  * native constraints first; the server's check is the security half). `min`
  * is the Worker's floor spelled client-side (days.ts). Controlled by whoever
  * renders it — the fields must hold values to bound each other.
+ *
+ * The third part, 厚み (ADR-0007), is there only while the two make a range —
+ * a single day has no 厚み, so a single day shows no slider. A native range
+ * (1..100, the moss `accent-color` dresses it — modern-web-guidance/
+ * brand-consistent-forms; no re-invented slider) with its 目盛り as a
+ * `<datalist>` (tick marks, and the thumb snaps to them where the browser
+ * does), the 換算 「60% · 731 日のうち 439 日分」 in an `<output for>` that follows
+ * the fields, and the 目盛り's names under the track — each a small button
+ * that sets the value, since dragging to exactly 60 on a phone is hard and a
+ * word is not. `thickness` is always held (the draft keeps it); only a range
+ * shows and sends it (days.ts stackingInput).
  */
 export function DaysField(props: DaysFieldProps) {
   const floor = props.today === null ? undefined : earliestStackDay(props.today);
   const firstId = `${props.idPrefix}-first-day`;
   const lastId = `${props.idPrefix}-last-day`;
   const hintId = `${props.idPrefix}-days-hint`;
+  const thicknessId = `${props.idPrefix}-thickness`;
+  const ticksId = `${props.idPrefix}-thickness-ticks`;
+  const noteId = `${props.idPrefix}-thickness-note`;
+  const fields: DaysFields = {
+    firstDay: props.firstDay,
+    lastDay: props.lastDay,
+    thickness: props.thickness,
+  };
   return (
     <fieldset className="days-field">
       {props.legend === undefined ? (
@@ -227,7 +254,7 @@ export function DaysField(props: DaysFieldProps) {
           min={floor}
           max={props.lastDay || props.today || undefined}
           aria-describedby={hintId}
-          onChange={(e) => props.onChange({ firstDay: e.target.value, lastDay: props.lastDay })}
+          onChange={(e) => props.onChange({ ...fields, firstDay: e.target.value })}
           onKeyDown={submitOnCmdEnter}
         />
       </div>
@@ -241,10 +268,54 @@ export function DaysField(props: DaysFieldProps) {
           min={props.firstDay || floor}
           max={props.today ?? undefined}
           aria-describedby={hintId}
-          onChange={(e) => props.onChange({ firstDay: props.firstDay, lastDay: e.target.value })}
+          onChange={(e) => props.onChange({ ...fields, lastDay: e.target.value })}
           onKeyDown={submitOnCmdEnter}
         />
       </div>
+      {isRange(props.firstDay, props.lastDay) && (
+        <div className="days-field-part thickness-field">
+          <div className="thickness-head">
+            <label htmlFor={thicknessId}>厚み</label>
+            <output id={noteId} htmlFor={thicknessId}>
+              {thicknessNote(props.thickness, props.firstDay, props.lastDay)}
+            </output>
+          </div>
+          <input
+            type="range"
+            id={thicknessId}
+            name="thickness"
+            min={1}
+            max={100}
+            step={1}
+            list={ticksId}
+            value={props.thickness}
+            aria-describedby={noteId}
+            onChange={(e) => props.onChange({ ...fields, thickness: e.target.valueAsNumber })}
+            onKeyDown={submitOnCmdEnter}
+          />
+          <datalist id={ticksId}>
+            {THICKNESS_TICKS.map((tick) => (
+              <option key={tick.value} value={tick.value} label={tick.label} />
+            ))}
+          </datalist>
+          <div className="thickness-ticks">
+            {THICKNESS_TICKS.map((tick) => (
+              <button
+                key={tick.value}
+                type="button"
+                className="thickness-tick"
+                // Where the tick sits along the track, 0..1 (styles.css places it under the thumb's centre).
+                style={{ "--at": (tick.value - 1) / 99 } as CSSProperties}
+                aria-label={`${tick.label} ${tick.value}%`}
+                title={`${tick.value}%`}
+                onClick={() => props.onChange({ ...fields, thickness: tick.value })}
+              >
+                {tick.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <p className="hint" id={hintId}>
         {props.hint}
       </p>
@@ -255,9 +326,10 @@ export function DaysField(props: DaysFieldProps) {
 /**
  * `DaysField` folded into a `<details>` 「日を選ぶ」. The edit form's face: a 苔片
  * already has its days, and 直す is usually about the words — folded, the
- * summary names the days so none of them ride along unseen, and opening it is
- * how a 続く苔片 is lengthened. The composer shows the fields unfolded instead
- * (2026-09-06): there, the day is part of writing the 苔片, not a correction.
+ * summary names the days (and a range's 厚み) so none of them ride along
+ * unseen, and opening it is how a 続く苔片 is lengthened or its 厚み moved. The
+ * composer shows the fields unfolded instead (2026-09-06): there, the day is
+ * part of writing the 苔片, not a correction.
  */
 export function DaysDisclosure(props: DaysFieldProps & { defaultOpen?: boolean }) {
   const { defaultOpen, ...field } = props;
@@ -265,19 +337,23 @@ export function DaysDisclosure(props: DaysFieldProps & { defaultOpen?: boolean }
   const chosen = props.firstDay !== "" || props.lastDay !== "";
   return (
     <details className="compose-days" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary>
-        {open || !chosen
-          ? "日を選ぶ"
-          : `日: ${daysLabel(props.firstDay || props.lastDay, props.lastDay || props.firstDay)}`}
-      </summary>
+      <summary>{open || !chosen ? "日を選ぶ" : `日: ${foldedDays(props)}`}</summary>
       <DaysField {...field} />
     </details>
   );
 }
 
+/** 「2026/09/01 〜 2026/09/05 · 厚み 60%」 — the fields as the folded summary names them; a single day has no 厚み. */
+const foldedDays = (fields: DaysFields): string => {
+  const days = daysLabel(fields.firstDay || fields.lastDay, fields.lastDay || fields.firstDay);
+  return isRange(fields.firstDay, fields.lastDay)
+    ? `${days} · ${thicknessLabel(fields.thickness)}`
+    : days;
+};
+
 /** What the composer's date fields mean: blank = today; the edit form says its own (App.tsx). */
 export const COMPOSE_DAYS_HINT =
-  "空のままなら今日に。1 日だけならその日に、範囲にすると続く苔片（最初の日〜最後の日に在った 1 片）として積まれます。今日より先には積めません。";
+  "空のままなら今日に。1 日だけならその日に、範囲にすると続く苔片として積まれ、厚み（そのうち打ち込んでいた日の割合）を添えます。今日より先には積めません。";
 
 /**
  * The 積む dialog. Mounted only while open (Garden), so opening is mounting:
@@ -350,7 +426,7 @@ export function ComposeDialog(props: {
         // The text still in the tag field is a stone too — nothing typed is lost.
         tags: stonesOf({ tags: fields.tags, text: fields.tagText }),
         kind: fields.kind,
-        ...stackDaysInput(fields.firstDay, fields.lastDay),
+        ...stackingInput(fields),
       });
       // Spent: nothing carries over (features.md §1).
       update(EMPTY_DRAFT);
@@ -408,6 +484,7 @@ export function ComposeDialog(props: {
           idPrefix="post"
           firstDay={fields.firstDay}
           lastDay={fields.lastDay}
+          thickness={fields.thickness}
           today={props.today}
           hint={COMPOSE_DAYS_HINT}
           legend="積む日（任意）"

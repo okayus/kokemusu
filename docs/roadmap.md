@@ -35,7 +35,7 @@
 - **過去に積む・続く苔片・向き**（2026-09-06 決定、[ADR-0005](adr/0005-post-axis-is-day-range.md)。順番は
   A1 軸を「日」に ✅ #43 → B 向き ✅ #46 → A2 過去に積む・続く苔片 ✅ #47。計画は完了したので plans から削除、経緯は log）。
 - **厚み**（2026-09-09 決定、[ADR-0007](adr/0007-spanning-post-amount-is-days-times-thickness.md)。続く苔片の量 ＝ 日数 × 厚み。
-  PR 1 再構築 ＋ core ＋ API ✅ #55 → PR 2 集計 ✅ 2026-09-12 → PR 3 UI、[plans/thickness.md](plans/thickness.md)。エクスポートより先）。
+  PR 1 再構築 ＋ core ＋ API ✅ #55 → PR 2 集計 ✅ #58 → PR 3 UI ✅ 2026-09-12。計画は完了したので plans から削除、経緯は log）。
 - 累積（積み上げ）グラフ、ストリーク、内訳・時間帯分布。
 - タグ運用（リネーム・統合・別名・アーカイブ・色/絵文字）。
 - 振り返りサマリー（週/月）。
@@ -92,7 +92,7 @@
     再構築、既存の続く苔片は 100%）・wire の解釈・テストの法則で同じ形に表す。石・橋・年表・累積が量を読み、総草と「計 N 片」は
     枚数のまま。期間はクリップ**
     （2026-09-09、[ADR-0007](adr/0007-spanning-post-amount-is-days-times-thickness.md)）。用語は [CONTEXT.md](../CONTEXT.md)「厚み」「量」。
-    実装は [plans/thickness.md](plans/thickness.md)。
+    実装は 3 PR で完了（#55 再構築 ＋ core ＋ API → #58 集計 → UI 2026-09-12、経緯は log）。
 
 ## 次のアクション
 
