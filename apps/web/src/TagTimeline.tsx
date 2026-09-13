@@ -9,6 +9,8 @@ import {
   type Ref,
 } from "react";
 import { formatAmount, formatMeasured, formatThickness, measuredThickness } from "./amount";
+import { daysLabel } from "./days";
+import { slashMonth } from "./period";
 import type { TagSummary } from "./posts-api";
 import { getTimeline, type MonthAmount, type TagTimeline, type TimelineRow } from "./stats-api";
 
@@ -138,8 +140,16 @@ export function segmentAt(segments: readonly MonthSegment[], pct: number): Month
   return null;
 }
 
-/** The lane's height in px; the bar sits centred on the track at half of it. */
-export const BAR_H = 20;
+/**
+ * The lane is as tall as its row (the gridlines run through it), and the bar
+ * sits on the chips' line: ROW_PAD is `.tl-tags`'s block padding and CHIP_H
+ * the chip's min-height (styles.css), so the track runs through the middle of
+ * the first line of chips whatever wraps under them.
+ */
+const ROW_PAD = 4;
+const CHIP_H = 28;
+/** The track's y — the centre of every bar — in the lane's px. */
+export const BAR_CY = ROW_PAD + CHIP_H / 2;
 
 // 太さ ＝ 量 (CONTEXT.md 量: 「年表の太さはこれを読み」): the bar's height grows
 // with the square root of the row's 量 from a floor and caps — the graph's
@@ -210,18 +220,28 @@ const labelsClear = (ticks: readonly AxisTick[], axisPx: number) =>
     );
   });
 
+/** The left edge's label: the year and month the axis opens on — 「2022年11月」. */
+export const fromLabel = (from: string) => `${+from.slice(0, 4)}年${+from.slice(5, 7)}月`;
+
 /**
- * The axis labels for an axis `axisPx` CSS pixels wide. Every month boundary
- * in the domain is a candidate (a January wears its year in both modes — that
- * is the 年表's spine). 今日 owns the right edge, so a label that would run
- * into it yields; then the ladder coarsens the interval until no label runs
- * into its neighbour. An unknown width (0) leaves only 今日.
+ * The axis labels for an axis `axisPx` CSS pixels wide. Both edges are named
+ * (visualization.md §8, 2026-09-13): the left one wears the year and month the
+ * axis opens on, 今日 owns the right edge, and a month boundary that would run
+ * into either yields. Every other month boundary in the domain is a candidate
+ * (a January wears its year in both modes — that is the 年表's spine); then
+ * the ladder coarsens the interval until no label runs into its neighbour.
+ * An unknown width (0) leaves only 今日, as does an axis too narrow for the
+ * left label to clear it.
  */
 export function axisTicks(domain: Domain, axisPx: number): AxisTick[] {
   const total = dayIndex(domain.to) - dayIndex(domain.from) + 1;
   const finest = total <= MONTH_TICKS_MAX_DAYS ? 1 : 12;
   const todayLeft = axisPx - labelPx(TODAY_LABEL) - LABEL_GAP_PX;
-  // Walk the 1sts from the first month boundary at or after `from`.
+  const left: AxisTick = { x: 0, label: fromLabel(domain.from) };
+  if (labelPx(left.label) > todayLeft) return [];
+  const leftRight = labelPx(left.label) + LABEL_GAP_PX;
+  // Walk the 1sts from the first month boundary at or after `from` (a `from`
+  // on a 1st is that boundary, and the edge label absorbs it).
   let y = +domain.from.slice(0, 4);
   let m = +domain.from.slice(5, 7);
   if (domain.from.slice(8, 10) !== "01") {
@@ -237,7 +257,8 @@ export function axisTicks(domain: Domain, axisPx: number): AxisTick[] {
     if (day > domain.to) break;
     const x = round3(((dayIndex(day) - dayIndex(domain.from)) / total) * 100);
     const label = m === 1 ? `${y}年` : `${m}月`;
-    if ((x / 100) * axisPx + labelPx(label) <= todayLeft) {
+    const px = (x / 100) * axisPx;
+    if (px >= leftRight && px + labelPx(label) <= todayLeft) {
       candidates.push({ x, label, month: monthIndex(day) });
     }
     m += 1;
@@ -249,9 +270,9 @@ export function axisTicks(domain: Domain, axisPx: number): AxisTick[] {
   for (const interval of TICK_LADDER) {
     if (interval < finest) continue;
     const kept = candidates.filter((t) => t.month % interval === 0);
-    if (labelsClear(kept, axisPx)) return kept.map(({ x, label }) => ({ x, label }));
+    if (labelsClear(kept, axisPx)) return [left, ...kept.map(({ x, label }) => ({ x, label }))];
   }
-  return [];
+  return [left];
 }
 
 /**
@@ -266,21 +287,30 @@ export function rowNote(span: Span): string {
 }
 
 /**
- * The bar's period line: the period, the count, and — once the span crosses
- * a month — how many of its months saw a 苔片, which is what the segments
- * show and the only place a screen reader hears it.
+ * The tip's days line: the 時代's days in the card's spelling, the count, and —
+ * once the span crosses a month — how many of its months saw a 苔片, which is
+ * what the segments show and the only place a screen reader hears it.
  */
 export function spanTitle(span: Span): string {
-  const period =
-    span.firstDay === span.lastDay ? span.firstDay : `${span.firstDay} 〜 ${span.lastDay}`;
-  const base = `${period} · ${span.count} 片`;
+  const base = `${daysLabel(span.firstDay, span.lastDay)} · ${span.count} 片`;
   const crossed = monthIndex(span.lastDay) - monthIndex(span.firstDay) + 1;
   return crossed > 1 ? `${base} · 活動 ${span.months.length}/${crossed} か月` : base;
 }
 
 /** The tip's month line: the 活動月 under the pointer, its 量 and its own 厚み. */
 export function monthTitle(s: Pick<MonthSegment, "month" | "amount" | "thickness">): string {
-  return `${s.month} · 量 ${formatAmount(s.amount)} · 厚み ${formatMeasured(s.thickness)}`;
+  return `${slashMonth(s.month)} · 量 ${formatAmount(s.amount)} · 厚み ${formatMeasured(s.thickness)}`;
+}
+
+/**
+ * The row's 時代 in words (visualization.md §8): 「2023/04 〜 2024/03」, the
+ * months of its first and last 苔片, one month named once. What the bar's
+ * position encodes, readable without carrying it up to the axis.
+ */
+export function eraLabel(range: DayRange): string {
+  const first = slashMonth(range.firstDay);
+  const last = slashMonth(range.lastDay);
+  return first === last ? first : `${first} 〜 ${last}`;
 }
 
 // ------------------------------------------------- rows = server + ad-hoc mix
@@ -336,9 +366,12 @@ export function TimelineChart(props: {
   deepDive?: DeepDive | undefined;
 }) {
   const domain = chartDomain(props.rows, props.today);
+  const [axisRef, axisPx] = useAxisPx();
+  // One set of ticks: the axis's labels and every row's gridlines.
+  const ticks = axisTicks(domain, axisPx);
   return (
     <div className="tl-grid">
-      <TimelineAxis domain={domain} />
+      <TimelineAxis ticks={ticks} ref={axisRef} />
       {/* role="list": list-style is stripped for the grid, Safari drops list semantics without it. */}
       <ol className="tl-rows" role="list">
         {props.rows.map((row) => (
@@ -346,6 +379,7 @@ export function TimelineChart(props: {
             key={row.key}
             row={row}
             domain={domain}
+            ticks={ticks}
             onTagTap={props.onTagTap}
             deepDive={props.deepDive}
           />
@@ -381,14 +415,15 @@ export function TimelineChart(props: {
 const AXIS_NOMINAL_PX = 320;
 
 /**
- * Decorative (every tick fact is recoverable from the bars' own labels), and
- * measured rather than styled: how many labels fit is a function of the
- * column's pixel width, which only the browser knows (subgrid column, chip
- * widths, viewport), and no container query can count labels. useLayoutEffect
- * so the first paint already wears the measured set; a ResizeObserver for
- * every later change (viewport, a picker form widening the chip column).
+ * The axis column's width, measured rather than styled: how many labels fit
+ * is a function of the column's pixel width, which only the browser knows
+ * (subgrid column, chip widths, viewport), and no container query can count
+ * labels. useLayoutEffect so the first paint already wears the measured set;
+ * a ResizeObserver for every later change (viewport, a picker form widening
+ * the chip column). The chart measures, since the rows' gridlines read the
+ * same ticks as the axis.
  */
-function TimelineAxis(props: { domain: Domain }) {
+function useAxisPx(): [Ref<SVGSVGElement>, number] {
   const ref = useRef<SVGSVGElement>(null);
   const [axisPx, setAxisPx] = useState(AXIS_NOMINAL_PX);
   useLayoutEffect(() => {
@@ -400,9 +435,14 @@ function TimelineAxis(props: { domain: Domain }) {
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+  return [ref, axisPx];
+}
+
+/** Decorative: every tick fact is recoverable from the rows' own words. Its width is the chart's measure. */
+function TimelineAxis(props: { ticks: readonly AxisTick[]; ref: Ref<SVGSVGElement> }) {
   return (
-    <svg ref={ref} className="tl-axis" aria-hidden="true">
-      {axisTicks(props.domain, axisPx).map((t) => (
+    <svg ref={props.ref} className="tl-axis" aria-hidden="true">
+      {props.ticks.map((t) => (
         <text key={t.x} x={`${t.x}%`} y="10">
           {t.label}
         </text>
@@ -417,14 +457,19 @@ function TimelineAxis(props: { domain: Domain }) {
 function TimelineRowItem(props: {
   row: ChartRow;
   domain: Domain;
+  ticks: readonly AxisTick[];
   onTagTap: (tag: TagSummary) => void;
   deepDive?: DeepDive | undefined;
 }) {
-  const { row, domain, deepDive } = props;
+  const { row, domain, ticks, deepDive } = props;
   const label = row.tags.map((t) => t.name).join(" × ");
   const pickerOpen = deepDive !== undefined && deepDive.openFor === row.key;
   return (
     <li className={row.adhoc ? "tl-row adhoc" : "tl-row"}>
+      {/* The stone column's cell: the chips' line, then the 時代 in words under
+          it — a grid, so the column is as wide as the wider of the two, not
+          their sum (a flex line's max-content would add them up). */}
+      <div className="tl-rowhead">
       <span className="tl-tags">
         {row.tags.map((t) => (
           <button
@@ -487,12 +532,16 @@ function TimelineRowItem(props: {
           </span>
         )}
       </span>
+      {/* The 時代 in words under the chips: the row reads 「名前 ＋ 期間」 like
+          a résumé, and the bar column stays a drawing (§8). */}
+      {row.span !== null && !row.loading && <span className="tl-era">{eraLabel(row.span)}</span>}
+      </div>
       {row.loading ? (
         <span className="tl-empty quiet">…</span>
       ) : row.span === null ? (
         <span className="tl-empty quiet">重なる苔片なし</span>
       ) : (
-        <TimelineBar span={row.span} domain={domain} />
+        <TimelineBar span={row.span} domain={domain} ticks={ticks} />
       )}
     </li>
   );
@@ -511,11 +560,11 @@ const HAS_INTEREST =
  * and the tip — a popover with the numbers the bar encodes, opened by hover
  * (interest) or a tap (popovertarget), dismissed by Escape or a tap outside.
  */
-function TimelineBar(props: { span: Span; domain: Domain }) {
-  const { span, domain } = props;
+function TimelineBar(props: { span: Span; domain: Domain; ticks: readonly AxisTick[] }) {
+  const { span, domain, ticks } = props;
   const { x, w } = barGeom(span, domain);
   const h = barThickness(span.amount);
-  const y = (BAR_H - h) / 2;
+  const y = BAR_CY - h / 2;
   const segments = monthSegments(span, domain);
   // <clipPath> and popover ids are document-wide; one bar per row, so one id each.
   const id = useId();
@@ -563,7 +612,22 @@ function TimelineBar(props: { span: Span; domain: Domain }) {
       }
     >
       <svg className="tl-bar" aria-hidden="true">
-        <line className="tl-track" x1="0" x2="100%" y1={BAR_H / 2} y2={BAR_H / 2} />
+        {/* The axis's labelled ticks as hairlines down the row (§8): a line
+            always has its name above it. The left edge is the edge itself. */}
+        {ticks.map(
+          (t) =>
+            t.x > 0 && (
+              <line
+                key={t.x}
+                className="tl-gridline"
+                x1={`${t.x}%`}
+                x2={`${t.x}%`}
+                y1="0"
+                y2="100%"
+              />
+            ),
+        )}
+        <line className="tl-track" x1="0" x2="100%" y1={BAR_CY} y2={BAR_CY} />
         {/* The era, first 苔片 to last, as the underlay — the 総草's empty
             cell: both ends are data ends, so both wear the 4px rounding. A
             dormant month shows only this. Its height is the row's 量. */}

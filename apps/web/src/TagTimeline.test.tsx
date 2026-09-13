@@ -6,6 +6,7 @@ import {
   barGeom,
   barThickness,
   chartDomain,
+  eraLabel,
   labelPx,
   monthSegments,
   monthTitle,
@@ -145,23 +146,35 @@ describe("axisTicks — labels for an axis of a given pixel width", () => {
   });
 
   it("ticks by month on a short domain, naming the year at January", () => {
-    // 106 days on 400px: every month fits, but 3月 (x ≈ 95%) would run into 今日.
-    expect(labels({ from: "2026-11-20", to: "2027-03-05" }, 400)).toEqual(["12月", "2027年", "2月"]);
+    // 106 days on 400px: the edge names 2026年11月, 12月 (x ≈ 10%) would run
+    // into it and 3月 (x ≈ 95%) into 今日; the months between fit.
+    expect(labels({ from: "2026-11-20", to: "2027-03-05" }, 400)).toEqual([
+      "2026年11月",
+      "2027年",
+      "2月",
+    ]);
   });
 
   it("yields to 今日 by pixels, not by a fixed zone", () => {
-    // The same domain on 120px: 2月 (x ≈ 69%) now ends inside 今日's room too.
-    expect(labels({ from: "2026-11-20", to: "2027-03-05" }, 120)).toEqual(["12月", "2027年"]);
+    // The same domain on 120px: 2027年 (x ≈ 40%) now starts inside the edge
+    // label's room and 2月 (x ≈ 69%) ends inside 今日's — the edges alone.
+    expect(labels({ from: "2026-11-20", to: "2027-03-05" }, 120)).toEqual(["2026年11月"]);
   });
 
   it("coarsens months to calendar quarters when neighbours would touch", () => {
-    // 288 days on 200px: 12月 and 2026年 (29px) would overlap, so the ladder
-    // steps to 1・4・7・10月 — January (the year) kept, not every other month.
-    expect(labels({ from: "2025-11-20", to: "2026-09-03" }, 200)).toEqual(["2026年", "4月", "7月"]);
+    // 288 days on 200px: 12月, 2026年 and 2月 sit inside the edge label's room,
+    // and from 3月 on single months touch, so the ladder steps to the quarters
+    // 1・4・7・10月 — the year is read off the edge (2025年11月, so 4月 is 2026).
+    expect(labels({ from: "2025-11-20", to: "2026-09-03" }, 200)).toEqual([
+      "2025年11月",
+      "4月",
+      "7月",
+    ]);
   });
 
   it("ticks by year on a multi-year domain", () => {
     expect(labels({ from: "2020-01-15", to: "2026-09-03" }, 600)).toEqual([
+      "2020年1月",
       "2021年",
       "2022年",
       "2023年",
@@ -174,6 +187,7 @@ describe("axisTicks — labels for an axis of a given pixel width", () => {
   it("drops the last year rather than let it run into 今日", () => {
     // 2026年 starts at x ≈ 90%: on 400px its 29px would reach the 今日 label.
     expect(labels({ from: "2020-01-15", to: "2026-09-03" }, 400)).toEqual([
+      "2020年1月",
       "2021年",
       "2022年",
       "2023年",
@@ -183,11 +197,17 @@ describe("axisTicks — labels for an axis of a given pixel width", () => {
   });
 
   it("thins years on a narrow axis to a calendar-aligned interval", () => {
-    // ~30px per year on 200px: single years collide, even years clear.
-    expect(labels({ from: "2020-01-15", to: "2026-09-03" }, 200)).toEqual(["2022年", "2024年"]);
-    // 27 years on 360px: 1 and 2 collide, 5 clears; 2025 yields to 今日.
+    // ~30px per year on 200px: 2021 sits in the edge label's room, single
+    // years collide, even years clear.
+    expect(labels({ from: "2020-01-15", to: "2026-09-03" }, 200)).toEqual([
+      "2020年1月",
+      "2022年",
+      "2024年",
+    ]);
+    // 27 years on 360px: the edge absorbs 2000年 (the axis opens on a 1st),
+    // 1 and 2 collide, 5 clears; 2025 yields to 今日.
     expect(labels({ from: "2000-01-01", to: "2026-09-03" }, 360)).toEqual([
-      "2000年",
+      "2000年1月",
       "2005年",
       "2010年",
       "2015年",
@@ -195,9 +215,11 @@ describe("axisTicks — labels for an axis of a given pixel width", () => {
     ]);
   });
 
-  it("leaves only 今日 on an unmeasured axis or a one-day domain", () => {
+  it("names the edge even on a one-day domain, and nothing on an unmeasured or too-narrow axis", () => {
+    expect(labels({ from: "2026-09-03", to: "2026-09-03" }, 600)).toEqual(["2026年9月"]);
     expect(labels({ from: "2000-01-01", to: "2026-09-03" }, 0)).toEqual([]);
-    expect(labels({ from: "2026-09-03", to: "2026-09-03" }, 600)).toEqual([]);
+    // 60px: 今日 leaves 34px and the edge label needs 45.5 — 今日 alone.
+    expect(labels({ from: "2000-01-01", to: "2026-09-03" }, 60)).toEqual([]);
   });
 });
 
@@ -251,8 +273,16 @@ describe("thicknessLevel — 濃さ ＝ 厚み on the 総草's four steps", () =
 
 describe("monthTitle — the tip's month line", () => {
   it("names the month, its 量 and its own 厚み", () => {
-    expect(monthTitle({ month: "2026-01", amount: 3, thickness: 3 / 17 })).toBe("2026-01 · 量 3 · 厚み 18%");
-    expect(monthTitle({ month: "2026-02", amount: 16.8, thickness: 0.6 })).toBe("2026-02 · 量 17 · 厚み 60%");
+    expect(monthTitle({ month: "2026-01", amount: 3, thickness: 3 / 17 })).toBe("2026/01 · 量 3 · 厚み 18%");
+    expect(monthTitle({ month: "2026-02", amount: 16.8, thickness: 0.6 })).toBe("2026/02 · 量 17 · 厚み 60%");
+  });
+});
+
+describe("eraLabel — the row's 時代 in words", () => {
+  it("names the months of the first and last 苔片, one month once", () => {
+    expect(eraLabel({ firstDay: "2023-04-10", lastDay: "2024-03-31" })).toBe("2023/04 〜 2024/03");
+    expect(eraLabel({ firstDay: "2023-09-03", lastDay: "2023-09-03" })).toBe("2023/09");
+    expect(eraLabel({ firstDay: "2023-09-03", lastDay: "2023-09-28" })).toBe("2023/09");
   });
 });
 
@@ -277,16 +307,16 @@ describe("rowNote — 「量 N · 厚み x%」, the 厚み measured over the row
 describe("spanTitle", () => {
   it("names the period and the count, collapsing a one-day span", () => {
     expect(spanTitle(span("2026-04-01", "2026-04-20", 12, [m("2026-04", 12)]))).toBe(
-      "2026-04-01 〜 2026-04-20 · 12 片",
+      "2026/04/01 〜 2026/04/20 · 12 片",
     );
     expect(spanTitle(span("2026-09-03", "2026-09-03", 2, [m("2026-09", 2)]))).toBe(
-      "2026-09-03 · 2 片",
+      "2026/09/03 · 2 片",
     );
   });
 
   it("adds the 活動月 ratio once the span crosses a month — the gap, in words", () => {
     const s = span("2026-04-01", "2026-09-03", 12, [m("2026-04", 9), m("2026-09", 3)]);
-    expect(spanTitle(s)).toBe("2026-04-01 〜 2026-09-03 · 12 片 · 活動 2/6 か月");
+    expect(spanTitle(s)).toBe("2026/04/01 〜 2026/09/03 · 12 片 · 活動 2/6 か月");
   });
 });
 
@@ -331,15 +361,21 @@ describe("TimelineChart markup", () => {
       ],
       "2026-09-10",
     );
-    // 量 5 is 6px on the 20px lane (y 7), 量 1 is 4px (y 8).
-    expect(html).toContain('class="tl-span" x="0%" y="7" width="50%" height="6" rx="4"');
-    expect(html).toContain('class="tl-span" x="50%" y="8" width="10%" height="4" rx="4"');
-    expect(html).toContain('class="tl-track" x1="0" x2="100%" y1="10" y2="10"');
+    // 量 5 is 6px and 量 1 4px, both centred on the track at BAR_CY 18: y 15 and 16.
+    expect(html).toContain('class="tl-span" x="0%" y="15" width="50%" height="6" rx="4"');
+    expect(html).toContain('class="tl-span" x="50%" y="16" width="10%" height="4" rx="4"');
+    expect(html).toContain('class="tl-track" x1="0" x2="100%" y1="18" y2="18"');
+    // The 時代 in words under each row's chips — both rows sit in one month.
+    expect(html.match(/<span class="tl-era">2026\/09<\/span>/g)).toHaveLength(2);
+    // The axis opens on 9/1 (the edge label absorbs that boundary) and no
+    // other boundary falls within ten days: no gridline — the edge is the edge.
+    expect(html).toContain(">2026年9月</text>");
+    expect(html).not.toContain('class="tl-gridline"');
     // The drawing is decorative; the hit target over the era carries the
     // period, the count and the numbers for assistive tech …
     expect(html).toContain('<svg class="tl-bar" aria-hidden="true">');
-    expect(html).toContain('aria-label="2026-09-01 〜 2026-09-05 · 5 片 · 量 5 · 厚み 100%"');
-    expect(html).toContain('aria-label="2026-09-06 · 1 片 · 量 1 · 厚み 100%"');
+    expect(html).toContain('aria-label="2026/09/01 〜 2026/09/05 · 5 片 · 量 5 · 厚み 100%"');
+    expect(html).toContain('aria-label="2026/09/06 · 1 片 · 量 1 · 厚み 100%"');
     // … and opens the row's tip, a popover it targets by id and by interest
     // (React writes popoverTarget in camel case; HTML attributes are case-blind).
     const hit = html.match(
@@ -352,7 +388,7 @@ describe("TimelineChart markup", () => {
     const lane = html.match(/<span class="tl-lane" style="--tl-anchor:--tl-([^"]+)">/);
     expect(`${lane?.[1]}t`).toBe(hit?.[1]);
     expect(html).toContain(
-      `<div id="${hit?.[1]}" popover="auto" class="tl-tip"><strong>量 5 · 厚み 100%</strong><span>2026-09-01 〜 2026-09-05 · 5 片</span></div>`,
+      `<div id="${hit?.[1]}" popover="auto" class="tl-tip"><strong>量 5 · 厚み 100%</strong><span>2026/09/01 〜 2026/09/05 · 5 片</span></div>`,
     );
     // The legend, in the 総草's swatches.
     expect(html).toContain('<div class="tl-legend" aria-hidden="true">');
@@ -366,12 +402,19 @@ describe("TimelineChart markup", () => {
     );
     // The axis opens on the row's first day (chartDomain): 76 days to today.
     // The era underlay, first 苔片 to last (55 days), 6px for its 量 5 …
-    expect(html).toContain('class="tl-span" x="0%" y="7" width="72.368%" height="6" rx="4"');
+    expect(html).toContain('class="tl-span" x="0%" y="15" width="72.368%" height="6" rx="4"');
     // … and one segment per active month — none for dormant February — on
     // the step of its own 厚み: 3 in 17 days and 2 in 10 are both たまに.
     expect(html.match(/class="tl-month l\d"/g)).toHaveLength(2);
-    expect(html).toContain('class="tl-month l1" x="0%" y="7" width="22.368%" height="6"');
-    expect(html).toContain('class="tl-month l1" x="59.211%" y="7" width="13.158%" height="6"');
+    expect(html).toContain('class="tl-month l1" x="0%" y="15" width="22.368%" height="6"');
+    expect(html).toContain('class="tl-month l1" x="59.211%" y="15" width="13.158%" height="6"');
+    // The axis (nominal 320px) opens on 2026年1月 and labels 2月 and 3月; each
+    // labelled tick runs down the row as a hairline at its label's x, and the
+    // row's 時代 is written under its chip.
+    expect(html).toContain('<text x="22.368%" y="10">2月</text>');
+    expect(html).toContain('class="tl-gridline" x1="22.368%" x2="22.368%" y1="0" y2="100%"');
+    expect(html).toContain('class="tl-gridline" x1="59.211%" x2="59.211%" y1="0" y2="100%"');
+    expect(html).toContain('<span class="tl-era">2026/01 〜 2026/03</span>');
     // The segments sit in a group cut to the era's rounded outline, per bar.
     const clipId = html.match(/<clipPath id="([^"]+)"/)?.[1];
     expect(clipId).toBeDefined();
@@ -379,10 +422,10 @@ describe("TimelineChart markup", () => {
     // What a screen reader hears of the gap, and the tip's two lines (the
     // month line waits for a pointer).
     expect(html).toContain(
-      'aria-label="2026-01-15 〜 2026-03-10 · 5 片 · 活動 2/3 か月 · 量 5 · 厚み 9%"',
+      'aria-label="2026/01/15 〜 2026/03/10 · 5 片 · 活動 2/3 か月 · 量 5 · 厚み 9%"',
     );
     expect(html).toContain(
-      '<strong>量 5 · 厚み 9%</strong><span>2026-01-15 〜 2026-03-10 · 5 片 · 活動 2/3 か月</span></div>',
+      '<strong>量 5 · 厚み 9%</strong><span>2026/01/15 〜 2026/03/10 · 5 片 · 活動 2/3 か月</span></div>',
     );
   });
 
@@ -427,16 +470,22 @@ describe("TimelineChart markup", () => {
     expect(html).toContain('<button type="button" class="tag-chip">XX案件</button>');
     expect(html).toContain('<button type="button" class="tag-chip">Vue.js</button>');
     expect(html).toContain(">今日</text>");
-    // January wears the year — the 年表's spine — and later months their 月.
-    expect(html).toContain(">2026年</text>");
-    expect(html).toContain(">2月</text>");
+    // The edge wears the year and month the axis opens on (absorbing that
+    // January's own label), later months their 月 — 2月 sits in the edge's room.
+    expect(html).toContain(">2026年1月</text>");
+    expect(html).not.toContain(">2026年</text>");
+    expect(html).not.toContain(">2月</text>");
+    expect(html).toContain(">3月</text>");
   });
 
   it("lays the axis out for the nominal width until the browser measures it", () => {
     // Static markup never runs layout: 320px is assumed, on which every year
-    // of this domain fits except 2026, which would run into 今日.
+    // of this domain fits except 2021 (inside the edge label's room) and 2026
+    // (it would run into 今日).
     const html = render([chartRow("a", span("2020-01-15", "2020-02-01", 2))], "2026-09-10");
-    expect(html).toContain(">2021年</text>");
+    expect(html).toContain(">2020年1月</text>");
+    expect(html).not.toContain(">2021年</text>");
+    expect(html).toContain(">2022年</text>");
     expect(html).toContain(">2025年</text>");
     expect(html).not.toContain(">2026年</text>");
   });
@@ -449,6 +498,7 @@ describe("TimelineChart markup", () => {
     expect(html).toContain("重なる苔片なし");
     expect(html.match(/class="tl-span"/g)).toHaveLength(1);
     expect(html.match(/class="tl-tip"/g)).toHaveLength(1);
+    expect(html.match(/class="tl-era"/g)).toHaveLength(1);
   });
 
   it("offers the deep-dive controls only when focus mode passes them", () => {

@@ -11,5 +11,12 @@ export const shiftDay = (day: string, days: number): string =>
 /** `YYYY-MM-DD` → `YYYY/MM/DD`, the spelling the cards and chips use. */
 export const slashed = (day: string): string => day.replaceAll("-", "/");
 
+/** A 年表 row's 時代 in words for the days it spans: 「2026/08 〜 2026/09」, one month named once. */
+export const eraOf = (first: string, last: string): string => {
+  const a = slashed(first).slice(0, 7);
+  const b = slashed(last).slice(0, 7);
+  return a === b ? a : `${a} 〜 ${b}`;
+};
+
 /** `YYYY-MM-DD` → `M/D`, the card's 「M/D に積む」. */
 export const shortDay = (day: string): string => `${+day.slice(5, 7)}/${+day.slice(8, 10)}`;

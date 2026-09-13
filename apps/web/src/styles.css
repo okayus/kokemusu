@@ -853,12 +853,12 @@ dialog.compose h2 {
   font-size: 0.8rem;
 }
 
-/* 行 = [石チップ | 棒 | 注記]。subgrid で全行の列を揃える。 */
+/* 行 = [石チップ ＋ 時代の文字 | 棒]。subgrid で全行の列を揃える。行間は行が自分で取る（.tl-tags の
+   padding-block）— 外の row-gap は 0 にして、縦線（.tl-gridline）が行から行へ途切れず通る。 */
 .tl-grid {
   display: grid;
   grid-template-columns: fit-content(11rem) 1fr;
   column-gap: 0.75rem;
-  row-gap: 0.5rem;
   align-items: center;
   margin-block-start: 0.5rem;
 }
@@ -887,7 +887,18 @@ dialog.compose h2 {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: subgrid;
-  align-items: center;
+  /* 車線は行の高さいっぱい（縦線のため）。棒はチップの行の高さに乗る（TimelineBar の BAR_CY）。 */
+  align-items: stretch;
+}
+
+/* 石の列のセル = チップの行 ＋ 時代の文字。grid の 1 列なので列の幅は「チップの行」と「文字」の広い方 —
+   flex の中に文字を置くと、折り返す前提でも max-content が「チップ ＋ 文字」の和になり列を 11rem まで押し広げた。 */
+.tl-rowhead {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  /* 行間。TimelineBar の ROW_PAD と同じ値 — 棒はこの余白 ＋ チップの半分（14px）の高さに乗る。 */
+  padding-block: 4px;
 }
 
 .tl-tags {
@@ -895,6 +906,15 @@ dialog.compose h2 {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem;
+}
+
+/* 時代の文字（visualization.md §8）: チップの下。石の列はこの幅まで広がる。 */
+.tl-era {
+  font-size: 0.75rem;
+  line-height: 1.2;
+  color: var(--quiet);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* タグのチップ button。年表（.tl-tags）ではフォーカス、投稿一覧
@@ -957,11 +977,17 @@ dialog.compose h2 {
 .tl-lane {
   position: relative;
   display: block;
+  align-self: stretch;
 }
 
+/* 行の高さいっぱいの SVG。棒と糸は BAR_CY（上から 18px ＝ 余白 4px ＋ チップの半分）、縦線は上下いっぱい。
+   絶対配置: フローに置くと行の高さを決める段階で 100% が解けず SVG 既定の 150px が行を伸ばす（2026-09-13 実測）。
+   行の高さは石の列が決め、車線は stretch で同じ高さになり、SVG はそれを埋める。 */
 .tl-bar {
+  position: absolute;
+  inset: 0;
   inline-size: 100%;
-  block-size: 20px;
+  block-size: 100%;
   display: block;
 }
 
@@ -969,6 +995,14 @@ dialog.compose h2 {
 .tl-track {
   stroke: var(--line);
   stroke-width: 1;
+}
+
+/* 軸のラベル付き目盛りの縦線（visualization.md §8）。行の上下いっぱいに引き、row-gap 0 で隣の行と繋がる。
+   x は % の小数 px なので crispEdges でピクセルに揃え、にじんだ 2px にしない。 */
+.tl-gridline {
+  stroke: var(--line);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
 }
 
 /* 棒 = 最初の苔片〜最後の苔片の「時代」。活動月（.tl-month）の下地で、総草の空マスと同じ段 —
@@ -988,12 +1022,13 @@ dialog.compose h2 {
 .tl-month.l3 { fill: var(--moss-3); }
 .tl-month.l4 { fill: var(--moss-4); }
 
-/* 当たり判定 = 時代の幅 × 行の高さ（棒の 20px を上下 4px ずつ越えてチップと同じ 28px）。
+/* 当たり判定 = 時代の幅 × チップの行（上から 4px、高さ 28px ＝ チップと同じ。棒はその中央）。
    1 日の点でも親指に乗る最小幅。吹き出しの anchor — 名前は行ごと（TimelineBar が --tl-anchor で配る。
    同じ名前を全行で使うと top layer の popover は文書の最後の button に付く）。 */
 .tl-hit {
   position: absolute;
-  inset-block: -4px;
+  inset-block-start: 4px;
+  block-size: 28px;
   min-inline-size: 1.5rem;
   padding: 0;
   border: 0;
@@ -1020,7 +1055,7 @@ dialog.compose h2 {
   stroke-width: 2;
 }
 
-/* 吹き出し: 棒の数値（量 · 厚み ／ 期間 · 片 · 活動月 ／ 指した月）。時代の真上に anchor し、
+/* 吹き出し: 棒の数値（量 · 厚み ／ 時代の日 · 片 · 活動月 ／ 指した月）。時代の真上に anchor し、
    上に入らなければ下へ。UA の inset: 0 / margin: auto は外す（外さないと領域の中央に浮く）。
    anchor positioning の無いブラウザでは static な位置 = 棒のすぐ下に出る。狭い画面では行が折り返す。 */
 .tl-tip {
@@ -1061,6 +1096,7 @@ dialog.compose h2 {
 /* 凡例（総草のと同じ見本の並び）: 太さ ＝ 量、濃さ ＝ 厚み。 */
 .tl-legend {
   grid-column: 2;
+  margin-block-start: 0.35rem; /* row-gap が 0 なので自分で最後の行から離れる */
   display: flex;
   align-items: center;
   justify-content: flex-end;
