@@ -4,6 +4,7 @@ import {
   periodKey,
   periodLabel,
   presetPeriod,
+  slashMonth,
   spanInPeriod,
   type Period,
 } from "./period";
@@ -118,5 +119,12 @@ describe("spanInPeriod — overlap, both ends inclusive, an absent end is open",
     expect(spanInPeriod(day("1999-01-01"), { to: "2026-09-30" })).toBe(true);
     expect(spanInPeriod(day("2026-10-01"), { to: "2026-09-30" })).toBe(false);
     expect(spanInPeriod({ firstDay: "2026-09-30", lastDay: "2026-10-31" }, { to: "2026-09-30" })).toBe(true);
+  });
+});
+
+describe("slashMonth — the 年表's month spelling", () => {
+  it("cuts a day or a month key at the month, slashed like the day", () => {
+    expect(slashMonth("2023-04-10")).toBe("2023/04");
+    expect(slashMonth("2023-04")).toBe("2023/04");
   });
 });

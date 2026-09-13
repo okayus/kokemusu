@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { E2E_INITIAL_REGISTRATION_TOKEN } from "./env";
-import { shiftDay, shortDay, slashed } from "./helpers/day";
+import { eraOf, shiftDay, shortDay, slashed } from "./helpers/day";
 import { queryRows } from "./helpers/db";
 import { fillTags, tagChips } from "./helpers/tags";
 import { enableVirtualAuthenticator } from "./helpers/webauthn";
@@ -723,6 +723,10 @@ test("register → post → today's moss darkens → reload → logout → login
   expect(spanRow?.months.map((m) => m.amount)).toEqual(spanRow?.months.map(() => 2 / (spanRow?.months.length ?? 1)));
   // The 年表 is the other view (hidden here, still mounted): its row exists.
   await expect(yearChart.locator("li.tl-row", { hasText: "続き" })).toHaveCount(1);
+  // … with its 時代 in words under the chip (visualization.md §8).
+  await expect(yearChart.locator("li.tl-row", { hasText: "続き" }).locator(".tl-era")).toHaveText(
+    eraOf(yesterday, todayKey),
+  );
   await today.click();
   await expect(periodChip).toHaveText(`${slashed(todayKey)} ×`);
   const spanCard = timeline.locator("li.post", { hasText: "二日続いた苔片" });
@@ -912,8 +916,16 @@ test("register → post → today's moss darkens → reload → logout → login
   const weighedHit = weighedLi.locator(".tl-hit");
   await expect(weighedHit).toHaveAttribute(
     "aria-label",
-    new RegExp(`^${tenDaysAgo} 〜 ${todayKey} · 1 片.* · 量 6 · 厚み 60%$`),
+    new RegExp(`^${slashed(tenDaysAgo)} 〜 ${slashed(todayKey)} · 1 片.* · 量 6 · 厚み 60%$`),
   );
+  // The 時代 in words under the chip, and the axis's edges: this garden's
+  // earliest 苔片 is the one ten days ago, so the axis opens on its month and,
+  // as always, ends on 今日 (visualization.md §8).
+  await expect(weighedLi.locator(".tl-era")).toHaveText(eraOf(tenDaysAgo, todayKey));
+  await expect(yearChart.locator(".tl-axis text").first()).toHaveText(
+    `${+tenDaysAgo.slice(0, 4)}年${+tenDaysAgo.slice(5, 7)}月`,
+  );
+  await expect(yearChart.locator(".tl-axis text").last()).toHaveText("今日");
   await weighedHit.hover();
   await expect(weighedLi.locator(".tl-tip")).toBeVisible();
   await expect(weighedLi.locator(".tl-tip")).toContainText("量 6 · 厚み 60%");

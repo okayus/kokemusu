@@ -74,6 +74,9 @@ export const periodKey = (period: Period | null): string =>
  */
 export const slashDay = (day: string) => day.replaceAll("-", "/");
 
+/** A day or a `YYYY-MM` month → `YYYY/MM`: the day's spelling cut at the month, the 年表's word for a 時代. */
+export const slashMonth = (key: string) => slashDay(key.slice(0, 7));
+
 /**
  * The chip's text. A whole year or a whole month is named as the unit, a
  * single day as the day, anything else as the range or its open half.
