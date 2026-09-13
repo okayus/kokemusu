@@ -929,4 +929,38 @@ test("register → post → today's moss darkens → reload → logout → login
   await weighedHit.hover();
   await expect(weighedLi.locator(".tl-tip")).toBeVisible();
   await expect(weighedLi.locator(".tl-tip")).toContainText("量 6 · 厚み 60%");
+
+  // 本文はカードから溢れない (features.md §1, 2026-09-13), at a phone's width: a
+  // code block's longest line has nothing to wrap on, and the card's grid track
+  // used to grow to it — the card and the page ran past the screen, and iPhone
+  // WebKit (Safari and Chrome alike) inflated the text of that 苔片 alone, its
+  // text autosizing acting on blocks wider than the screen. The body keeps the
+  // card's width, the <pre> scrolls inside its own box, the page does not.
+  await viewLink("投稿一覧").click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await attempt("POST", "/api/posts", {
+      body: [
+        "```ts",
+        "const veryLongIdentifierName = someFunctionCall(argumentNumberOne, argumentNumberTwo, argumentNumberThree);",
+        "```",
+      ].join("\n"),
+    }),
+  ).toBe(201);
+  await page.reload();
+  const codeCard = timeline.locator("li.post", { has: page.locator("pre.md-pre") });
+  await expect(codeCard.locator("pre.md-pre")).toBeVisible();
+  const widths = await codeCard.evaluate((li) => {
+    const pre = li.querySelector("pre.md-pre")!;
+    return {
+      card: li.getBoundingClientRect().width,
+      body: li.querySelector(".post-body")!.getBoundingClientRect().width,
+      preScrolls: pre.scrollWidth > pre.clientWidth,
+      page: document.documentElement.scrollWidth,
+      viewport: window.innerWidth,
+    };
+  });
+  expect(widths.body).toBe(widths.card);
+  expect(widths.preScrolls).toBe(true);
+  expect(widths.page).toBe(widths.viewport);
 });

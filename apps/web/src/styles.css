@@ -55,6 +55,16 @@
   }
 }
 
+/* iPhone (Safari and Chrome alike — both WebKit) inflates the text of any block wider
+   than the screen (WebKit's text autosizing, `adjustFontSizes`; only `auto` text).
+   100% keeps that from ever restyling a 苔片 that overflows, without touching the
+   browser's own zoom: Chrome iOS's 文字サイズ sets an inline percentage on <body>,
+   which still wins over this rule. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   font-family: system-ui, sans-serif;
@@ -1340,6 +1350,13 @@ dialog.compose h2 {
 
 .post {
   display: grid;
+  /* The implicit track is `auto` (= minmax(auto, 1fr)), which cannot shrink below the
+     苔片's min-content — a code block's longest line (`white-space: pre`, nothing to
+     wrap) — so the card and the page grew past the screen, and iPhone WebKit then
+     enlarged every line inside the too-wide block (its text autosizing inflates blocks
+     wider than the screen). minmax(0, 1fr) keeps the body at the card's width; the
+     pre / table scroll inside their own boxes. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.35rem;
   padding-block: 1rem;
   border-block-start: 1px solid var(--line);
