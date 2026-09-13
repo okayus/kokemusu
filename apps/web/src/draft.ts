@@ -2,8 +2,8 @@
 // since the composer became a dialog (features.md §1, 2026-09-05) neither may
 // closing it: Esc, the backdrop, a back gesture and 閉じる all leave the draft
 // here, so the next open resumes it. Closing is saving, not discarding. Success
-// clears it whole: no stones carry over to the next 苔片 by themselves
-// (同じ石に積む is the one explicit way they do).
+// clears it whole: no stones — and no 向き — carry over to the next 苔片 by
+// themselves (同じ石に積む is the one explicit way they do).
 // The draft is plaintext on the user's own device — same trust boundary as the
 // textarea itself; it is cleared on logout so a shared machine keeps nothing.
 // Storage can be unavailable (private mode, blocked site data), so every access
