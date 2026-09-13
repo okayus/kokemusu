@@ -15,6 +15,7 @@ import {
   ComposeDialog,
   DaysDisclosure,
   KindField,
+  seedOf,
   stoneNames,
   useComposeShortcut,
   type ComposeRequest,
@@ -214,7 +215,7 @@ function AuthedView(props: {
   // The 積む dialog's request lives here because two places raise it: the `n`
   // key (resume the draft as it is) up here, and — down in Garden — the round
   // 積む at the bottom-right corner (CornerButton) and a 苔片's 同じ石に積む
-  // (that 苔片's stones seeded). Garden renders it.
+  // (that 苔片's stones and 向き seeded). Garden renders it.
   const [compose, setCompose] = useState<ComposeRequest | null>(null);
   // The receipt after a post — 「積みました」, and where it went when the feed
   // cannot show it — hangs from the sticky bar so it is in view wherever the
@@ -227,7 +228,7 @@ function AuthedView(props: {
     return () => clearTimeout(timer);
   }, [notice]);
   const noticeAction = notice?.action;
-  const openCompose = useCallback(() => setCompose({ seedTags: null }), []);
+  const openCompose = useCallback(() => setCompose({ seed: null }), []);
   useComposeShortcut(openCompose);
   // 見かた (features.md §3): 投稿一覧 or 年表, read from and written to the URL.
   const { view, show } = useView();
@@ -627,7 +628,7 @@ function Garden(props: {
     <>
       {props.compose !== null && (
         <ComposeDialog
-          seedTags={props.compose.seedTags}
+          seed={props.compose.seed}
           tagOptions={tagOptions}
           today={today}
           onCreated={handleCreated}
@@ -639,7 +640,7 @@ function Garden(props: {
           is hidden, form and all, and the corner is 積む again. */}
       <CornerButton
         saveFormId={editingId !== null && showingPosts ? editFormId(editingId) : null}
-        onCompose={() => props.onCompose({ seedTags: null })}
+        onCompose={() => props.onCompose({ seed: null })}
       />
       {error && (
         <p role="alert" className="error">
@@ -737,7 +738,7 @@ function Garden(props: {
           tagOptions={tagOptions}
           filtered={narrowedBy.length > 0}
           onTagTap={(t) => showPosts([t])}
-          onSameStones={(tags) => props.onCompose({ seedTags: stoneNames(tags) })}
+          onSameStones={(post) => props.onCompose({ seed: seedOf(post) })}
           onUpdated={handleUpdated}
           onDeleted={handleDeleted}
           onSessionLost={props.onSessionLost}
@@ -835,7 +836,7 @@ function Timeline(props: {
   tagOptions: TagSummary[];
   filtered: boolean;
   onTagTap: (tag: TagSummary) => void;
-  onSameStones: (tags: TagSummary[]) => void;
+  onSameStones: (post: PostItem) => void;
   onUpdated: (updated: PostItem) => void;
   onDeleted: (id: string) => void;
   onSessionLost: () => void;
@@ -901,7 +902,7 @@ function PostEntry(props: {
   today: string | null;
   tagOptions: TagSummary[];
   onTagTap: (tag: TagSummary) => void;
-  onSameStones: (tags: TagSummary[]) => void;
+  onSameStones: (post: PostItem) => void;
   onUpdated: (updated: PostItem) => void;
   onDeleted: (id: string) => void;
   onSessionLost: () => void;
@@ -1109,10 +1110,11 @@ function PostEntry(props: {
         </p>
       )}
       <div className="post-actions">
-        {/* 同じ石に積む (CONTEXT.md): only its stones travel, and only when it
-            has some — a bare 苔片 would just be 積む again. */}
+        {/* 同じ石に積む (CONTEXT.md): its stones and its 向き travel, nothing
+            else — and only when it has stones; a bare 苔片 would just be 積む
+            again. */}
         {p.tags.length > 0 && (
-          <button type="button" disabled={busy} onClick={() => props.onSameStones(p.tags)}>
+          <button type="button" disabled={busy} onClick={() => props.onSameStones(p)}>
             同じ石に積む
           </button>
         )}

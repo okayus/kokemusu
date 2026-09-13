@@ -1,6 +1,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ComposeDialog, DaysDisclosure, DaysField, isComposeShortcut, stoneNames } from "./Compose";
+import {
+  ComposeDialog,
+  DaysDisclosure,
+  DaysField,
+  isComposeShortcut,
+  seedOf,
+  stoneNames,
+  type ComposeSeed,
+} from "./Compose";
 
 describe("isComposeShortcut — `n` opens the dialog only when the key would otherwise do nothing", () => {
   const plain = {
@@ -43,6 +51,27 @@ describe("stoneNames", () => {
   });
 });
 
+describe("seedOf — what 同じ石に積む takes from a 苔片", () => {
+  it("is the stones by name and the 向き, nothing of the body or the days", () => {
+    expect(
+      seedOf({
+        tags: [
+          { id: "a", name: "typescript" },
+          { id: "b", name: "読書" },
+        ],
+        kind: "input",
+      }),
+    ).toEqual({ tags: ["typescript", "読書"], kind: "input" });
+  });
+
+  it("carries 未分類 as 未分類 — the new 苔片 starts as the old one is", () => {
+    expect(seedOf({ tags: [{ id: "a", name: "typescript" }], kind: null })).toEqual({
+      tags: ["typescript"],
+      kind: null,
+    });
+  });
+});
+
 /** The one `<input>` carrying this id — React writes `name` / `value` after the other attributes, so match by parts. */
 const inputTag = (html: string, id: string): string =>
   html.match(new RegExp(`<input [^>]*id="${id}"[^>]*>`))?.[0] ?? "";
@@ -51,10 +80,10 @@ describe("ComposeDialog", () => {
   // No localStorage in Node: loadDraft reads null, so the fields start from the
   // props alone. Effects (showModal, focus) don't run under
   // renderToStaticMarkup — this is about what the form is seeded with.
-  const render = (seedTags: string[] | null, today: string | null = "2026-09-06") =>
+  const render = (seed: ComposeSeed | null, today: string | null = "2026-09-06") =>
     renderToStaticMarkup(
       <ComposeDialog
-        seedTags={seedTags}
+        seed={seed}
         tagOptions={[]}
         today={today}
         onCreated={() => {}}
@@ -63,15 +92,24 @@ describe("ComposeDialog", () => {
       />,
     );
 
-  it("seeds the tag field from 同じ石に積む — the stones as chips, no text — and nothing else", () => {
-    const html = render(["typescript", "読書"]);
+  it("seeds the tag field and the 向き from 同じ石に積む — the stones as chips, no text, the 苔片's 向き pressed — and nothing else", () => {
+    const html = render({ tags: ["typescript", "読書"], kind: "input" });
     expect(html.match(/<li class="tag-field-chip">/g)).toHaveLength(2);
     expect(html).toContain("<span>typescript</span>");
     expect(html).toContain("<span>読書</span>");
     expect(html).toContain('aria-label="「typescript」を外す"');
     expect(inputTag(html, "post-tags")).toContain('value=""');
-    // The body starts empty — only the stones travel (CONTEXT.md).
+    // The 向き travels with the stones (2026-09-13): exactly one radio is checked, the 苔片's.
+    expect(html.match(/name="kind" checked=""/g)).toHaveLength(1);
+    expect(html).toContain('<input type="radio" name="kind" checked="" value="input"/>インプット');
+    // The body starts empty — only the stones and the 向き travel (CONTEXT.md).
     expect(html).toMatch(/<textarea[^>]*id="post-body"[^>]*><\/textarea>/);
+  });
+
+  it("seeds 未分類 from a 未分類 苔片 — the 苔片's 向き, whatever the draft held", () => {
+    const html = render({ tags: ["typescript"], kind: null });
+    expect(html.match(/name="kind" checked=""/g)).toHaveLength(1);
+    expect(html).toContain('<input type="radio" name="kind" checked="" value=""/>未分類');
   });
 
   it("starts empty without a seed — a combobox with no chips", () => {

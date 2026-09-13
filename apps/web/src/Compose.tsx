@@ -1,8 +1,8 @@
 // 積む — the composer as a dialog (features.md §1, 2026-09-05). It left the top
 // of the page so the page could be for looking back; it opens from the round
 // 積む fixed to the bottom-right corner, from the `n` key, or from a 苔片's
-// 同じ石に積む (CONTEXT.md), which seeds the tag field with that 苔片's stones
-// and nothing else.
+// 同じ石に積む (CONTEXT.md), which seeds the tag field and the 向き radios with
+// that 苔片's stones and 向き, and nothing else.
 //
 // Everything typed — the body, the 向き, the days, the stones — is
 // 退避 to the draft on each keystroke (draft.ts), so closing the dialog — Esc,
@@ -32,13 +32,28 @@ import { TagField } from "./TagField";
 import { stonesOf } from "./tags";
 
 /**
- * What opens the dialog: `seedTags` is the stones (by name) for 同じ石に積む;
+ * What 同じ石に積む carries from a 苔片 into the dialog (features.md §1): its
+ * stones (by name) and its 向き. The 向き rides along since 2026-09-13 — the
+ * next 苔片 on the same stones usually faces the same way — and it is the
+ * 苔片's 向き even when that is 未分類: the new 苔片 starts as the old one is,
+ * not as the draft was left.
+ */
+export type ComposeSeed = { tags: string[]; kind: PostKind | null };
+
+/**
+ * What opens the dialog: `seed` is the 苔片's stones and 向き for 同じ石に積む;
  * null means resume the draft as it was left (積む / `n`).
  */
-export type ComposeRequest = { seedTags: string[] | null };
+export type ComposeRequest = { seed: ComposeSeed | null };
 
-/** A 苔片's stones by name — what 同じ石に積む seeds and the edit form starts from. */
+/** A 苔片's stones by name — what the edit form starts from, and the stones half of `seedOf`. */
 export const stoneNames = (tags: TagSummary[]): string[] => tags.map((t) => t.name);
+
+/** The seed 同じ石に積む takes from a 苔片 — nothing of the body or the days. */
+export const seedOf = (post: Pick<PostItem, "tags" | "kind">): ComposeSeed => ({
+  tags: stoneNames(post.tags),
+  kind: post.kind,
+});
 
 /**
  * The `n` shortcut (features.md §1) opens the dialog only when the key would
@@ -368,7 +383,7 @@ export const COMPOSE_DAYS_HINT =
  * dialog — so the garden can travel to the new 苔片 without being undone.
  */
 export function ComposeDialog(props: {
-  seedTags: string[] | null;
+  seed: ComposeSeed | null;
   /** The garden's registered stones — the tag field's suggestions. */
   tagOptions: TagSummary[];
   /** The feed's server-decided today — the date fields' ceiling. */
@@ -378,10 +393,12 @@ export function ComposeDialog(props: {
   onSessionLost: () => void;
 }) {
   // The whole entry is one Draft: resumed from storage, and 同じ石に積む replaces
-  // the stones only — the body, 向き and days are whatever was left there.
+  // the stones and the 向き — the body and the days are whatever was left there.
   const [fields, setFields] = useState<Draft>(() => {
     const draft = loadDraft() ?? EMPTY_DRAFT;
-    return props.seedTags === null ? draft : { ...draft, tags: props.seedTags, tagText: "" };
+    return props.seed === null
+      ? draft
+      : { ...draft, tags: props.seed.tags, tagText: "", kind: props.seed.kind };
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -397,14 +414,14 @@ export function ComposeDialog(props: {
     bodyRef.current?.focus();
   }, []);
 
-  // 同じ石に積む replaced the tag field: the draft must say so too, or a close
-  // before any keystroke would resume the previous stones. Mount only.
+  // 同じ石に積む replaced the tag field and the 向き: the draft must say so too,
+  // or a close before any keystroke would resume the previous ones. Mount only.
   const seeded = useRef(false);
   useEffect(() => {
-    if (seeded.current || props.seedTags === null) return;
+    if (seeded.current || props.seed === null) return;
     seeded.current = true;
     saveDraft(fields);
-  }, [props.seedTags, fields]);
+  }, [props.seed, fields]);
 
   const update = (patch: Partial<Draft>) => {
     const next = { ...fields, ...patch };

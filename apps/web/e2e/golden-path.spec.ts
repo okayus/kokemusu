@@ -544,12 +544,20 @@ test("register → post → today's moss darkens → reload → logout → login
   await expect(timeline.locator("li.post")).toHaveCount(2);
   await expect(timeline.locator("li.post").first()).toContainText("今日の苔片");
 
-  // 同じ石に積む (CONTEXT.md): the survivor's stones seed the tag field and the
-  // body starts empty; the new 苔片 lands at the head of the feed carrying them.
+  // 同じ石に積む (CONTEXT.md): the survivor's stones seed the tag field and its
+  // 向き the radios — 未分類 here, and that replaces the アウトプット left in the
+  // draft (features.md §1, 2026-09-13: the 苔片's 向き, not the draft's) — while
+  // the body starts empty; the new 苔片 lands at the head of the feed carrying
+  // the stones.
+  await stack.click();
+  await dialog.getByLabel("アウトプット", { exact: true }).check();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
   const survivor = timeline.locator("li.post").nth(1);
   await expect(survivor.getByText(body, { exact: true })).toBeVisible();
   await survivor.getByRole("button", { name: "同じ石に積む" }).click();
   await expect(tagChips(dialog)).toHaveText(["e2e", "苔"]);
+  await expect(dialog.getByLabel("未分類", { exact: true })).toBeChecked();
   await expect(dialog.getByLabel("いまの苔片")).toHaveValue("");
   await dialog.getByLabel("いまの苔片").fill("同じ石に積んだ苔片");
   await dialog.getByRole("button", { name: "積む", exact: true }).click();
@@ -571,6 +579,7 @@ test("register → post → today's moss darkens → reload → logout → login
     await stack.click();
     await dialog.getByLabel("いまの苔片").fill(text);
     await dialog.getByLabel("インプット", { exact: true }).check();
+    await fillTags(dialog, ["読書"]);
     await dialog.getByRole("button", { name: "積む", exact: true }).click();
     await expect(dialog).toBeHidden();
   }
@@ -603,6 +612,21 @@ test("register → post → today's moss darkens → reload → logout → login
   const stillIn = queryRows<{ c: number }>("SELECT COUNT(*) AS c FROM post WHERE kind = 'input'");
   expect(stillIn[0]?.c).toBe(1);
 
+  // 同じ石に積む carries the 向き too (features.md §1, 2026-09-13): from 読んだ 1,
+  // still インプット, the dialog opens with its stone and インプット pressed. Put
+  // back to nothing and closed, none of it stays in the draft — the next 積む
+  // below starts clean. 閉じる, not Escape: taking the chip off hands focus to
+  // the emptied tag field, whose list opens, and its Escape folds only that.
+  const readFirst = timeline.locator("li.post", { hasText: "読んだ 1" });
+  await readFirst.getByRole("button", { name: "同じ石に積む" }).click();
+  await expect(tagChips(dialog)).toHaveText(["読書"]);
+  await expect(dialog.getByLabel("インプット", { exact: true })).toBeChecked();
+  await expect(dialog.getByLabel("いまの苔片")).toHaveValue("");
+  await dialog.getByLabel("未分類", { exact: true }).check();
+  await dialog.getByRole("button", { name: "「読書」を外す" }).click();
+  await dialog.getByRole("button", { name: "閉じる" }).click();
+  await expect(dialog).toBeHidden();
+
   // 過去に積む (plans/day-axis-and-kind.md §A2, ADR-0005): 積む日 sits under the
   // stones in the dialog, unfolded; いつ alone = that one past day. The 苔片 is not at the head, so the
   // feed stays put and is never narrowed on its own — the receipt offers the
@@ -610,6 +634,8 @@ test("register → post → today's moss darkens → reload → logout → login
   // one (the survivor is there already) and the window counts one more. Its
   // card shows the day and 「M/D に積む」, no time.
   await stack.click();
+  await expect(tagChips(dialog)).toHaveCount(0);
+  await expect(dialog.getByLabel("未分類", { exact: true })).toBeChecked();
   await dialog.getByLabel("いつ", { exact: true }).fill(yesterday);
   await dialog.getByLabel("いまの苔片").fill("昨日の苔片");
   await dialog.getByRole("button", { name: "積む", exact: true }).click();
