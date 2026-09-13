@@ -22,7 +22,10 @@ export function measuredThickness(amount: number, days: number): number {
   return days > 0 ? amount / days : 0;
 }
 
-/** 「厚み x%」 — the measured 厚み as a whole percentage, past 100 as it is. */
+/** 「x%」 of a measured 厚み — whole, past 100 as it is. */
+export const formatMeasured = (thickness: number) => `${Math.round(thickness * 100)}%`;
+
+/** 「厚み x%」 — the 厚み measured over `days`, as a whole percentage. */
 export function formatThickness(amount: number, days: number): string {
-  return `${Math.round(measuredThickness(amount, days) * 100)}%`;
+  return formatMeasured(measuredThickness(amount, days));
 }

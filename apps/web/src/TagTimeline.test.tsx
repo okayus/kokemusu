@@ -4,11 +4,15 @@ import {
   assembleRows,
   axisTicks,
   barGeom,
+  barThickness,
   chartDomain,
   labelPx,
   monthSegments,
+  monthTitle,
   rowNote,
+  segmentAt,
   spanTitle,
+  thicknessLevel,
   TimelineChart,
   type AdhocEntry,
   type ChartRow,
@@ -73,16 +77,28 @@ describe("monthSegments — the 活動月 cut to the span, on the bar's own axis
   it("cuts the first and last months to the span and leaves a dormant month unpainted", () => {
     const s = span("2026-01-15", "2026-03-10", 5, [m("2026-01", 3), m("2026-03", 2)]);
     expect(monthSegments(s, domain)).toEqual([
-      // Jan 15–31 = 17 days, starting on day 14 of the axis.
-      { month: "2026-01", amount: 3, x: 15.556, w: 18.889 },
+      // Jan 15–31 = 17 days, starting on day 14 of the axis; 量 3 over the 17 days it covers.
+      { month: "2026-01", amount: 3, x: 15.556, w: 18.889, thickness: 3 / 17 },
       // Mar 1–10 = 10 days from day 59; February is not there.
-      { month: "2026-03", amount: 2, x: 65.556, w: 11.111 },
+      { month: "2026-03", amount: 2, x: 65.556, w: 11.111, thickness: 0.2 },
     ]);
   });
 
-  it("paints an interior month whole", () => {
+  it("paints an interior month whole, its 厚み over the whole month", () => {
     const s = span("2026-01-15", "2026-03-10", 6, [m("2026-01"), m("2026-02", 4), m("2026-03")]);
-    expect(monthSegments(s, domain)[1]).toEqual({ month: "2026-02", amount: 4, x: 34.444, w: 31.111 });
+    expect(monthSegments(s, domain)[1]).toEqual({
+      month: "2026-02",
+      amount: 4,
+      x: 34.444,
+      w: 31.111,
+      thickness: 4 / 28,
+    });
+  });
+
+  it("measures a partial first month over its own days — a 続く苔片 is as thick there as in its full months", () => {
+    // 60% from Jan 20: the 12 days of January carry 7.2, the 28 of February 16.8.
+    const s = span("2026-01-20", "2026-03-10", 1, [m("2026-01", 7.2), m("2026-02", 16.8)], 30);
+    expect(monthSegments(s, domain).map((seg) => seg.thickness)).toEqual([0.6, 0.6]);
   });
 
   it("skips a month the span does not reach instead of drawing off the bar", () => {
@@ -185,6 +201,61 @@ describe("axisTicks — labels for an axis of a given pixel width", () => {
   });
 });
 
+describe("segmentAt — the segment under a point of the axis", () => {
+  const seg = (month: string, x: number, w: number) => ({ month, amount: 1, x, w, thickness: 1 });
+  const segs = [seg("2026-01", 10, 20), seg("2026-03", 50, 5)];
+
+  it("finds the segment whose extent holds the point, ends included", () => {
+    expect(segmentAt(segs, 10)?.month).toBe("2026-01");
+    expect(segmentAt(segs, 30)?.month).toBe("2026-01");
+    expect(segmentAt(segs, 52)?.month).toBe("2026-03");
+  });
+
+  it("is null over a dormant month or off the era", () => {
+    expect(segmentAt(segs, 40)).toBeNull();
+    expect(segmentAt(segs, 5)).toBeNull();
+    expect(segmentAt([], 5)).toBeNull();
+  });
+});
+
+describe("barThickness — 太さ ＝ 量, the graph's √ law on a 20px lane", () => {
+  it("gives one 苔片 4px, a month of every day 10px, and caps at 15px from 量 100", () => {
+    expect(barThickness(1)).toBe(4);
+    expect(barThickness(6)).toBe(6);
+    expect(barThickness(30)).toBe(10);
+    expect(barThickness(100)).toBe(15);
+    expect(barThickness(438.6)).toBe(15);
+  });
+
+  it("keeps a clipped or thin 量 a visible bar", () => {
+    expect(barThickness(0.5)).toBe(4);
+    expect(barThickness(0.02)).toBe(3);
+  });
+});
+
+describe("thicknessLevel — 濃さ ＝ 厚み on the 総草's four steps", () => {
+  it("steps at a day in five, half the days, and every day", () => {
+    expect(thicknessLevel(0.03)).toBe(1);
+    expect(thicknessLevel(0.2)).toBe(1);
+    expect(thicknessLevel(0.21)).toBe(2);
+    expect(thicknessLevel(0.5)).toBe(2);
+    expect(thicknessLevel(0.6)).toBe(3);
+    expect(thicknessLevel(0.99)).toBe(3);
+    expect(thicknessLevel(1)).toBe(4);
+  });
+
+  it("keeps several 苔片 a day on the top step, as the 総草 does", () => {
+    expect(thicknessLevel(3)).toBe(4);
+  });
+});
+
+describe("monthTitle — the tip's month line", () => {
+  it("names the month, its 量 and its own 厚み", () => {
+    expect(monthTitle({ month: "2026-01", amount: 3, thickness: 3 / 17 })).toBe("2026-01 · 量 3 · 厚み 18%");
+    expect(monthTitle({ month: "2026-02", amount: 16.8, thickness: 0.6 })).toBe("2026-02 · 量 17 · 厚み 60%");
+  });
+});
+
 describe("rowNote — 「量 N · 厚み x%」, the 厚み measured over the row's period", () => {
   it("reads a 続く苔片's own 厚み back, and a single day as 100%", () => {
     expect(rowNote(span("2026-09-01", "2026-09-10", 1, [], 6))).toBe("量 6 · 厚み 60%");
@@ -252,7 +323,7 @@ describe("assembleRows — server rows + ad-hoc deep dives", () => {
 });
 
 describe("TimelineChart markup", () => {
-  it("draws each row's bar at its day-scaled position with the note beside it", () => {
+  it("draws each row's bar at its day-scaled position, as thick as its 量, centred on the track", () => {
     const html = render(
       [
         chartRow("a", span("2026-09-01", "2026-09-05", 5)),
@@ -260,34 +331,75 @@ describe("TimelineChart markup", () => {
       ],
       "2026-09-10",
     );
-    expect(html).toContain('x="0%" y="3" width="50%"');
-    expect(html).toContain('x="50%" y="3" width="10%"');
-    expect(html).toContain("量 5 · 厚み 100%");
-    // The bar carries its period for hover and for assistive tech.
-    expect(html).toContain('aria-label="2026-09-01 〜 2026-09-05 · 5 片"');
-    expect(html).toContain("<title>2026-09-06 · 1 片</title>");
+    // 量 5 is 6px on the 20px lane (y 7), 量 1 is 4px (y 8).
+    expect(html).toContain('class="tl-span" x="0%" y="7" width="50%" height="6" rx="4"');
+    expect(html).toContain('class="tl-span" x="50%" y="8" width="10%" height="4" rx="4"');
+    expect(html).toContain('class="tl-track" x1="0" x2="100%" y1="10" y2="10"');
+    // The drawing is decorative; the hit target over the era carries the
+    // period, the count and the numbers for assistive tech …
+    expect(html).toContain('<svg class="tl-bar" aria-hidden="true">');
+    expect(html).toContain('aria-label="2026-09-01 〜 2026-09-05 · 5 片 · 量 5 · 厚み 100%"');
+    expect(html).toContain('aria-label="2026-09-06 · 1 片 · 量 1 · 厚み 100%"');
+    // … and opens the row's tip, a popover it targets by id and by interest
+    // (React writes popoverTarget in camel case; HTML attributes are case-blind).
+    const hit = html.match(
+      /<button type="button" class="tl-hit" style="inset-inline-start:0%;inline-size:50%" popoverTarget="([^"]+)" interestfor="([^"]+)"/,
+    );
+    expect(hit?.[1]).toBeDefined();
+    expect(hit?.[2]).toBe(hit?.[1]);
+    // The row's own anchor name, handed to the button and the tip through
+    // the lane (a shared name would anchor every tip to the last row).
+    const lane = html.match(/<span class="tl-lane" style="--tl-anchor:--tl-([^"]+)">/);
+    expect(`${lane?.[1]}t`).toBe(hit?.[1]);
+    expect(html).toContain(
+      `<div id="${hit?.[1]}" popover="auto" class="tl-tip"><strong>量 5 · 厚み 100%</strong><span>2026-09-01 〜 2026-09-05 · 5 片</span></div>`,
+    );
+    // The legend, in the 総草's swatches.
+    expect(html).toContain('<div class="tl-legend" aria-hidden="true">');
+    expect(html.match(/<i class="l[1-4]"><\/i>/g)).toHaveLength(4);
   });
 
-  it("paints only the 活動月 as segments, clipped to the era bar", () => {
+  it("paints only the 活動月 as segments, each on its step of moss, clipped to the era bar", () => {
     const html = render(
       [chartRow("a", span("2026-01-15", "2026-03-10", 5, [m("2026-01", 3), m("2026-03", 2)]))],
       "2026-03-31",
     );
     // The axis opens on the row's first day (chartDomain): 76 days to today.
-    // The era underlay, first 苔片 to last (55 days) …
-    expect(html).toContain('class="tl-span" x="0%" y="3" width="72.368%" height="10" rx="4"');
-    // … and one segment per active month — none for dormant February.
-    expect(html.match(/class="tl-month"/g)).toHaveLength(2);
-    expect(html).toContain('class="tl-month" x="0%" y="3" width="22.368%" height="10"');
-    expect(html).toContain('class="tl-month" x="59.211%" y="3" width="13.158%" height="10"');
-    expect(html).toContain("<title>2026-01 · 量 3</title>");
-    expect(html).toContain("<title>2026-03 · 量 2</title>");
+    // The era underlay, first 苔片 to last (55 days), 6px for its 量 5 …
+    expect(html).toContain('class="tl-span" x="0%" y="7" width="72.368%" height="6" rx="4"');
+    // … and one segment per active month — none for dormant February — on
+    // the step of its own 厚み: 3 in 17 days and 2 in 10 are both たまに.
+    expect(html.match(/class="tl-month l\d"/g)).toHaveLength(2);
+    expect(html).toContain('class="tl-month l1" x="0%" y="7" width="22.368%" height="6"');
+    expect(html).toContain('class="tl-month l1" x="59.211%" y="7" width="13.158%" height="6"');
     // The segments sit in a group cut to the era's rounded outline, per bar.
     const clipId = html.match(/<clipPath id="([^"]+)"/)?.[1];
     expect(clipId).toBeDefined();
     expect(html).toContain(`clip-path="url(#${clipId})"`);
-    // What a screen reader hears of the gap.
-    expect(html).toContain('aria-label="2026-01-15 〜 2026-03-10 · 5 片 · 活動 2/3 か月"');
+    // What a screen reader hears of the gap, and the tip's two lines (the
+    // month line waits for a pointer).
+    expect(html).toContain(
+      'aria-label="2026-01-15 〜 2026-03-10 · 5 片 · 活動 2/3 か月 · 量 5 · 厚み 9%"',
+    );
+    expect(html).toContain(
+      '<strong>量 5 · 厚み 9%</strong><span>2026-01-15 〜 2026-03-10 · 5 片 · 活動 2/3 か月</span></div>',
+    );
+  });
+
+  it("darkens a segment with its month's 厚み", () => {
+    const html = render(
+      [
+        chartRow(
+          "a",
+          span("2026-01-01", "2026-03-31", 1, [m("2026-01", 9.3), m("2026-02", 16.8), m("2026-03", 31)], 57.1),
+        ),
+      ],
+      "2026-03-31",
+    );
+    // 30% in January, 60% in February, every day in March.
+    expect(html).toContain('class="tl-month l2" x="0%"');
+    expect(html).toContain('class="tl-month l3" x="34.444%"');
+    expect(html).toContain('class="tl-month l4" x="65.556%"');
   });
 
   it("keeps the rows in the order given — the server owns 開始日順", () => {
@@ -329,14 +441,14 @@ describe("TimelineChart markup", () => {
     expect(html).not.toContain(">2026年</text>");
   });
 
-  it("shows an empty AND row as 重なる苔片なし with 0 片, bar-less", () => {
+  it("shows an empty AND row as 重なる苔片なし, bar-less and tip-less", () => {
     const html = render(
       [chartRow("a", span("2026-09-01", "2026-09-02", 2)), { ...chartRow("b", null), adhoc: true }],
       "2026-09-10",
     );
     expect(html).toContain("重なる苔片なし");
-    expect(html).toContain("0 片");
     expect(html.match(/class="tl-span"/g)).toHaveLength(1);
+    expect(html.match(/class="tl-tip"/g)).toHaveLength(1);
   });
 
   it("offers the deep-dive controls only when focus mode passes them", () => {

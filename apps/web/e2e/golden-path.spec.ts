@@ -95,7 +95,14 @@ test("register → post → today's moss darkens → reload → logout → login
   await expect(yearChart).toBeVisible();
   await expect(feedSection).toBeHidden();
   await expect(yearChart.locator("li.tl-row")).toHaveCount(2);
-  await expect(yearChart.locator(".tl-note").first()).toHaveText("量 1 · 厚み 100%");
+  // The numbers live in the bar's tip (visualization.md §8): a tap on the hit
+  // target over the era toggles the popover, Escape light-dismisses it.
+  const firstRow = yearChart.locator("li.tl-row").first();
+  await firstRow.locator(".tl-hit").click();
+  await expect(firstRow.locator(".tl-tip")).toBeVisible();
+  await expect(firstRow.locator(".tl-tip")).toContainText("量 1 · 厚み 100%");
+  await page.keyboard.press("Escape");
+  await expect(firstRow.locator(".tl-tip")).toBeHidden();
   await yearChart.getByRole("button", { name: "e2e", exact: true }).click();
   await expect(yearChart.getByText("「e2e」の内訳")).toBeVisible();
   const focusRows = yearChart.locator("li.tl-row");
@@ -899,9 +906,15 @@ test("register → post → today's moss darkens → reload → logout → login
   const weighedLi = yearChart.locator("li.tl-row", {
     has: page.getByRole("button", { name: "案件", exact: true }),
   });
-  await expect(weighedLi.locator(".tl-note")).toHaveText("量 6 · 厚み 60%");
-  await expect(weighedLi.locator("svg.tl-bar")).toHaveAttribute(
+  // The hit target's label carries the period, the count and the numbers the
+  // bar encodes; hovering it (an interest invoker in Chromium, the mouse
+  // fallback elsewhere) opens the same numbers as a tip.
+  const weighedHit = weighedLi.locator(".tl-hit");
+  await expect(weighedHit).toHaveAttribute(
     "aria-label",
-    new RegExp(`^${tenDaysAgo} 〜 ${todayKey} · 1 片`),
+    new RegExp(`^${tenDaysAgo} 〜 ${todayKey} · 1 片.* · 量 6 · 厚み 60%$`),
   );
+  await weighedHit.hover();
+  await expect(weighedLi.locator(".tl-tip")).toBeVisible();
+  await expect(weighedLi.locator(".tl-tip")).toContainText("量 6 · 厚み 60%");
 });

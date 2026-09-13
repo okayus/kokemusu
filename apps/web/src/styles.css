@@ -856,7 +856,7 @@ dialog.compose h2 {
 /* 行 = [石チップ | 棒 | 注記]。subgrid で全行の列を揃える。 */
 .tl-grid {
   display: grid;
-  grid-template-columns: fit-content(11rem) 1fr max-content;
+  grid-template-columns: fit-content(11rem) 1fr;
   column-gap: 0.75rem;
   row-gap: 0.5rem;
   align-items: center;
@@ -952,9 +952,16 @@ dialog.compose h2 {
   color: var(--error);
 }
 
+/* 車線 = 棒の SVG ＋ その時代の上に重ねた透明な当たり判定の button ＋ 吹き出し（popover）。
+   吹き出しは車線の子孫なので、マウスが button から吹き出しへ渡っても「離れた」にならない。 */
+.tl-lane {
+  position: relative;
+  display: block;
+}
+
 .tl-bar {
   inline-size: 100%;
-  block-size: 16px;
+  block-size: 20px;
   display: block;
 }
 
@@ -964,34 +971,120 @@ dialog.compose h2 {
   stroke-width: 1;
 }
 
-/* 棒 = 最初の苔片〜最後の苔片の「時代」。活動月（.tl-month）の下地なので薄く —
-   休眠していた月はこの薄さだけが残る（visualization.md §8 月セグメント棒）。 */
+/* 棒 = 最初の苔片〜最後の苔片の「時代」。活動月（.tl-month）の下地で、総草の空マスと同じ段 —
+   休眠していた月はこの薄さだけが残る（visualization.md §8 月セグメント棒）。高さは量。 */
 .tl-span {
-  fill: var(--moss);
-  fill-opacity: 0.3;
+  fill: var(--moss-0);
 }
 
-/* 活動月。角丸は下地の輪郭で clip される（TimelineBar の <clipPath>）。 */
+/* 活動月。濃さはその月の厚み（総草の段 1..4）、角丸は下地の輪郭で clip される（TimelineBar の <clipPath>）。
+   隣り合う月の境は同じ小数 px に落ちるので、アンチエイリアスだと継ぎ目に細い筋が出る — 辺を px に揃える。 */
 .tl-month {
-  fill: var(--moss);
+  shape-rendering: crispEdges;
 }
 
-.tl-span:hover,
-.tl-month:hover {
+.tl-month.l1 { fill: var(--moss-1); }
+.tl-month.l2 { fill: var(--moss-2); }
+.tl-month.l3 { fill: var(--moss-3); }
+.tl-month.l4 { fill: var(--moss-4); }
+
+/* 当たり判定 = 時代の幅 × 行の高さ（棒の 20px を上下 4px ずつ越えてチップと同じ 28px）。
+   1 日の点でも親指に乗る最小幅。吹き出しの anchor — 名前は行ごと（TimelineBar が --tl-anchor で配る。
+   同じ名前を全行で使うと top layer の popover は文書の最後の button に付く）。 */
+.tl-hit {
+  position: absolute;
+  inset-block: -4px;
+  min-inline-size: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  anchor-name: var(--tl-anchor);
+}
+
+.tl-hit:focus-visible {
+  outline: 3px solid var(--moss);
+  outline-offset: 1px;
+}
+
+/* ポインタが乗った / 吹き出しが開いている時代は輪郭で持ち上がる（活動月は下地の輪郭で clip されるので、
+   stroke の外側半分 = 1px の縁が時代を囲む）。 */
+.tl-lane:has(.tl-hit:hover) .tl-span {
   stroke: var(--ink);
+  stroke-width: 2;
+}
+
+.tl-lane:has(.tl-tip:popover-open) .tl-span {
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+
+/* 吹き出し: 棒の数値（量 · 厚み ／ 期間 · 片 · 活動月 ／ 指した月）。時代の真上に anchor し、
+   上に入らなければ下へ。UA の inset: 0 / margin: auto は外す（外さないと領域の中央に浮く）。
+   anchor positioning の無いブラウザでは static な位置 = 棒のすぐ下に出る。狭い画面では行が折り返す。 */
+.tl-tip {
+  position-anchor: var(--tl-anchor);
+  position-area: block-start;
+  position-try-fallbacks: flip-block;
+  inset: auto;
+  margin: 0 0.5rem; /* 左右だけ: 端に寄った棒の吹き出しが画面の縁に触れない（anchor-center は余白込みで収める） */
+  max-inline-size: min(22rem, 100dvw - 1.5rem);
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 4px 16px color-mix(in oklab, var(--ink) 18%, transparent);
+}
+
+.tl-tip:popover-open {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.tl-tip strong {
+  font-weight: 600;
+}
+
+.tl-tip span {
+  color: var(--quiet);
 }
 
 .tl-empty {
   font-size: 0.8rem;
 }
 
-.tl-note {
-  font-size: 0.75rem;
+/* 凡例（総草のと同じ見本の並び）: 太さ ＝ 量、濃さ ＝ 厚み。 */
+.tl-legend {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  font-size: 0.7rem;
   color: var(--quiet);
-  text-align: end;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
+
+.tl-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.tl-legend i {
+  inline-size: 10px;
+  block-size: 10px;
+  border-radius: 2px;
+}
+
+.tl-legend .l1 { background: var(--moss-1); }
+.tl-legend .l2 { background: var(--moss-2); }
+.tl-legend .l3 { background: var(--moss-3); }
+.tl-legend .l4 { background: var(--moss-4); }
 
 /* ---- 石のつながり（タグ関係グラフ、visualization.md §6） ---- */
 
