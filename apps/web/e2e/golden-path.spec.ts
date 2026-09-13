@@ -358,11 +358,24 @@ test("register → post → today's moss darkens → reload → logout → login
   // is not a new 苔片. (exact: the tag chips' accessible names contain 編集
   // and 削除 as substrings once the new stone exists.)
   await second.getByRole("button", { name: "編集", exact: true }).click();
+  // 編集中 (features.md §1): the corner's round 積む gives way to this form's
+  // 保存 in the same place (the `form` attribute joins it to the form), and the
+  // other 苔片's 編集 waits — one 苔片 is edited at a time, so the corner never
+  // has two forms to save. The form's own 保存 stays (the keyboard's way).
+  const cornerSave = page.getByRole("button", { name: "保存" }).and(page.locator(".fab"));
+  await expect(stack).toHaveCount(0);
+  await expect(cornerSave).toBeVisible();
+  await expect(
+    timeline.locator("li.post").nth(1).getByRole("button", { name: "編集", exact: true }),
+  ).toBeDisabled();
+  await expect(second.getByRole("button", { name: "保存" })).toBeVisible();
   await second.getByLabel("本文").fill("編集された苔片");
   // The edit form starts from the 苔片's own stones as chips; one more is typed.
   await expect(tagChips(second)).toHaveText(["e2e"]);
   await fillTags(second, ["編集"]);
-  await second.getByRole("button", { name: "保存" }).click();
+  await cornerSave.click();
+  await expect(cornerSave).toHaveCount(0);
+  await expect(stack).toBeVisible();
 
   const edited = timeline.locator("li.post", { hasText: "編集された苔片" });
   await expect(edited).toBeVisible();
