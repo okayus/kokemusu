@@ -197,11 +197,13 @@ body {
   white-space: nowrap;
 }
 
-/* ---- 積む（右下の丸いボタン） ---- */
+/* ---- 右下の丸いボタン（積む — 編集中はその苔片の保存） ---- */
 
 /* The one pointer way in to 積む (features.md §1): a round button fixed to the
    bottom-right corner — under the thumb on a phone, and in view wherever the
    reader has scrolled to. The keyboard way in is the `n` key (Compose.tsx).
+   While a 苔片 is being edited the same button is that form's 保存 (App.tsx
+   CornerButton): one corner, one action, the same dress.
    Above the sticky bar (z-index 1); a dialog is in the top layer above both. */
 .fab {
   position: fixed;

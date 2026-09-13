@@ -6,19 +6,19 @@
 
 ## フェーズ
 
-**Phase 2 — #41〜#58 まで本番稼働（可視化の柱 3 本・書く面・見かた 2 つと選んだ石・厚みの DB / core / API / 集計（石・橋・年表が量を読む #58）・送り側契約 #56・タグ上限 99 #57。#51〜#58 の実データ目視は残）。** 次は厚みの UI（`docs/plans/thickness.md` PR 3）→ エクスポート。回帰検知は `pnpm e2e`、目視は使い捨て spec。
+**Phase 2 — #41〜#59 まで本番稼働（可視化の柱 3 本・書く面・見かた 2 つと選んだ石・厚み（DB / core / API #55 → 集計 #58 → UI #59 で完了）・送り側契約 #56・タグ上限 99 #57。#51〜#59 の実データ目視は残）。** 次は エクスポート。回帰検知は `pnpm e2e`、目視は使い捨て spec。
 
 ## 次の 3 手
 
-1. **厚み PR 3 UI**（`main` から `claude/thickness-ui`、plans/thickness.md PR 3、auto-merge 可。この handoff commit を cherry-pick して同乗、`gh pr create` は `--title`）: 書く前に `modern-web-guidance` → `DaysField` に「厚み」のスライダー（範囲のときだけ、初期 100、目盛り 14 / 60 / 71 / 100）＋ 換算 → `draft.ts` に `thickness` → `stackDaysInput` の `current ?? 100` をスライダー値に → カード / summary に「厚み 60%」→ 使い捨て spec で目視 → docs の「未実装」を ✅、plans/thickness.md 削除。
-2. **実データ目視 ＋ 石の目盛り**（#51〜#58 を本番で。`nodeRadius` は量 ≈ 46 で飽和 — 実物で据え置きか決める）。その後 **エクスポート**（`grill-with-docs` で 形式・範囲・出し方・復号・ADR-0003 の受け皿 → ADR → 実装）。
-3. **skill 書き戻し**（log #32〜#58 の罠 → `cloudflare-d1-drizzle-migration`（CHECK 追加も再構築・退避 recipe）/ `playwright-e2e-in-docker-sandbox` / `cloudflare-workers-e2e-playwright` / `cloudflare-workers-pat-bearer-auth`）→ 累積グラフ → `Idempotency-Key`。
+1. **エクスポートの決定**（`grill-with-docs`: 形式（JSON / Markdown）・範囲（全部 / 期間 / 石）・出し方（設定 UI からダウンロード / API＋PAT）・復号（`BODY_KEY` を持つ Worker が復号して出す — ADR-0001）・ADR-0003（物理削除）の受け皿 → ADR-0009 ＋ docs（features / security / data-model）。実装は次の PR で、Worker の純粋関数（整形）と I/O（D1 → 復号 → 応答）を分ける）。
+2. **実データ目視 ＋ 石の目盛り**（持ち主が本番で #51〜#59 を見る: 見かた 2 つ・選んだ石・量の注記・厚みのスライダー。`nodeRadius` は量 ≈ 46 で飽和 — 実物で据え置きか決める。直すなら使い捨て spec で再現してから）。
+3. **skill 書き戻し**（log #32〜#59 の罠 → `cloudflare-d1-drizzle-migration`（CHECK 追加も再構築・退避 recipe）/ `playwright-e2e-in-docker-sandbox` / `cloudflare-workers-e2e-playwright` / `cloudflare-workers-pat-bearer-auth`）→ 累積グラフ → `Idempotency-Key`。
 
 ## 詰まり・人手待ち
 
-- **本番 `0006` の事後確認（ホスト）**: `post` / `post_tags` の COUNT が merge 前と同じ、`(first_day = last_day) <> (thickness IS NULL)` が 0 件、`pragma_table_info('post')` に `thickness`（`title` は無い）、`sqlite_master` の `post` に CHECK 3 つ。
-- **画面から積む範囲は PR 3 まで 100%（毎日）で送る**（`stackDaysInput` のつなぎ）。範囲を送る送り側は `thickness` 必須。
-- **送り側 mazuoboeru（人手）**: `pnpm kokemusu:schema` の再 vendoring PR → 次の活動日 00:15 JST の tick でタグ付きの石が立つのを host の `wrangler tail` で実測。`title` 送信の修正は送り側 main に着地済み。二重投稿を見たら `Idempotency-Key`。
+- **本番 `0006` の事後確認（ホスト）**: `post` / `post_tags` の COUNT が merge 前と同じ、`(first_day = last_day) <> (thickness IS NULL)` が 0 件、`pragma_table_info('post')` に `thickness`、`sqlite_master` の `post` に CHECK 3 つ。
+- **送り側 mazuoboeru（人手）**: `pnpm kokemusu:schema` の再 vendoring PR → 次の活動日 00:15 JST の tick でタグ付きの石が立つのを host の `wrangler tail` で実測。二重投稿を見たら `Idempotency-Key`。
+- **対応が要る: `modern-web-guidance` の SKILL.md が古い**（検索のたびに警告、2026_05_16 → 最新 2026_09_04。古いままだと UI の案内が旧式になりうる）: `npx skills update`（`.claude/skills/modern-web-guidance/SKILL.md` と `skills-lock.json` が変わる）→ `.claude/**` なので arm せず人手 merge → search コマンドの `--skill-version` を新版にして警告が消えるのを確認。
 - okayus-skills#41（e2e 0.4.0 / sandbox 0.2.0 / passkey 0.2.1）の確認と merge。
 
 ## 進行中 PR

@@ -211,10 +211,10 @@ function AuthedView(props: {
   onSessionLost: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
-  // The 積む dialog's request lives here because two places raise it: the round
-  // 積む at the bottom-right corner and the `n` key (resume the draft as it is)
-  // up here, and a 苔片's 同じ石に積む (that 苔片's stones seeded) down in the
-  // feed. Garden renders it.
+  // The 積む dialog's request lives here because two places raise it: the `n`
+  // key (resume the draft as it is) up here, and — down in Garden — the round
+  // 積む at the bottom-right corner (CornerButton) and a 苔片's 同じ石に積む
+  // (that 苔片's stones seeded). Garden renders it.
   const [compose, setCompose] = useState<ComposeRequest | null>(null);
   // The receipt after a post — 「積みました」, and where it went when the feed
   // cannot show it — hangs from the sticky bar so it is in view wherever the
@@ -286,21 +286,6 @@ function AuthedView(props: {
           )}
         </p>
       </header>
-      {/* 積む, the round button fixed to the bottom-right corner (features.md
-          §1): one tap from wherever the reader has scrolled to, under the thumb
-          on a phone. Icon-only, so the name is on the button itself; styles.css
-          hides it while a dialog is up. */}
-      <button type="button" className="fab" aria-label="積む" title="積む" onClick={openCompose}>
-        <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false">
-          <path
-            d="M12 5v14M5 12h14"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-          />
-        </svg>
-      </button>
       <p className="quiet">{props.user.displayName} の庭。</p>
       {error && (
         <p role="alert" className="error">
@@ -325,6 +310,49 @@ function AuthedView(props: {
         <TokensSection />
       </details>
     </main>
+  );
+}
+
+/**
+ * The round button fixed to the bottom-right corner (features.md §1) — one tap
+ * from wherever the reader has scrolled to, under the thumb on a phone. It is
+ * 積む, except while a 苔片 is being edited in the feed on screen: then it is
+ * that form's 保存 in the same place, because a reader mid-edit has nothing to
+ * 積む and everything to save (2026-09-13). The 保存 is the edit form's own
+ * submit button, joined by the `form` attribute, so the form's validation and
+ * onSubmit run as if it sat inside — the form keeps its own 保存 too, the
+ * keyboard's way, right after the last field. Icon-only, so the name is on the
+ * button itself; styles.css hides it while a dialog is up.
+ */
+function CornerButton(props: { saveFormId: string | null; onCompose: () => void }) {
+  if (props.saveFormId !== null) {
+    return (
+      <button type="submit" form={props.saveFormId} className="fab" aria-label="保存" title="保存">
+        <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false">
+          <path
+            d="M5 12.5l4.5 4.5L19 7.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+    );
+  }
+  return (
+    <button type="button" className="fab" aria-label="積む" title="積む" onClick={props.onCompose}>
+      <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false">
+        <path
+          d="M12 5v14M5 12h14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    </button>
   );
 }
 
@@ -378,6 +406,11 @@ function Garden(props: {
   // of 今日 / 今週 / 今月 / 今年, so the presets cut where the server cuts.
   const [today, setToday] = useState<string | null>(null);
   const feedRef = useRef<HTMLElement | null>(null);
+  // 編集中の苔片 (features.md §1): one at a time, and held here rather than in
+  // the card, because the corner button (CornerButton) has to know whose 保存
+  // it is — two open forms would leave it nothing to point at. The card seeds
+  // its own fields when 編集 is pressed; this is only which one.
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const { onSessionLost } = props;
   const fault = useCallback(
@@ -402,6 +435,12 @@ function Garden(props: {
     feedEpoch.current += 1;
     setPosts(null);
     setNextCursor(null);
+  }
+  // A 苔片 that left the page — the filter moved, a fresh page came without it
+  // — took its form with it: the corner and the other cards' 編集 must not stay
+  // bound to a form that is gone (the same render-phase adjustment).
+  if (editingId !== null && !(posts?.some((p) => p.id === editingId) ?? false)) {
+    setEditingId(null);
   }
 
   useEffect(() => {
@@ -596,6 +635,12 @@ function Garden(props: {
           onSessionLost={props.onSessionLost}
         />
       )}
+      {/* 保存 only while the edit form is on screen: in the 年表 view the feed
+          is hidden, form and all, and the corner is 積む again. */}
+      <CornerButton
+        saveFormId={editingId !== null && showingPosts ? editFormId(editingId) : null}
+        onCompose={() => props.onCompose({ seedTags: null })}
+      />
       {error && (
         <p role="alert" className="error">
           {error}
@@ -696,6 +741,9 @@ function Garden(props: {
           onUpdated={handleUpdated}
           onDeleted={handleDeleted}
           onSessionLost={props.onSessionLost}
+          editingId={editingId}
+          onEditStart={setEditingId}
+          onEditEnd={() => setEditingId(null)}
         />
         {nextCursor !== null && (
           <button type="button" disabled={loadingMore} onClick={() => void loadMore()}>
@@ -791,6 +839,10 @@ function Timeline(props: {
   onUpdated: (updated: PostItem) => void;
   onDeleted: (id: string) => void;
   onSessionLost: () => void;
+  /** The 苔片 being edited, if any — the garden's (one at a time). */
+  editingId: string | null;
+  onEditStart: (id: string) => void;
+  onEditEnd: () => void;
 }) {
   if (props.posts === null) {
     return <p className="quiet">…</p>;
@@ -817,6 +869,9 @@ function Timeline(props: {
           onUpdated={props.onUpdated}
           onDeleted={props.onDeleted}
           onSessionLost={props.onSessionLost}
+          editingId={props.editingId}
+          onEditStart={props.onEditStart}
+          onEditEnd={props.onEditEnd}
         />
       ))}
     </ol>
@@ -830,11 +885,16 @@ const daysFieldsOf = (p: PostItem): DaysFields => ({
   thickness: p.thickness ?? EVERY_DAY,
 });
 
+/** The edit form's id — what the corner 保存 (CornerButton) names in its `form` attribute. */
+const editFormId = (postId: string) => `edit-form-${postId}`;
+
 /**
  * One 苔片: the read view with 編集/削除, or the inline edit form (the
  * composer's mirror — the same fields, uncontrolled so やめる simply
- * discards). Delete confirms through a native <dialog> showing
- * what dies; the deletion is physical and unrecoverable from the UI (ADR-0003).
+ * discards). Which 苔片 is being edited is the garden's (one at a time): this
+ * card is either the one, or one whose 編集 waits until that form is closed.
+ * Delete confirms through a native <dialog> showing what dies; the deletion
+ * is physical and unrecoverable from the UI (ADR-0003).
  */
 function PostEntry(props: {
   post: PostItem;
@@ -845,9 +905,13 @@ function PostEntry(props: {
   onUpdated: (updated: PostItem) => void;
   onDeleted: (id: string) => void;
   onSessionLost: () => void;
+  editingId: string | null;
+  onEditStart: (id: string) => void;
+  onEditEnd: () => void;
 }) {
   const p = props.post;
-  const [editing, setEditing] = useState(false);
+  const editing = props.editingId === p.id;
+  const editLocked = props.editingId !== null && !editing;
   // 編集中の本文・日・タグは state（本文はプレビューが要り、日は 2 欄が互いを縛り、
   // タグはチップと候補を持つ）。向きだけ form のまま。「編集」を押した時点の値で
   // 毎回蒔き直すので、やめる ＝ 捨てる が保たれる。厚みのスライダーは苔片の
@@ -892,7 +956,7 @@ function PostEntry(props: {
         kind: input.kind,
         ...stackingInput(input.days),
       });
-      setEditing(false);
+      props.onEditEnd();
       props.onUpdated(updated);
     } catch (e) {
       fault(e);
@@ -919,6 +983,7 @@ function PostEntry(props: {
     return (
       <li className="post">
         <form
+          id={editFormId(p.id)}
           className="post-edit"
           onSubmit={(e) => {
             e.preventDefault();
@@ -964,6 +1029,9 @@ function PostEntry(props: {
             </p>
           )}
           <div className="composer-actions">
+            {/* The form's own 保存 — the keyboard's way, right after the last
+                field. The round 保存 at the corner (CornerButton) submits this
+                same form; it is the thumb's way. */}
             <button type="submit" className="primary" disabled={busy}>
               保存
             </button>
@@ -972,7 +1040,7 @@ function PostEntry(props: {
               disabled={busy}
               onClick={() => {
                 setError(null);
-                setEditing(false);
+                props.onEditEnd();
               }}
             >
               やめる
@@ -1048,14 +1116,16 @@ function PostEntry(props: {
             同じ石に積む
           </button>
         )}
+        {/* Disabled, not hidden, while another 苔片 is being edited: the corner
+            holds one 保存, and closing that form (保存 or やめる) frees this. */}
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || editLocked}
           onClick={() => {
             setEditBody(p.body);
             setEditDays(daysFieldsOf(p));
             setEditTags({ tags: stoneNames(p.tags), text: "" });
-            setEditing(true);
+            props.onEditStart(p.id);
           }}
         >
           編集
