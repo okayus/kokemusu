@@ -6,19 +6,20 @@
 
 ## フェーズ
 
-**Phase 2 — #41〜#63 まで本番稼働（可視化の柱 3 本・書く面・見かた 2 つと選んだ石・厚み・送り側契約・タグ上限 99・年表は棒が量と厚み、時代の文字と軸の両端。#51〜#63 の実データ目視は残）。** 次は エクスポート。回帰検知は `pnpm e2e`、目視は使い捨て spec。
+**Phase 2 — #41〜#64 まで本番稼働（可視化の柱 3 本・書く面・見かた 2 つ・厚み・送り側契約・年表の棒と時代・#64 で本文はカードから溢れない。#51〜#64 の実データ目視は残）。** 次は エクスポート。回帰検知は `pnpm e2e`、目視は使い捨て spec。
 
 ## 次の 3 手
 
-1. **エクスポートの決定**（`grill-with-docs`: 形式（JSON / Markdown）・範囲（全部 / 期間 / 石）・出し方（設定 UI / API＋PAT）・復号（`BODY_KEY` を持つ Worker が復号して出す — ADR-0001）・ADR-0003（物理削除）の受け皿 → ADR-0009 ＋ docs（features / security / data-model）。実装は次の PR で、純粋関数（整形）と I/O（D1 → 復号 → 応答）を分ける）。
-2. **実データ目視 ＋ 石の目盛り**（持ち主が本番で #51〜#63 を見る: 見かた 2 つ・選んだ石・厚みのスライダー・編集中の右下の ✓・同じ石に積む の向き・年表の吹き出しと時代の文字（390px で棒の列 219px が狭すぎないか、行 52px の密度）。`nodeRadius` は量 ≈ 46 で飽和 — 実物で据え置きか決める）。
-3. **skill 書き戻し**（log #32〜#63 の罠 → `cloudflare-d1-drizzle-migration`（CHECK 追加も再構築 recipe）/ `playwright-e2e-in-docker-sandbox`（SVG の % 高さ・flex の max-content・anchor の名前）/ `cloudflare-workers-e2e-playwright` / `cloudflare-workers-pat-bearer-auth`）→ 累積グラフ → `Idempotency-Key`。
+1. **エクスポートの決定**（`grill-with-docs`: 形式（JSON / Markdown）・範囲（全部 / 期間 / 石）・出し方（設定 UI / API＋PAT）・復号は Worker が `BODY_KEY` で（ADR-0001）・ADR-0003（物理削除）の受け皿 → ADR-0009 ＋ docs。実装は次の PR、純粋関数（整形）と I/O（D1 → 復号 → 応答）を分ける）。
+2. **実データ目視 ＋ 石の目盛り**（持ち主が本番で #51〜#64 を見る: 見かた 2 つ・選んだ石・厚みのスライダー・編集中の右下の ✓・同じ石に積む の向き・年表の吹き出しと時代の文字（390px の棒の列 219px・行 52px）。`nodeRadius` は量 ≈ 46 で飽和 — 据え置きか決める）。
+3. **skill 書き戻し**（log #32〜#64 の罠 → `cloudflare-d1-drizzle-migration`（CHECK 追加も再構築 recipe）/ `playwright-e2e-in-docker-sandbox`（SVG の % 高さ・flex の max-content・anchor の名前・`isMobile` は iOS の文字拡大を再現しない）/ `cloudflare-workers-e2e-playwright` / `cloudflare-workers-pat-bearer-auth` / `cloudflare-mcp-claude-tooling`（upstream は api.github.com contents で読む））→ 累積グラフ → `Idempotency-Key`。
 
 ## 詰まり・人手待ち
 
-- **本番 `0006` の事後確認（ホスト）**: `post` / `post_tags` の COUNT が merge 前と同じ、`(first_day = last_day) <> (thickness IS NULL)` が 0 件、`pragma_table_info('post')` に `thickness`、`sqlite_master` の `post` に CHECK 3 つ。
-- **送り側 mazuoboeru（人手）**: `pnpm kokemusu:schema` の再 vendoring PR → 次の活動日 00:15 JST の tick でタグ付きの石が立つのを host の `wrangler tail` で実測。
-- **`modern-web-guidance` の SKILL.md が古い**（検索のたびに警告、2026_05_16 → 2026_09_04）: `npx skills update` → `.claude/**` なので arm せず人手 merge → `--skill-version` を新版にして警告が消えるのを確認。
+- **#64 の実機確認（人手）**: iPhone の Chrome で Markdown の苔片の文字と幅が戻ったか。まだ広がる苔片があれば本文（編集フォームの生テキスト）を貼る。
+- **本番 `0006` の事後確認（ホスト）**: `post` / `post_tags` の COUNT が merge 前と同じ、`(first_day = last_day) <> (thickness IS NULL)` が 0 件、`thickness` 列と `post` の CHECK 3 つ。
+- **送り側 mazuoboeru（人手）**: `pnpm kokemusu:schema` の再 vendoring PR → 次の活動日 00:15 JST の tick でタグ付きの石が立つのを `wrangler tail` で実測。
+- **`modern-web-guidance` の SKILL.md が古い**（2026_05_16 → 2026_09_04）: `npx skills update` → `.claude/**` なので arm せず人手 merge → `--skill-version` を新版にして警告が消えるのを確認。
 - okayus-skills#41（e2e / sandbox / passkey の版上げ）の確認と merge。
 
 ## 進行中 PR
