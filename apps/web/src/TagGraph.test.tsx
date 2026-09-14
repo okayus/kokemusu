@@ -4,9 +4,11 @@ import {
   TagGraphChart,
   VIEW_H,
   VIEW_W,
+  bridgedTo,
   edgeWidth,
   layoutGraph,
   nodeRadius,
+  reachOf,
   type LaidNode,
 } from "./TagGraph";
 import type { GraphEdge, GraphNode, TagGraph } from "./stats-api";
@@ -98,6 +100,48 @@ describe("layoutGraph", () => {
   });
 });
 
+describe("bridgedTo", () => {
+  const edges = [edge("a", "b"), edge("a", "c"), edge("c", "d")];
+
+  it("names the stones at the other end of each of a stone's bridges, whichever end it is", () => {
+    expect(bridgedTo(edges, "a")).toEqual(new Set(["b", "c"]));
+    expect(bridgedTo(edges, "c")).toEqual(new Set(["a", "d"]));
+  });
+
+  it("is empty for a lone stone", () => {
+    expect(bridgedTo(edges, "e")).toEqual(new Set());
+  });
+});
+
+describe("reachOf — what the map keeps while stones are chosen", () => {
+  const nodes = [node("a", 5), node("b", 3), node("c", 2), node("d", 1)];
+  // a–b, a–c, b–c form a triangle; d hangs off c alone.
+  const edges = [edge("a", "b"), edge("a", "c"), edge("b", "c"), edge("c", "d")];
+
+  it("keeps everything while nothing is chosen", () => {
+    expect(reachOf(nodes, edges, new Set())).toEqual(new Set(["a", "b", "c", "d"]));
+  });
+
+  it("keeps a chosen stone and the stones bridged to it, and hides the rest", () => {
+    expect(reachOf(nodes, edges, new Set(["a"]))).toEqual(new Set(["a", "b", "c"]));
+    expect(reachOf(nodes, edges, new Set(["d"]))).toEqual(new Set(["c", "d"]));
+  });
+
+  it("narrows with a second stone: only the stones bridged to ALL chosen stones stay", () => {
+    // b is bridged to both a and c; d only to c — the AND filter's shape.
+    expect(reachOf(nodes, edges, new Set(["a", "c"]))).toEqual(new Set(["a", "b", "c"]));
+    // a and d share no bridge themselves — both stay, being chosen — and c is
+    // the one stone bridged to both; b (not bridged to d) goes.
+    expect(reachOf(nodes, edges, new Set(["a", "d"]))).toEqual(new Set(["a", "c", "d"]));
+  });
+
+  it("keeps everything when the chosen stones have no 苔片 in this period", () => {
+    // The 選んだ石 outlive a period switch (features.md §3); a map they are
+    // not on has nothing to hide relative to.
+    expect(reachOf(nodes, edges, new Set(["zz"]))).toEqual(new Set(["a", "b", "c", "d"]));
+  });
+});
+
 describe("TagGraphChart markup", () => {
   const graph: TagGraph = { nodes: [node("a", 5), node("b", 1)], edges: [edge("a", "b", 2)] };
   const render = (selected: { id: string; name: string }[]) =>
@@ -136,6 +180,36 @@ describe("TagGraphChart markup", () => {
       { id: "a", name: "A" },
     ]);
     expect(both.match(/aria-pressed="true"/g)).toHaveLength(3);
+  });
+
+  it("hides nothing, and lights no spotlight, at rest", () => {
+    expect(html).not.toContain("data-hidden");
+    expect(html).not.toContain("data-far");
+    expect(html).not.toContain("data-near");
+    expect(render([{ id: "a", name: "A" }])).not.toContain("data-hidden");
+  });
+
+  it("hides the stones out of the chosen stone's reach, and the bridges to them", () => {
+    // a–b, b–c: choosing a keeps b (bridged to it) and loses c with its bridge.
+    const chain: TagGraph = {
+      nodes: [node("a", 3), node("b", 2), node("c", 1)],
+      edges: [edge("a", "b"), edge("b", "c")],
+    };
+    const html2 = renderToStaticMarkup(
+      <TagGraphChart
+        graph={chain}
+        selected={[{ id: "a", name: "A" }]}
+        onStoneTap={() => {}}
+        onBridgeTap={() => {}}
+      />,
+    );
+    expect(html2).toMatch(/aria-label="C · 量 1" data-hidden="true"/);
+    expect(html2).toMatch(/aria-label="B × C · 量 1" data-hidden="true"/);
+    expect(html2).not.toMatch(/aria-label="A · 量 3" data-hidden/);
+    expect(html2).not.toMatch(/aria-label="B · 量 2" data-hidden/);
+    expect(html2).not.toMatch(/aria-label="A × B · 量 1" data-hidden/);
+    // Hidden by attribute only — the stone keeps its place for its return.
+    expect(html2.match(/role="button"/g)).toHaveLength(5);
   });
 
   it("sizes stones by their 量 and bridges by the 量 they share", () => {

@@ -746,7 +746,8 @@ dialog.compose h2 {
 /* マスはボタン: タップでその日の投稿一覧へ（visualization.md §1）。 */
 .heatmap-cell {
   cursor: pointer;
-  /* 投稿直後に「マスが濃くなる」のを見せる、UI で唯一の動き。 */
+  /* 投稿直後に「マスが濃くなる」のを見せる。UI の動きはこれと、石のつながりの
+     隠れる / 戻る（.tg-node の遷移）の 2 つ。 */
   transition: fill 0.4s;
 }
 
@@ -1213,6 +1214,42 @@ dialog.compose h2 {
 
 .tg-chart:has([aria-pressed="true"]) .tg-node[aria-pressed="false"] .tg-stone {
   opacity: 0.55;
+}
+
+/* 隠れる（features.md §3, 2026-09-14）: 選んだ石があるあいだ、その全部と橋でつながる石だけが
+   残り、つながらない石とその橋は data-hidden で消える（HTML の hidden 属性は SVG 要素に効かない
+   ので、属性を CSS で読む）。visibility はタブ順と当たり判定も一緒に外す。opacity と同時に
+   遷移させると、消えるときは薄れてから消え、戻るときは現れてから濃くなる。配置は庭全体で
+   決めたまま（layoutGraph）なので、隠れていた石は元の場所に戻る。 */
+.tg-node,
+.tg-bridge {
+  transition:
+    opacity 0.2s,
+    visibility 0.2s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tg-node,
+  .tg-bridge {
+    transition: none;
+  }
+}
+
+.tg-node[data-hidden],
+.tg-bridge[data-hidden] {
+  visibility: hidden;
+  opacity: 0;
+}
+
+/* スポットライト: ホバー / キーボードフォーカスの石の橋は濃くなり、その石と橋でつながらない
+   石と橋は名前ごと薄れる（退いた石は 0.55 × これ）。タッチにホバーは無い（タップが選ぶ）。 */
+.tg-node[data-far],
+.tg-bridge[data-far] {
+  opacity: 0.3;
+}
+
+.tg-bridge[data-near] .tg-edge {
+  opacity: 1;
 }
 
 /* 細い橋でもタップできるよう、透明な太い当たり判定を重ねる。 */

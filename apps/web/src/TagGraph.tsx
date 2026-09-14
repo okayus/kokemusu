@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatAmount } from "./amount";
 import type { TagSummary } from "./posts-api";
 import { getGraph, type GraphEdge, type GraphNode, type GraphPeriod, type TagGraph } from "./stats-api";
@@ -14,6 +14,9 @@ import { getGraph, type GraphEdge, type GraphNode, type GraphPeriod, type TagGra
 // (features.md §3, 2026-09-07): a stone tap toggles it in or out of the
 // 選んだ石, a bridge tap toggles both its ends at once, and the set is read by
 // the 投稿一覧 (AND filter) and the 年表 (its axis) below — the page wires it up.
+// While stones are chosen the map keeps only their reach (reachOf, 2026-09-14),
+// and the stone under the pointer or the keyboard focus is a spotlight: its
+// bridges come forward, what is not bridged to it steps back.
 
 // ---------------------------------------------------------------- pure layout
 
@@ -170,6 +173,43 @@ export const nodeTitle = (node: GraphNode) => `${node.name} · 量 ${formatAmoun
 export const edgeTitle = (a: GraphNode, b: GraphNode, amount: number) =>
   `${a.name} × ${b.name} · 量 ${formatAmount(amount)}`;
 
+// --------------------------------------------------------------- pure reach
+
+/** The stones bridged to `id` — the ones sharing 苔片 with it on this map. */
+export function bridgedTo(edges: readonly GraphEdge[], id: string): Set<string> {
+  const near = new Set<string>();
+  for (const e of edges) {
+    if (e.a === id) near.add(e.b);
+    else if (e.b === id) near.add(e.a);
+  }
+  return near;
+}
+
+/**
+ * What the map keeps while stones are chosen (features.md §3, 2026-09-14): the
+ * 選んだ石 that are on this map, plus every stone bridged to ALL of them. The
+ * intersection, not the union — the 投稿一覧 narrows by AND and the 年表's 内訳
+ * lists the set × the stones co-occurring with it, so a second stone must
+ * narrow the map, never widen it back. A bridge is a pairwise fact, so this is
+ * the closest the map gets to "co-occurs with the whole set" without asking
+ * the server. No chosen stone on the map (nothing chosen, or a period they
+ * have no 苔片 in) keeps everything: the ids of all `nodes`.
+ */
+export function reachOf(
+  nodes: readonly GraphNode[],
+  edges: readonly GraphEdge[],
+  chosen: ReadonlySet<string>,
+): Set<string> {
+  const onMap = nodes.filter((n) => chosen.has(n.id)).map((n) => n.id);
+  if (onMap.length === 0) return new Set(nodes.map((n) => n.id));
+  const reach = new Set(onMap);
+  const nearEach = onMap.map((id) => bridgedTo(edges, id));
+  for (const n of nodes) {
+    if (nearEach.every((near) => near.has(n.id))) reach.add(n.id);
+  }
+  return reach;
+}
+
 // ----------------------------------------------------------------- the chart
 
 // Exported for the markup test — geometry and structure are locked there, the
@@ -186,6 +226,19 @@ export function TagGraphChart(props: {
   const at = new Map(laid.map((p) => [p.id, p] as const));
   const named = new Map(nodes.map((node) => [node.id, node] as const));
   const chosen = new Set(props.selected.map((t) => t.id));
+  // The layout is over the whole garden and only the drawing hides: a stone
+  // keeps its place while it is away, so the map never reshuffles on a tap.
+  const reach = reachOf(nodes, edges, chosen);
+  // The spotlight: the stone under the pointer or the keyboard focus. Honoured
+  // only while it is on the map and in reach — a period switch or a hide can
+  // take the stone away without any pointerleave.
+  const [interest, setInterest] = useState<string | null>(null);
+  const spot = interest !== null && reach.has(interest) ? interest : null;
+  const nearSpot = spot === null ? null : bridgedTo(edges, spot);
+  const endInterest = useCallback(
+    (id: string) => setInterest((current) => (current === id ? null : current)),
+    [],
+  );
   return (
     <svg className="tg-chart" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>
       {/* Bridges first so stones paint over them (and take the later tab stops). */}
@@ -197,6 +250,9 @@ export function TagGraphChart(props: {
         if (pa === undefined || pb === undefined || na === undefined || nb === undefined) {
           return null;
         }
+        // A bridge goes with either end: hidden when one is, and under the
+        // spotlight only when it touches the spot.
+        const hidden = !reach.has(e.a) || !reach.has(e.b);
         return (
           <Bridge
             key={`${e.a}+${e.b}`}
@@ -206,6 +262,8 @@ export function TagGraphChart(props: {
             pb={pb}
             amount={e.amount}
             pressed={chosen.has(e.a) && chosen.has(e.b)}
+            hidden={hidden}
+            spot={spot === null || hidden ? null : e.a === spot || e.b === spot ? "near" : "far"}
             onBridgeTap={props.onBridgeTap}
           />
         );
@@ -213,13 +271,20 @@ export function TagGraphChart(props: {
       {nodes.map((node) => {
         const p = at.get(node.id);
         if (p === undefined) return null;
+        const hidden = !reach.has(node.id);
         return (
           <Stone
             key={node.id}
             node={node}
             at={p}
             pressed={chosen.has(node.id)}
+            hidden={hidden}
+            far={
+              nearSpot !== null && !hidden && node.id !== spot && !nearSpot.has(node.id)
+            }
             onStoneTap={props.onStoneTap}
+            onInterest={setInterest}
+            onInterestEnd={endInterest}
           />
         );
       })}
@@ -234,6 +299,10 @@ function Bridge(props: {
   pb: LaidNode;
   amount: number;
   pressed: boolean;
+  /** An end of it is out of the 選んだ石's reach: gone with it. */
+  hidden: boolean;
+  /** Under a spotlight: touching the spot (comes forward) or not (steps back). */
+  spot: "near" | "far" | null;
   onBridgeTap: (a: TagSummary, b: TagSummary) => void;
 }) {
   const { a, b, pa, pb } = props;
@@ -241,13 +310,17 @@ function Bridge(props: {
   return (
     // The same rebuilt-button contract as Stone (no native button inside SVG).
     // A bridge is a toggle for its two stones at once (visualization.md §6):
-    // aria-pressed says whether both ends are among the 選んだ石.
+    // aria-pressed says whether both ends are among the 選んだ石. The data
+    // attributes are the CSS's: HTML's `hidden` has no effect on SVG elements.
     <g
       className="tg-bridge"
       role="button"
       tabIndex={0}
       aria-pressed={props.pressed}
       aria-label={edgeTitle(a, b, props.amount)}
+      data-hidden={props.hidden || undefined}
+      data-near={props.spot === "near" || undefined}
+      data-far={props.spot === "far" || undefined}
       onClick={tap}
       onKeyDown={(e) => {
         if (e.key === "Enter") tap();
@@ -276,7 +349,15 @@ function Stone(props: {
   node: GraphNode;
   at: LaidNode;
   pressed: boolean;
+  /** Out of the 選んだ石's reach: not bridged to every chosen stone. */
+  hidden: boolean;
+  /** Outside the spotlight: neither the spot nor bridged to it. */
+  far: boolean;
   onStoneTap: (tag: TagSummary) => void;
+  /** The pointer or the keyboard focus arrived: this stone is the spotlight. */
+  onInterest: (id: string) => void;
+  /** … and left. Only this stone's own spotlight goes out with it. */
+  onInterestEnd: (id: string) => void;
 }) {
   const { node, at } = props;
   const tap = () => props.onStoneTap({ id: node.id, name: node.name });
@@ -286,13 +367,18 @@ function Stone(props: {
     // keydown, Space on keyup, keydown only swallows the scroll
     // (modern-web-guidance/accessibility §5). A stone is a toggle button — a
     // tap chooses it, the same tap lets it go — and aria-pressed carries that;
-    // the CSS reads the same attribute for the ring and the fade.
+    // the CSS reads the same attribute for the ring and the fade. Hidden and
+    // far are data attributes (HTML's `hidden` has no effect on SVG elements):
+    // the CSS hides with `visibility`, which takes the tab stop and the hit
+    // area away too.
     <g
       className="tg-node"
       role="button"
       tabIndex={0}
       aria-pressed={props.pressed}
       aria-label={nodeTitle(node)}
+      data-hidden={props.hidden || undefined}
+      data-far={props.far || undefined}
       onClick={tap}
       onKeyDown={(e) => {
         if (e.key === "Enter") tap();
@@ -301,6 +387,18 @@ function Stone(props: {
       onKeyUp={(e) => {
         if (e.key === " ") tap();
       }}
+      // A finger's "hover" is the tap itself, so touch lights no spotlight (the
+      // tap chooses instead); a mouse or a pen does. The keyboard's hover is
+      // focus — the visible kind only, so a click's silent focus (no ring)
+      // leaves nothing behind once the pointer moves on.
+      onPointerEnter={(e) => {
+        if (e.pointerType !== "touch") props.onInterest(node.id);
+      }}
+      onPointerLeave={() => props.onInterestEnd(node.id)}
+      onFocus={(e) => {
+        if (e.currentTarget.matches(":focus-visible")) props.onInterest(node.id);
+      }}
+      onBlur={() => props.onInterestEnd(node.id)}
     >
       <title>{nodeTitle(node)}</title>
       {/* An invisible disc keeps young stones (r → R_MIN) tappable. */}

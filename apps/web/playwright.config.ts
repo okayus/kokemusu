@@ -36,6 +36,11 @@ export default defineConfig({
   workers: 1,
   // A flaky e2e is a bug report, not something to retry past.
   retries: 0,
+  // The golden path is ONE long test by design (one sqlite, one authenticator,
+  // every 導線 in sequence) and grows with each feature; it crossed the 30 s
+  // default on 2026-09-14. Each assertion still has its own 5 s expect timeout,
+  // so a hung step is caught there, not here.
+  timeout: 60_000,
   reporter: [["list"]],
   globalSetup: "./e2e/global-setup.ts",
   use: {
