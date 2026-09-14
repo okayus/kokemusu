@@ -619,6 +619,35 @@ test("register → post → today's moss darkens → reload → logout → login
   const stillIn = queryRows<{ c: number }>("SELECT COUNT(*) AS c FROM post WHERE kind = 'input'");
   expect(stillIn[0]?.c).toBe(1);
 
+  // 石のつながり — reach and spotlight (features.md §3, 2026-09-14). 読書 shares
+  // no 苔片 with 苔: hovering 苔 fades 読書 and brings the e2e–苔 bridge forward
+  // (e2e, bridged to 苔, stays as it is), and the pointer leaving lifts it;
+  // choosing 苔 hides 読書 — by visibility, so its role goes with it — while
+  // e2e stays, and the same tap brings it back. The feed is narrowed and
+  // released with the stone, as before. (The bridge's 量 is 2 by now: the
+  // survivor and 同じ石に積んだ苔片 both carry the pair.)
+  const readStone = graphChart.getByRole("button", { name: /^読書 · 量 \d+$/ });
+  const pairBridge = graphChart.getByRole("button", { name: /^(e2e × 苔|苔 × e2e) · 量 \d+$/ });
+  await expect(readStone).toBeVisible();
+  await mossStone.hover();
+  await expect(readStone).toHaveAttribute("data-far", "true");
+  await expect(e2eStone).not.toHaveAttribute("data-far", "true");
+  await expect(pairBridge).toHaveAttribute("data-near", "true");
+  await page.mouse.move(0, 0);
+  await expect(readStone).not.toHaveAttribute("data-far", "true");
+  await expect(pairBridge).not.toHaveAttribute("data-near", "true");
+  await mossStone.click();
+  await expect(mossStone).toHaveAttribute("aria-pressed", "true");
+  await expect(readStone).toBeHidden();
+  await expect(e2eStone).toBeVisible();
+  await expect(page.getByRole("button", { name: "「苔」の絞り込みを外す" })).toBeVisible();
+  await mossStone.click();
+  await expect(mossStone).toHaveAttribute("aria-pressed", "false");
+  await expect(readStone).toBeVisible();
+  await page.mouse.move(0, 0);
+  await expect(page.getByRole("button", { name: "「苔」の絞り込みを外す" })).toHaveCount(0);
+  await expect(timeline.locator("li.post")).toHaveCount(5);
+
   // 同じ石に積む carries the 向き too (features.md §1, 2026-09-13): from 読んだ 1,
   // still インプット, the dialog opens with its stone and インプット pressed. Put
   // back to nothing and closed, none of it stays in the draft — the next 積む
