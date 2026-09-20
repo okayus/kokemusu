@@ -51,8 +51,12 @@ services:
       DISABLE_AUTOUPDATER: "1"
       DISABLE_FEEDBACK_COMMAND: "1"
       DISABLE_ERROR_REPORTING: "1"
-      # Default model for the in-container agent.
-      ANTHROPIC_MODEL: "claude-fable-5"
+      # Optional: pin the agent's default model (alias or full id). Left commented
+      # out on purpose: when set, it wins over the default saved by `/model` on EVERY
+      # launch, which made `/model` the first command of almost every session
+      # (120 times in 5 weeks, 2026-09-20 review). The saved default lives in the
+      # claude-config volume and survives recreation.
+      # ANTHROPIC_MODEL: "claude-fable-5-1"
       POWERLEVEL9K_DISABLE_GITSTATUS: "true"
       TZ: Asia/Tokyo
       # The repo-scoped GitHub PAT is deliberately NOT here. Putting it in
