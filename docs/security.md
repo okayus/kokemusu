@@ -61,7 +61,8 @@
 
 ### 鍵の運用（`BODY_KEY`）
 
-- `openssl rand -base64 32 | wrangler secret put BODY_KEY`（ホスト）。**同じ値を 1Password に保存**（Cloudflare からは読み戻せない。失うと本文は永久に復号不能）。ローカルは `.dev.vars` に別の値。
+- **先に 1Password に保存し、そこから読んで入れる**（ホスト）: `openssl rand -base64 32` の値を 1Password の item に保存 → `op read "op://<vault>/<item>/password" | ./node_modules/.bin/wrangler secret put BODY_KEY` → `wrangler secret list`。`openssl … | wrangler secret put` と直接つなぐと値が一度も画面に出ず、保存できない（Cloudflare からは読み戻せない。失うと本文は永久に復号不能）。ローカルは `.dev.vars` に別の値。
+- **復元訓練**: 1Password の値で本番の 1 行を実際に復号できることを一度確かめる（D1 の dump は `~/backups/d1/kokemusu/` にある。鍵が違えば dump があっても本文は戻らない）。
 - 暗号文は `k<鍵ID>.<iv>.<暗号文>` の封筒。ローテーションは `k2` を足して順次再暗号化（鍵 ID で世代を見分ける）。
 - 鍵を持つのは Worker だけ。送り側（API 自動投稿）には渡さない。
 

@@ -44,7 +44,7 @@
 ## Phase 3 — 堅牢・安心
 
 - ~~本文のアプリ層暗号化(B)~~ → Phase 1 に前倒し（ADR-0001）。端末側 E2E (C) は採用しない。鍵ローテーション手順（`k2` を足して順次再暗号化）。
-- D1 バックアップ: **public リポなので「git に commit」変種は不可** → keyless 変種（ホスト timer か Worker→R2）を skill 側に足してから。暗号化バックアップ。
+- ~~D1 バックアップ~~ → ホストの週次 timer が稼働（2026-09-20、skill `cloudflare-d1-keyless-host-backup`。dump は `~/backups/d1/kokemusu/`、本文は `BODY_KEY` で暗号化されたまま入る）。残り: ホスト以外への写し。
 - インポート、ログイン履歴 UI。
 - セルフホスト配布物の整備（案B: `docker compose up` 一発、セットアップ/運用ドキュメント）。
 
