@@ -16,11 +16,8 @@
 
 ## 詰まり・人手待ち
 
-- **#64 の実機確認（人手）**: iPhone の Chrome で Markdown の苔片の文字と幅が戻ったか。まだ広がる苔片があれば本文（編集フォームの生テキスト）を貼る。
-- **本番 `0006` の事後確認（ホスト）**: `post` / `post_tags` の COUNT が merge 前と同じ、`(first_day = last_day) <> (thickness IS NULL)` が 0 件、`thickness` 列と `post` の CHECK 3 つ。
-- **送り側 mazuoboeru（人手）**: `pnpm kokemusu:schema` の再 vendoring PR → 次の活動日 00:15 JST の tick でタグ付きの石が立つのを `wrangler tail` で実測。
-- okayus-skills#41（e2e / sandbox / passkey の版上げ）の確認と merge。
+- **#64 の実機確認（人手）**: iPhone の Chrome で Markdown の苔片の文字と幅が戻ったか。確認の仕方 = 長い 1 行のコードブロックを含む苔片を開き、横スクロールが出ないこと・文字が他の苔片と同じ大きさであること。まだ広がる苔片があれば本文（編集フォームの生テキスト）を貼る。
 
 ## 進行中 PR
 
-- なし（この handoff commit は次の feature PR に同乗）。
+- なし。
