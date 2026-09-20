@@ -3,6 +3,7 @@
 1 行 = 1 節目（PR の merge・ADR・人手作業の完了・本番の状態変化）。`- YYYY-MM-DD 何を（#PR / ADR / skill）`。
 自動ロードはされない。必要なら `head -20 docs/log.md`。作業中の試行錯誤は書かない（git log と PR にある）。
 
+- 2026-09-21 **訂正: mazuoboeru の日次投稿は一度も届いていなかった**（下の 09-20「送り側 mazuoboeru の実測 完了」は誤り。石の存在だけを見て tick が通ったと判断したが、`まず覚える` の石 2 つの作成時刻は 17:30 と 23:56 で、00:15 の Cron のものではない）。実測: PAT「mazuoboeru」の `last_used_at` は発行当日 09-03 のまま。09-21 00:15 JST の tick を両 Worker の `wrangler tail` で採ると、送り側は `POST /api/posts -> 404`、こちらには要求が来ていない。原因 = 同じ `shiraoka.workers.dev` の Worker への `fetch()` は `global_fetch_strictly_public` フラグが無いと届かない（Cloudflare error 1042）。修正は mazuoboeru#105。
 - 2026-09-20 **本番 `0006` の事後確認 完了**（ホストの D1 dump で実測: `thickness` 列あり・`post` の CHECK 3 つ・`(first_day = last_day) <> (thickness IS NULL)` は 0 件・`d1_migrations` は 0006 まで・`post` 53 / `post_tags` 214・外部キー違反なし。merge 前の COUNT は控えが無く比較不能）。
 - 2026-09-20 **送り側 mazuoboeru の実測 完了**（再 vendoring は mazuoboeru #100 で 09-12 に済み。本番 D1 に `まず覚える` タグつきの 2026-09-12 分の石がタグ 4 つで存在 = 00:15 JST の tick が 201 で通った）。okayus-skills#41 は 09-02 に merge 済みで、人手待ちから外した。
 - 2026-09-20 **D1 の週次バックアップ 稼働**（ホストの systemd timer `d1-backup.timer`、日曜 04:40、dump は `~/backups/d1/`。skill `cloudflare-d1-keyless-host-backup` = okayus-skills#43。`wrangler d1 export` の生 dump は親テーブル順でなく D1 に戻せないので、復元は `d1-restore-sql.mjs` を通す）。

@@ -18,6 +18,8 @@
 
 - **#64 の実機確認（人手）**: iPhone の Chrome で Markdown の苔片の文字と幅が戻ったか。確認の仕方 = 長い 1 行のコードブロックを含む苔片を開き、横スクロールが出ないこと・文字が他の苔片と同じ大きさであること。まだ広がる苔片があれば本文（編集フォームの生テキスト）を貼る。
 
+- **mazuoboeru からの日次投稿が未達（ホスト）**: 原因は送り側の Cloudflare error 1042（同じゾーンの Worker への fetch）。mazuoboeru#105 の配備後、最初の活動日の翌 00:15 JST に PAT「mazuoboeru」の `last_used_at` の前進と石の到着を確かめる（`~/backups/d1/` の dump で見られる）。matatabetai（ADR-013）の送り側にも同じフラグが要る。
+
 ## 進行中 PR
 
 - なし。
