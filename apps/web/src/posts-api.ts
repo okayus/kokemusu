@@ -63,29 +63,56 @@ export const updatePost = (id: string, input: PostInput): Promise<PostItem> =>
 export const deletePost = (id: string): Promise<Record<string, never>> =>
   request(`/api/posts/${encodeURIComponent(id)}`, { method: "DELETE" });
 
-// `tag` = one tag by name, `tags` = a 2+ tag AND set by id (same wire 規約 as
-// the 年表's deep-dive rows) — the server rejects a request carrying both.
-// `from` / `to` = inclusive JST days (`YYYY-MM-DD`, the 総草's window form),
-// either half alone allowed; the server rejects an inverted pair.
-export function listPosts(
-  opts: {
-    cursor?: string;
-    tag?: string;
-    tags?: string[];
-    from?: string;
-    to?: string;
-    limit?: number;
-  } = {},
-): Promise<Timeline> {
+/**
+ * The feed's filter in wire form — what the timeline, its count and 付け替え
+ * share, so what is shown narrowed is what is counted and retagged. `tag` =
+ * one tag by name, `tags` = a 2+ tag AND set by id (same wire 規約 as the
+ * 年表's deep-dive rows) — the server rejects a request carrying both. `from` /
+ * `to` = inclusive JST days (`YYYY-MM-DD`, the 総草's window form), either
+ * half alone allowed; the server rejects an inverted pair.
+ */
+export type FeedFilter = { tag?: string; tags?: string[]; from?: string; to?: string };
+
+function filterParams(filter: FeedFilter): URLSearchParams {
   const q = new URLSearchParams();
+  if (filter.tag !== undefined) q.set("tag", filter.tag);
+  if (filter.tags !== undefined) q.set("tags", filter.tags.join(","));
+  if (filter.from !== undefined) q.set("from", filter.from);
+  if (filter.to !== undefined) q.set("to", filter.to);
+  return q;
+}
+
+export function listPosts(
+  opts: FeedFilter & { cursor?: string; limit?: number } = {},
+): Promise<Timeline> {
+  const q = filterParams(opts);
   if (opts.cursor !== undefined) q.set("cursor", opts.cursor);
-  if (opts.tag !== undefined) q.set("tag", opts.tag);
-  if (opts.tags !== undefined) q.set("tags", opts.tags.join(","));
-  if (opts.from !== undefined) q.set("from", opts.from);
-  if (opts.to !== undefined) q.set("to", opts.to);
   if (opts.limit !== undefined) q.set("limit", String(opts.limit));
   const qs = q.toString();
   return request(`/api/posts${qs ? `?${qs}` : ""}`);
 }
+
+/** How many 苔片 the filter holds — loaded pages or not. */
+export const countPosts = (filter: FeedFilter): Promise<{ count: number }> =>
+  request(`/api/posts/count?${filterParams(filter)}`);
+
+/** What a 付け替え reports: the 苔片 the filter held, and how many actually changed. */
+export type RetagResult = { matched: number; changed: number };
+
+/**
+ * 付け替え (features.md §2): every 苔片 of the filter gains the stones in `add`
+ * (by name — a new spelling mints a stone, as on 積む) and loses those in
+ * `remove` (by id), atomically. The server insists on a stone in the filter
+ * and refuses a stone on both sides (400).
+ */
+export const retagPosts = (
+  filter: FeedFilter,
+  change: { add: string[]; remove: string[] },
+): Promise<RetagResult> =>
+  request(`/api/posts?${filterParams(filter)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(change),
+  });
 
 export const listTags = (): Promise<TagSummary[]> => request("/api/tags");

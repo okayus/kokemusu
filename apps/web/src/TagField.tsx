@@ -35,6 +35,8 @@ import {
 
 export function TagField(props: {
   id: string;
+  /** The visible label; the composer's and the edit form's 「タグ（任意）」 unless said otherwise (付け替え says 「足す石」). */
+  label?: string;
   /** The garden's registered stones (GET /api/tags) — what the listbox offers. */
   options: TagSummary[];
   value: TagsFields;
@@ -113,7 +115,7 @@ export function TagField(props: {
 
   return (
     <div className="field tag-field">
-      <label htmlFor={props.id}>タグ（任意）</label>
+      <label htmlFor={props.id}>{props.label ?? "タグ（任意）"}</label>
       {/* The anchor the list hangs from (position: relative); the box is dressed
           as the input, and a tap anywhere in it lands in the text. */}
       <div className="tag-field-anchor">

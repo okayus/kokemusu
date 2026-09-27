@@ -1,9 +1,19 @@
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
-import { MAX_TAGS_PER_POST } from "../core/tag";
+import { MAX_TAGS_PER_POST, MAX_TAGS_PER_SET } from "../core/tag";
+import { createDb } from "../db";
 import { app } from "../index";
 import { TEST_ORIGIN, testEnv } from "../test-support";
-import { createPostSchema, listPostsQuerySchema, periodCondition } from "./posts";
+import {
+  createPostSchema,
+  feedCondition,
+  feedFilterSchema,
+  listPostsQuerySchema,
+  periodCondition,
+  retagFilterSchema,
+  retagSchema,
+  retagStatements,
+} from "./posts";
 
 // The Node harness has no D1 (test-support.ts), so these route tests stay on
 // the paths that fail BEFORE the database: mount order, CSRF, the session
@@ -96,6 +106,40 @@ describe("posts/tags routes sit behind the session guard", () => {
     );
     expect(res.status).toBe(401);
     expect(((await res.json()) as { error: { type: string } }).error.type).toBe("unauthorized");
+  });
+
+  // 付け替え and its count (features.md §2): mounted, session-only. The
+  // collection PATCH carries no body here — the guard answers before reading.
+  it("GET /api/posts/count without a session is 401 (not 404 — the route is mounted)", async () => {
+    const res = await app.request("/api/posts/count?tag=苔", {}, testEnv());
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: { type: string } }).error.type).toBe("unauthorized");
+  });
+
+  it("PATCH /api/posts (the collection, 付け替え) without a session is 401", async () => {
+    const res = await app.request(
+      "/api/posts?tag=苔",
+      { method: "PATCH", headers: { Origin: TEST_ORIGIN } },
+      testEnv(),
+    );
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: { type: string } }).error.type).toBe("unauthorized");
+  });
+
+  it("a cross-origin PATCH /api/posts is rejected by CSRF before anything else", async () => {
+    const res = await app.request(
+      "/api/posts?tag=苔",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Origin: "https://evil.example" },
+        body: JSON.stringify({ add: ["typescript"] }),
+      },
+      testEnv(),
+    );
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: { type: string } }).error.type).toBe(
+      "csrf_origin_mismatch",
+    );
   });
 
   it("a cross-origin PATCH /api/posts/:id is rejected by CSRF before anything else", async () => {
@@ -324,5 +368,174 @@ describe("periodCondition — the period is an overlap on the day axis (ADR-0005
     expect(toOnly?.sql).toContain("first_day");
     expect(toOnly?.sql).not.toContain("last_day");
     expect(render({})).toBeUndefined();
+  });
+});
+
+describe("feedFilterSchema / retagFilterSchema — the filter three routes share", () => {
+  it("the feed's filter takes stones and a period, or nothing; 付け替え's insists on a stone", () => {
+    expect(feedFilterSchema.safeParse({}).success).toBe(true);
+    expect(feedFilterSchema.safeParse({ from: "2026-09-01" }).success).toBe(true);
+    expect(retagFilterSchema.safeParse({}).success).toBe(false);
+    expect(retagFilterSchema.safeParse({ from: "2026-09-01", to: "2026-09-30" }).success).toBe(
+      false,
+    );
+    expect(retagFilterSchema.safeParse({ tag: "TS" }).success).toBe(true);
+    expect(retagFilterSchema.safeParse({ tags: "id-a,id-b", from: "2026-09-01" }).success).toBe(
+      true,
+    );
+  });
+
+  it("keeps the feed's rules — tag/tags exclusive, an ordered period — under the extra one", () => {
+    expect(retagFilterSchema.safeParse({ tag: "TS", tags: "id-a,id-b" }).success).toBe(false);
+    expect(
+      retagFilterSchema.safeParse({ tag: "TS", from: "2026-09-30", to: "2026-09-01" }).success,
+    ).toBe(false);
+    expect(retagFilterSchema.safeParse({ tag: "TS", to: "9999-12-31" }).success).toBe(false);
+    // Refining did not touch the feed's own schema.
+    expect(feedFilterSchema.safeParse({ from: "2026-09-01" }).success).toBe(true);
+  });
+
+  it("the page's schema is the filter plus limit and cursor, rules kept", () => {
+    expect(listPostsQuerySchema.safeParse({ tag: "TS", tags: "id-a,id-b" }).success).toBe(false);
+    expect(listPostsQuerySchema.safeParse({ tag: "TS", limit: "5", cursor: "c" }).success).toBe(
+      true,
+    );
+  });
+});
+
+describe("retagSchema — the change of a 付け替え", () => {
+  it("takes stones to put on by name, stones to take off by id, either or both", () => {
+    expect(retagSchema.safeParse({ add: ["typescript"] }).success).toBe(true);
+    expect(retagSchema.safeParse({ remove: ["id-a"] }).success).toBe(true);
+    expect(retagSchema.safeParse({ add: ["typescript"], remove: ["id-a"] }).success).toBe(true);
+  });
+
+  it("refuses nothing to change, a blank stone, and a key it does not name (ADR-0006)", () => {
+    expect(retagSchema.safeParse({}).success).toBe(false);
+    expect(retagSchema.safeParse({ add: [], remove: [] }).success).toBe(false);
+    expect(retagSchema.safeParse({ add: [""] }).success).toBe(false);
+    expect(retagSchema.safeParse({ add: "typescript" }).success).toBe(false);
+    expect(retagSchema.safeParse({ add: ["x"], tags: ["y"] }).success).toBe(false);
+    expect(retagSchema.safeParse({ add: ["x"], title: "見出し" }).success).toBe(false);
+  });
+
+  it("caps the sides where the composer and the ?tags= set are capped", () => {
+    const names = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`);
+    expect(retagSchema.safeParse({ add: names(MAX_TAGS_PER_POST) }).success).toBe(true);
+    expect(retagSchema.safeParse({ add: names(MAX_TAGS_PER_POST + 1) }).success).toBe(false);
+    expect(retagSchema.safeParse({ remove: names(MAX_TAGS_PER_SET) }).success).toBe(true);
+    expect(retagSchema.safeParse({ remove: names(MAX_TAGS_PER_SET + 1) }).success).toBe(false);
+    expect(retagSchema.safeParse({ remove: ["x".repeat(65)] }).success).toBe(false);
+  });
+});
+
+describe("feedCondition — the filter as SQL, a subquery so writes can go through it", () => {
+  // No D1 behind it: the builders only render.
+  const db = createDb(undefined as unknown as D1Database);
+  const render = (stones: string[], period: { from?: string; to?: string }) =>
+    new SQLiteSyncDialect().sqlToQuery(feedCondition(db, "u", stones, period));
+
+  it("no stone is the user alone (with the period's overlap when there is one)", () => {
+    expect(render([], {})).toMatchObject({ sql: '"post"."user_id" = ?', params: ["u"] });
+    const q = render([], { from: "2026-09-01", to: "2026-09-30" });
+    expect(q.sql).toMatch(/"last_day" >= \? and "post"."first_day" <= \?/);
+    expect(q.params).toEqual(["u", "2026-09-01", "2026-09-30"]);
+  });
+
+  it("one stone is a plain IN over post_tags, never a join", () => {
+    const q = render(["t1"], {});
+    expect(q.sql).toBe(
+      '("post"."user_id" = ? and "post"."id" in (select "post_id" from "post_tags" where "post_tags"."tag_id" = ?))',
+    );
+    expect(q.params).toEqual(["u", "t1"]);
+  });
+
+  it("a set is the 年表's AND — post ids carrying COUNT(DISTINCT tag_id ∈ set) = n", () => {
+    const q = render(["t1", "t2"], { from: "2026-09-01" });
+    expect(q.sql).toBe(
+      '("post"."user_id" = ? and "post"."id" in (select "post_id" from "post_tags" where "post_tags"."tag_id" in (?, ?) group by "post_tags"."post_id" having count(distinct "post_tags"."tag_id") = ?) and "post"."last_day" >= ?)',
+    );
+    expect(q.params).toEqual(["u", "t1", "t2", 2, "2026-09-01"]);
+  });
+});
+
+describe("retagStatements — every statement writes THROUGH the filter (features.md §2)", () => {
+  const db = createDb(undefined as unknown as D1Database);
+  const cond = feedCondition(db, "u", ["t1"], { from: "2026-09-01" });
+  const filterSql =
+    '("post"."user_id" = ? and "post"."id" in (select "post_id" from "post_tags" where "post_tags"."tag_id" = ?) and "post"."last_day" >= ?)';
+  const filterParams = ["u", "t1", "2026-09-01"];
+
+  it("counts, touches the changed, mints new stones, puts links on, takes links off — in that order", () => {
+    const stmts = retagStatements(db, {
+      cond,
+      now: 1,
+      newTags: [{ id: "n1", userId: "u", name: "New", norm: "new", createdAt: 1 }],
+      addIds: ["n1", "t2"],
+      removeIds: ["t1"],
+    }).map((s) => s.toSQL());
+    expect(stmts.map((s) => s.sql.split(" ")[0])).toEqual([
+      "select",
+      "update",
+      "insert",
+      "insert",
+      "insert",
+      "delete",
+    ]);
+    expect(stmts[0]).toEqual({
+      sql: `select count(*) from "post" where ${filterSql}`,
+      params: filterParams,
+    });
+    // A new stone is on no 苔片 yet: every matched 苔片 changes, no condition.
+    expect(stmts[1]).toEqual({
+      sql: `update "post" set "updated_at" = ? where ${filterSql}`,
+      params: [1, ...filterParams],
+    });
+    expect(stmts[2]?.sql).toMatch(/^insert into "tag" /);
+    // INSERT … SELECT: the 苔片 of the filter, each with the stone — OR IGNORE
+    // for one that wears it already (the PK).
+    expect(stmts[3]).toEqual({
+      sql: `insert into "post_tags" ("post_id", "tag_id") select "id", ? as "tag_id" from "post" where ${filterSql} on conflict do nothing`,
+      params: ["n1", ...filterParams],
+    });
+    expect(stmts[4]?.params).toEqual(["t2", ...filterParams]);
+    // DELETE through the filter: the 苔片 of the filter as it stands when the
+    // statement runs — after the links above were put on.
+    expect(stmts[5]).toEqual({
+      sql: `delete from "post_tags" where ("post_tags"."tag_id" = ? and "post_tags"."post_id" in (select "id" from "post" where ${filterSql}))`,
+      params: ["t1", ...filterParams],
+    });
+  });
+
+  it("with no new stone, the touch names exactly the 苔片 whose links will change", () => {
+    const [, touch] = retagStatements(db, {
+      cond,
+      now: 1,
+      newTags: [],
+      addIds: ["t2"],
+      removeIds: ["t1"],
+    });
+    const q = touch.toSQL();
+    expect(q.sql).toBe(
+      `update "post" set "updated_at" = ? where (${filterSql} and (not exists (select 1 from "post_tags" where ("post_tags"."post_id" = "post"."id" and "post_tags"."tag_id" = ?)) or exists (select 1 from "post_tags" where ("post_tags"."post_id" = "post"."id" and "post_tags"."tag_id" = ?))))`,
+    );
+    expect(q.params).toEqual([1, ...filterParams, "t2", "t1"]);
+  });
+
+  it("binds the filter and the stone, however many 苔片 the filter holds", () => {
+    const stmts = retagStatements(db, {
+      cond: feedCondition(db, "u", Array.from({ length: MAX_TAGS_PER_SET }, (_, i) => `s${i}`), {
+        from: "2026-01-01",
+        to: "2026-12-31",
+      }),
+      now: 1,
+      newTags: [],
+      addIds: ["a1"],
+      removeIds: ["s0"],
+    });
+    // The widest statement: the touch, with the set twice over (not exists /
+    // exists once each) — under D1's 100 bound parameters per statement.
+    const widest = Math.max(...stmts.map((s) => s.toSQL().params.length));
+    expect(widest).toBeLessThan(100);
   });
 });

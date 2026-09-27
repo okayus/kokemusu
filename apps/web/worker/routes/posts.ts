@@ -1,5 +1,20 @@
-import { and, countDistinct, desc, eq, gte, inArray, lt, lte, or, type SQL } from "drizzle-orm";
-import { Hono } from "hono";
+import {
+  and,
+  count,
+  countDistinct,
+  desc,
+  eq,
+  exists,
+  gte,
+  inArray,
+  lt,
+  lte,
+  notExists,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { decodeCursor, encodeCursor } from "../core/cursor";
 import { decryptBody, encryptBody, importBodyKey } from "../core/crypto";
@@ -12,7 +27,13 @@ import {
   thicknessSchema,
 } from "../core/stacking";
 import { POST_KINDS, type PostKind } from "../core/kind";
-import { MAX_TAGS_PER_POST, normalizeTagName, parseTagNames, parseTagsParam } from "../core/tag";
+import {
+  MAX_TAGS_PER_POST,
+  MAX_TAGS_PER_SET,
+  normalizeTagName,
+  parseTagNames,
+  parseTagsParam,
+} from "../core/tag";
 import { createDb, type Db } from "../db";
 import { post, postTags, tag } from "../db/schema";
 import { fail } from "../lib/errors";
@@ -62,6 +83,11 @@ export const createPostSchema = z.strictObject({
   thickness: thicknessSchema.nullable().optional(),
 });
 
+// The feed's filter (features.md §3): stones and a period, AND together — one
+// wire form for three routes, the timeline (GET /), its count (GET /count) and
+// 付け替え (PATCH /), so what the reader sees narrowed is exactly what is
+// counted and what is retagged.
+//
 // The two tag filter forms: `?tag=` = one tag by (normalized) name —
 // hand-writable; `?tags=` = a 2+ tag AND set by id, the same wire 規約 as the
 // 年表's deep-dive rows (core/tag.ts) so §6's edge tap and a §8 row land here
@@ -75,10 +101,8 @@ export const createPostSchema = z.strictObject({
 // それ以前); together they must not invert. `9999-12-31` as `to` stays a 400:
 // the rule dates from the instant window that needed `to + 1`, and A1 changes
 // no behaviour on the wire.
-export const listPostsQuerySchema = z
+export const feedFilterSchema = z
   .object({
-    limit: z.coerce.number().int().min(1).max(50).default(20),
-    cursor: z.string().min(1).max(256).optional(),
     tag: z.string().min(1).max(MAX_TAG_CHARS).optional(),
     tags: z.string().min(1).max(1400).optional(),
     from: z.string().refine(isDayKey, "must be a YYYY-MM-DD calendar day").optional(),
@@ -90,6 +114,35 @@ export const listPostsQuerySchema = z
     "from must not be after to",
   )
   .refine((q) => q.to !== "9999-12-31", "to must be a day before the end of the calendar");
+
+// The page on top of the filter (zod 4 keeps the refinements across extend).
+export const listPostsQuerySchema = feedFilterSchema.extend({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  cursor: z.string().min(1).max(256).optional(),
+});
+
+// 付け替え's filter: the feed's, with a stone required. A period alone would
+// name a season of the whole diary, and the diary is not a thing to retag by
+// accident — the UI shows the form only while a stone narrows the feed, and
+// the wire says the same.
+export const retagFilterSchema = feedFilterSchema.refine(
+  (q) => q.tag !== undefined || q.tags !== undefined,
+  "a stone is required",
+);
+
+/**
+ * 付け替え's change (features.md §2, CONTEXT.md): the stones to put on every
+ * 苔片 of the filter, by name — a new spelling mints a stone, as on 積む — and
+ * the stones to take off, by id (the filter's own, in the UI; any of the
+ * reader's on the wire). One of the two at least. Strict like the composer's:
+ * a key the shape does not name is a 400, never silently dropped (ADR-0006).
+ */
+export const retagSchema = z
+  .strictObject({
+    add: z.array(z.string().min(1).max(MAX_TAG_CHARS)).max(MAX_TAGS_PER_POST).optional(),
+    remove: z.array(z.string().min(1).max(64)).max(MAX_TAGS_PER_SET).optional(),
+  })
+  .refine((b) => (b.add?.length ?? 0) + (b.remove?.length ?? 0) > 0, "nothing to change");
 
 /**
  * The overlap of a 苔片's days with the period, as the SQL the feed ANDs onto
@@ -107,6 +160,147 @@ export function periodCondition(query: {
     query.to === undefined ? undefined : lte(post.firstDay, query.to),
   );
 }
+
+type FeedFilter = z.infer<typeof feedFilterSchema>;
+
+type StoneFilter = { kind: "invalid" } | { kind: "none" } | { kind: "stones"; ids: string[] };
+
+/**
+ * The stones a filter names, as ids. `?tag=` goes by its normalized name: an
+ * unknown one is `none` — an empty feed, not an error, nothing to enumerate
+ * against — and a blank spelling `invalid`. `?tags=` is the ids as they are
+ * (an unknown id makes the set match nothing, like an unknown ?tag=; the user
+ * condition in feedCondition keeps a foreign id from ever selecting foreign
+ * posts). No stone at all is the empty set.
+ */
+async function resolveStones(db: Db, userId: string, filter: FeedFilter): Promise<StoneFilter> {
+  if (filter.tag !== undefined) {
+    const norm = normalizeTagName(filter.tag);
+    if (norm === "") return { kind: "invalid" };
+    const hit = (
+      await db
+        .select({ id: tag.id })
+        .from(tag)
+        .where(and(eq(tag.userId, userId), eq(tag.norm, norm)))
+    )[0];
+    return hit ? { kind: "stones", ids: [hit.id] } : { kind: "none" };
+  }
+  if (filter.tags !== undefined) {
+    const ids = parseTagsParam(filter.tags);
+    return ids === null ? { kind: "invalid" } : { kind: "stones", ids };
+  }
+  return { kind: "stones", ids: [] };
+}
+
+/**
+ * The feed's filter as SQL over `post`: the user's rows carrying EVERY stone
+ * of the set — post ids where COUNT(DISTINCT tag_id ∈ set) = n, the 年表's
+ * ?tags= row's SQL (data-model.md 集計節); one stone needs no count, none is
+ * no condition — whose days overlap the period (periodCondition). Subqueries
+ * rather than a join, so the one condition narrows an UPDATE, a DELETE and an
+ * INSERT … SELECT as it narrows the page: 付け替え writes through it, and its
+ * parameters do not grow with the number of 苔片. Exported for the unit tests.
+ */
+export function feedCondition(
+  db: Db,
+  userId: string,
+  stoneIds: readonly string[],
+  period: { from?: string | undefined; to?: string | undefined },
+): SQL {
+  const [only] = stoneIds;
+  const stoneCond =
+    only === undefined
+      ? undefined
+      : stoneIds.length === 1
+        ? inArray(
+            post.id,
+            db.select({ postId: postTags.postId }).from(postTags).where(eq(postTags.tagId, only)),
+          )
+        : inArray(
+            post.id,
+            db
+              .select({ postId: postTags.postId })
+              .from(postTags)
+              .where(inArray(postTags.tagId, [...stoneIds]))
+              .groupBy(postTags.postId)
+              .having(eq(countDistinct(postTags.tagId), stoneIds.length)),
+          );
+  // Never undefined: the user condition is always there.
+  return and(eq(post.userId, userId), stoneCond, periodCondition(period)) as SQL;
+}
+
+/**
+ * The statements of one 付け替え, in the order the batch runs them — an order
+ * that keeps the filter true until the last statement: the count and the
+ * touch first, new stones before any link that references them (FK), the
+ * links put on before any taken off — a 苔片 that loses a filtered stone
+ * leaves the filter, and it must have gained its new stones first. Each
+ * statement's subquery is evaluated against the table as it was before that
+ * statement (rehearsed on the local D1, 2026-09-27), so a DELETE through a
+ * filter naming the very stone it removes takes every 苔片 of the set, not the
+ * first alone. `cond` is feedCondition's. Exported for the unit tests, which
+ * pin the SQL each statement writes through the filter.
+ */
+export function retagStatements(
+  db: Db,
+  input: {
+    cond: SQL;
+    now: number;
+    newTags: (typeof tag.$inferInsert)[];
+    addIds: string[];
+    removeIds: string[];
+  },
+) {
+  const { cond } = input;
+  const matched = () => db.select({ id: post.id }).from(post).where(cond);
+  const link = (tagId: string) =>
+    db
+      .select({ one: sql`1` })
+      .from(postTags)
+      .where(and(eq(postTags.postId, post.id), eq(postTags.tagId, tagId)));
+  // updated_at moves on exactly the 苔片 whose stones change: one lacking a
+  // stone being put on, or carrying one being taken off. A new stone is on
+  // no 苔片 yet, so with one every matched 苔片 changes (no condition).
+  const changeCond =
+    input.newTags.length > 0
+      ? undefined
+      : or(
+          ...input.addIds.map((id) => notExists(link(id))),
+          ...input.removeIds.map((id) => exists(link(id))),
+        );
+  return [
+    db.select({ n: count() }).from(post).where(cond),
+    db
+      .update(post)
+      .set({ updatedAt: input.now })
+      .where(and(cond, changeCond)),
+    ...input.newTags.map((t) => db.insert(tag).values(t)),
+    ...input.addIds.map((id) =>
+      db
+        .insert(postTags)
+        .select(
+          db
+            .select({ postId: post.id, tagId: sql<string>`${id}`.as("tag_id") })
+            .from(post)
+            .where(cond),
+        )
+        .onConflictDoNothing(),
+    ),
+    ...input.removeIds.map((id) =>
+      db
+        .delete(postTags)
+        .where(and(eq(postTags.tagId, id), inArray(postTags.postId, matched()))),
+    ),
+  ] as const;
+}
+
+/** The feed's filter, read off the query string (the same four keys for all three routes). */
+const filterQuery = (c: Context<Env>) => ({
+  tag: c.req.query("tag"),
+  tags: c.req.query("tags"),
+  from: c.req.query("from"),
+  to: c.req.query("to"),
+});
 
 // The :id of PATCH/DELETE. Bounded like tokens' id schema — the shape says
 // nothing about existence; unknown and foreign ids share one 404 later.
@@ -280,10 +474,7 @@ export const postRoutes = new Hono<Env>()
     const parsed = listPostsQuerySchema.safeParse({
       limit: c.req.query("limit"),
       cursor: c.req.query("cursor"),
-      tag: c.req.query("tag"),
-      tags: c.req.query("tags"),
-      from: c.req.query("from"),
-      to: c.req.query("to"),
+      ...filterQuery(c),
     });
     if (!parsed.success) return fail(c, "validation_error");
     const { limit } = parsed.data;
@@ -293,38 +484,12 @@ export const postRoutes = new Hono<Env>()
     const userId = c.get("userId");
     const db = createDb(c.env.DB);
 
-    // ?tag= filters by the normalized name. An unknown tag is an empty
-    // timeline, not an error — nothing to enumerate against.
-    let tagFilterId: string | null = null;
-    if (parsed.data.tag !== undefined) {
-      const norm = normalizeTagName(parsed.data.tag);
-      if (norm === "") return fail(c, "validation_error");
-      const hit = (
-        await db
-          .select({ id: tag.id })
-          .from(tag)
-          .where(and(eq(tag.userId, userId), eq(tag.norm, norm)))
-      )[0];
-      if (!hit) return c.json({ posts: [], nextCursor: null });
-      tagFilterId = hit.id;
-    }
-
-    // ?tags= keeps only posts carrying the WHOLE set (AND) — the same SQL as
-    // the 年表's ?tags= row (data-model.md 集計節): post ids where
-    // COUNT(DISTINCT tag_id ∈ set) = n. An unknown id makes the subquery match
-    // nothing — an empty timeline, not an error, like an unknown ?tag=. The
-    // outer user filter keeps a foreign id from ever selecting foreign posts.
-    let tagSetCond: SQL | undefined;
-    if (parsed.data.tags !== undefined) {
-      const ids = parseTagsParam(parsed.data.tags);
-      if (ids === null) return fail(c, "validation_error");
-      const matched = db
-        .select({ postId: postTags.postId })
-        .from(postTags)
-        .where(inArray(postTags.tagId, ids))
-        .groupBy(postTags.postId)
-        .having(eq(countDistinct(postTags.tagId), ids.length));
-      tagSetCond = inArray(post.id, matched);
+    // The stones of the filter (resolveStones): a stone that does not exist
+    // is an empty timeline, not an error.
+    const stones = await resolveStones(db, userId, parsed.data);
+    if (stones.kind === "invalid") return fail(c, "validation_error");
+    if (stones.kind === "none") {
+      return c.json({ posts: [], nextCursor: null, today: dayKey(Date.now()) });
     }
 
     // Keyset pagination on (first_day DESC, created_at DESC, id DESC) — the
@@ -343,13 +508,11 @@ export const postRoutes = new Hono<Env>()
         )
       : undefined;
 
-    // The period is an overlap on the very axis the cursor walks, so the two
-    // compose as plain AND on post(user_id, first_day, created_at) — a page
-    // under a period is the same page of the same order, minus the 苔片 whose
-    // days miss it. Absent halves are dropped inside, like the cursor's.
-    const periodCond = periodCondition(parsed.data);
-
-    let query = db
+    // The filter (feedCondition) — the stones, and the period as an overlap on
+    // the very axis the cursor walks — composes with the cursor as plain AND
+    // on post(user_id, first_day, created_at): a page under a filter is the
+    // same page of the same order, minus the 苔片 that miss it.
+    const rows = await db
       .select({
         id: post.id,
         body: post.body,
@@ -362,16 +525,7 @@ export const postRoutes = new Hono<Env>()
         updatedAt: post.updatedAt,
       })
       .from(post)
-      .$dynamic();
-    if (tagFilterId !== null) {
-      // A post carries a tag at most once (PK), so the join cannot fan out.
-      query = query.innerJoin(
-        postTags,
-        and(eq(postTags.postId, post.id), eq(postTags.tagId, tagFilterId)),
-      );
-    }
-    const rows = await query
-      .where(and(eq(post.userId, userId), tagSetCond, periodCond, cursorCond))
+      .where(and(feedCondition(db, userId, stones.ids, parsed.data), cursorCond))
       .orderBy(desc(post.firstDay), desc(post.createdAt), desc(post.id))
       .limit(limit + 1);
 
@@ -413,6 +567,78 @@ export const postRoutes = new Hono<Env>()
           : null,
       today: dayKey(Date.now()),
     });
+  })
+  // ------------------------------------------------------- count (絞り込みの片数)
+  // How many 苔片 the filter holds, loaded pages or not — what 付け替え's form
+  // says before anything is written (features.md §2). Session-only like the
+  // timeline it counts.
+  .get("/count", requireSession, async (c) => {
+    const parsed = feedFilterSchema.safeParse(filterQuery(c));
+    if (!parsed.success) return fail(c, "validation_error");
+
+    const userId = c.get("userId");
+    const db = createDb(c.env.DB);
+    const stones = await resolveStones(db, userId, parsed.data);
+    if (stones.kind === "invalid") return fail(c, "validation_error");
+    if (stones.kind === "none") return c.json({ count: 0 });
+
+    const [row] = await db
+      .select({ n: count() })
+      .from(post)
+      .where(feedCondition(db, userId, stones.ids, parsed.data));
+    return c.json({ count: row?.n ?? 0 });
+  })
+  // ------------------------------------------------ 付け替え (まとめて石を付け替える)
+  // PATCH on the collection, narrowed by the feed's own filter (features.md
+  // §2, CONTEXT.md 付け替え): every 苔片 the reader sees narrowed to — loaded or
+  // not — gains the stones in `add` and loses those in `remove`, in one
+  // transaction, and nothing else about it moves. Session-only: rewriting
+  // history is no business of a post:write PAT (403 session_required).
+  .patch("/", requireSession, async (c) => {
+    // The body is read before the query string is judged: a refusal that
+    // leaves a body unread trips wrangler dev's proxy (e2e/README.md) — and
+    // both are the same 400 anyway.
+    const parsed = retagSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return fail(c, "validation_error");
+    const filter = retagFilterSchema.safeParse(filterQuery(c));
+    if (!filter.success) return fail(c, "validation_error");
+    const wanted = parseTagNames(parsed.data.add ?? []);
+    if (wanted.some((t) => t.norm === "")) return fail(c, "validation_error");
+    const removeIds = [...new Set(parsed.data.remove ?? [])];
+
+    const userId = c.get("userId");
+    const db = createDb(c.env.DB);
+    const stones = await resolveStones(db, userId, filter.data);
+    if (stones.kind === "invalid") return fail(c, "validation_error");
+    if (stones.kind === "none") return c.json({ matched: 0, changed: 0 });
+
+    // The stones to take off must be the reader's own: an unknown or foreign
+    // id is a malformed request (400), not a silent no-op — the UI offers only
+    // stones that exist. And a stone cannot be put on and taken off at once.
+    if (removeIds.length > 0) {
+      const owned = await db
+        .select({ id: tag.id })
+        .from(tag)
+        .where(and(eq(tag.userId, userId), inArray(tag.id, removeIds)));
+      if (owned.length !== removeIds.length) return fail(c, "validation_error");
+    }
+    const now = Date.now();
+    const { newTags, resolved } = await resolveTagRows(db, userId, wanted, now);
+    if (resolved.some((t) => removeIds.includes(t.id))) return fail(c, "validation_error");
+
+    // One atomic batch (retagStatements), every statement writing THROUGH the
+    // filter: the 苔片 are never enumerated into a parameter list, so a filter
+    // of a thousand 苔片 costs the same statements as one of three.
+    const [counted, touched] = await db.batch(
+      retagStatements(db, {
+        cond: feedCondition(db, userId, stones.ids, filter.data),
+        now,
+        newTags,
+        addIds: resolved.map((t) => t.id),
+        removeIds,
+      }),
+    );
+    return c.json({ matched: counted[0]?.n ?? 0, changed: touched.meta.changes });
   })
   // ------------------------------------------------------------ edit (苔片を直す)
   // Session-only like the timeline: editing starts from reading what you

@@ -27,6 +27,14 @@ describe("TagField", () => {
     expect(html).toContain('id="post-tags-hint"');
   });
 
+  it("wears another label when told — 付け替え's 「足す石」", () => {
+    const html = renderToStaticMarkup(
+      <TagField id="retag-add" label="足す石" options={options} value={{ tags: [], text: "" }} onChange={() => {}} />,
+    );
+    expect(html).toContain('<label for="retag-add">足す石</label>');
+    expect(html).toContain('id="retag-add-hint"');
+  });
+
   it("shows the chosen stones as chips, each with a remove button named for it", () => {
     const html = renderToStaticMarkup(
       <TagField
