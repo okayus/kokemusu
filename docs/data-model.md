@@ -149,6 +149,12 @@ WebAuthn の challenge は **テーブルを持たない**（署名付き 5 分 
 | tag_id | text | FK → tag |
 |  |  | PK = (post_id, tag_id) |
 
+> **付け替え**（[features.md](features.md) §2、2026-09-27）は `post_tags` だけを動かす（`post` は `updated_at` のみ）。苔片を id で列挙せず、
+> 一覧と同じ絞り込みの副問合せ（`post.id IN (SELECT post_id FROM post_tags …)` ＋ 期間の重なり）を通して書く:
+> 足す ＝ `INSERT OR IGNORE INTO post_tags SELECT id, :tag FROM post WHERE <絞り込み>`、外す ＝ `DELETE FROM post_tags WHERE tag_id = :tag AND post_id IN (SELECT id FROM post WHERE <絞り込み>)`。
+> bound parameter は絞り込みの分だけで苔片の数に依らない。SQLite は各文の副問合せをその文が動く前の表で評価する（local D1 で実測）ので、
+> 絞り込みの石そのものを外す DELETE も集合の全部に効く。順は 件数 → `updated_at`（変わる苔片だけ: 足す石を持たない or 外す石を持つ）→ 新しい石 → 足す → 外す。
+
 ### tag_alias（表記ゆれ統合用・任意）
 | カラム | 型 | 備考 |
 | --- | --- | --- |

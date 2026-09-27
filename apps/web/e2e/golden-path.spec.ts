@@ -992,4 +992,84 @@ test("register → post → today's moss darkens → reload → logout → login
   expect(widths.body).toBe(widths.card);
   expect(widths.preScrolls).toBe(true);
   expect(widths.page).toBe(widths.viewport);
+
+  // 付け替え (features.md §2, CONTEXT.md, 2026-09-27): the filter is the target.
+  // Three 苔片 on a stone 「付替」 — two also on 「相棒」 — by fetch; a chip
+  // narrows the feed to the three, and まとめて付け替える under the filter says
+  // 3 片 (the count route says the same); 「付替後」 is put on and 「付替」 taken
+  // off, the confirm repeats the change, the bar says 3 片を付け替えました, the
+  // fold closes and the filter is empty — no 苔片 wears 「付替」 now. At rest
+  // the three carry 「付替後」, the two keep 「相棒」, and the stone 「付替」
+  // stays registered, empty (merging or removing a stone is 石の運用, not
+  // 付け替え). Released, the cards wear the new stone. Still at a phone's width.
+  for (const [body, tags] of [
+    ["付替 1", ["付替", "相棒"]],
+    ["付替 2", ["付替", "相棒"]],
+    ["付替 3", ["付替"]],
+  ] as const) {
+    expect(await attempt("POST", "/api/posts", { body, tags: [...tags] })).toBe(201);
+  }
+  await page.reload();
+  await timeline.getByRole("button", { name: "「付替」で絞り込む" }).first().click();
+  await expect(timeline.locator("li.post")).toHaveCount(3);
+  const retag = page.locator("details.feed-retag");
+  await retag.locator("summary").click();
+  await expect(retag.locator(".feed-retag-scope")).toHaveText(
+    "「付替」で絞った 3 片が対象です（読み込んでいない分も含む）。",
+  );
+  expect(
+    ((await (await page.request.get("/api/posts/count?tag=付替")).json()) as { count: number })
+      .count,
+  ).toBe(3);
+  const addField = retag.getByRole("combobox", { name: "足す石" });
+  await addField.fill("付替後");
+  await addField.press("Enter");
+  await expect(tagChips(retag)).toHaveText(["付替後"]);
+  await retag.getByLabel("付替", { exact: true }).check();
+  await retag.getByRole("button", { name: "付け替える" }).click();
+  const retagConfirm = page.locator("dialog.confirm");
+  await expect(retagConfirm).toContainText(
+    "「付替」で絞った 3 片に「付替後」を足し、「付替」を外します。元に戻せません。",
+  );
+  await retagConfirm.getByRole("button", { name: "付け替える" }).click();
+  await expect(receipt).toHaveText("3 片を付け替えました");
+  await expect(retag).not.toHaveAttribute("open");
+  await expect(page.getByText("この絞り込みに合う苔片はありません。")).toBeVisible();
+  const stoneIdOf = (name: string) =>
+    queryRows<{ id: string }>(`SELECT id FROM tag WHERE name = '${name}'`)[0]?.id ?? "";
+  const wearers = (name: string) =>
+    queryRows<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM post_tags WHERE tag_id = '${stoneIdOf(name)}'`,
+    )[0]?.c;
+  expect(stoneIdOf("付替")).toBeTruthy();
+  expect([wearers("付替"), wearers("付替後"), wearers("相棒")]).toEqual([0, 3, 2]);
+  await page.locator(".feed-filter").getByRole("button", { name: "解除" }).click();
+  await expect(timeline.getByRole("button", { name: "「付替後」で絞り込む" })).toHaveCount(3);
+
+  // The wire's refusals — each reads the body before refusing, so the unread-
+  // body trap (e2e/README.md) does not apply: a period alone (no stone), a
+  // stone on both sides, nothing to change, a stone the reader does not have,
+  // a key the shape does not name — 400, and no link moved. A stone nobody
+  // wears matches nothing and says so (200, matched 0) without minting the
+  // stone it was asked to put on.
+  const retagAttempt = (query: string, payload: Record<string, unknown>) =>
+    attempt("PATCH", `/api/posts?${query}`, payload);
+  expect(await retagAttempt("from=2026-01-01", { add: ["x"] })).toBe(400);
+  expect(
+    await retagAttempt("tag=付替後", { add: ["付替後"], remove: [stoneIdOf("付替後")] }),
+  ).toBe(400);
+  expect(await retagAttempt("tag=付替後", {})).toBe(400);
+  expect(await retagAttempt("tag=付替後", { remove: ["no-such-stone"] })).toBe(400);
+  expect(await retagAttempt("tag=付替後", { add: ["x"], title: "見出し" })).toBe(400);
+  expect([wearers("付替後"), wearers("相棒")]).toEqual([3, 2]);
+  const nobody = await page.evaluate(async () => {
+    const res = await fetch("/api/posts?tag=だれも持たない", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ add: ["x"] }),
+    });
+    return [res.status, await res.json()];
+  });
+  expect(nobody).toEqual([200, { matched: 0, changed: 0 }]);
+  expect(queryRows<{ c: number }>("SELECT COUNT(*) AS c FROM tag WHERE name = 'x'")[0]?.c).toBe(0);
 });

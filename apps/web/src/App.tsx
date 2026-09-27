@@ -44,17 +44,21 @@ import {
   type Period,
 } from "./period";
 import {
+  countPosts,
   deletePost,
   listPosts,
   listTags,
+  retagPosts,
   updatePost,
   type PostItem,
+  type RetagResult,
   type TagSummary,
 } from "./posts-api";
+import { isEmptyChange, retagReceipt, retagSentence, type RetagChange } from "./retag";
 import { togglePair, toggleStone } from "./stones";
 import { TagField } from "./TagField";
 import { TagGraphSection } from "./TagGraph";
-import { stonesOf, type TagsFields } from "./tags";
+import { EMPTY_TAGS, stonesOf, type TagsFields } from "./tags";
 import { rowKey, TagTimelineSection } from "./TagTimeline";
 import { pathOf, useView, VIEWS, type View } from "./view";
 import {
@@ -448,6 +452,8 @@ function Garden(props: {
     listTags().then(setTagOptions).catch(fault);
   }, [fault]);
 
+  // Bumped to fetch the page again under the same filter (reloadFeed).
+  const [feedVersion, setFeedVersion] = useState(0);
   useEffect(() => {
     let cancelled = false;
     listPosts(feedQuery(stones, postPeriod))
@@ -463,7 +469,17 @@ function Garden(props: {
     return () => {
       cancelled = true;
     };
-  }, [stones, postPeriod, fault]);
+  }, [stones, postPeriod, feedVersion, fault]);
+
+  // The page again from the head, under the same filter — after a 付け替え,
+  // when stones moved on 苔片 loaded and not. The epoch keeps a slow もっと遡る
+  // from appending the old page under the new one, as a filter move does.
+  const reloadFeed = () => {
+    feedEpoch.current += 1;
+    setPosts(null);
+    setNextCursor(null);
+    setFeedVersion((v) => v + 1);
+  };
 
   /** Whether a 苔片 carries every 選んだ石. */
   const carriesStones = (item: PostItem) =>
@@ -560,6 +576,20 @@ function Garden(props: {
     setPosts((current) => (current === null ? current : current.filter((p) => p.id !== id)));
     // The moss lightens — the visible receipt that the 苔片 is gone (ADR-0003).
     setMossVersion((v) => v + 1);
+  };
+
+  const handleRetagged = (result: RetagResult) => {
+    setError(null);
+    // Stones moved on 苔片 loaded and not: the page is fetched again under the
+    // same filter (a 苔片 that lost a filtered stone is out of it now), the
+    // map and the 年表 follow, and a new spelling is a new stone for the
+    // completion list. The receipt says how many.
+    reloadFeed();
+    setMossVersion((v) => v + 1);
+    void listTags()
+      .then(setTagOptions)
+      .catch(() => {});
+    props.onNotice({ text: retagReceipt(result) });
   };
 
   const loadMore = async () => {
@@ -732,6 +762,19 @@ function Garden(props: {
             onChange={setPostPeriod}
           />
         </details>
+        {/* 付け替え acts on the filter, so it is there only while a stone
+            narrows the feed (a period alone is no filter to retag by). */}
+        {stones.length > 0 && (
+          <RetagDisclosure
+            stones={stones}
+            period={postPeriod}
+            narrowedBy={narrowedBy}
+            tagOptions={tagOptions}
+            locked={editingId !== null}
+            onRetagged={handleRetagged}
+            onSessionLost={props.onSessionLost}
+          />
+        )}
         <Timeline
           posts={posts}
           today={today}
@@ -825,6 +868,172 @@ function PeriodForm(props: {
       </fieldset>
       <p className="hint">片方だけでも絞れます（開始日だけ = それ以降、終了日だけ = それ以前）。</p>
     </form>
+  );
+}
+
+/**
+ * まとめて付け替える (features.md §2, CONTEXT.md 付け替え, 2026-09-27): a fold
+ * under 期間で絞る, there only while a stone narrows the feed. It acts on the
+ * filter itself — every 苔片 the reader is looking at, loaded pages or not —
+ * so the form says how many (GET /api/posts/count, fetched when it opens and
+ * again when the filter moves) and the confirm repeats the filter, the number
+ * and the change before anything is written. 足す is the tag field (a new
+ * spelling mints a stone, as on 積む); 外す offers the filter's own stones as
+ * checkboxes — the stones every 苔片 in view carries — so what can be taken
+ * off is what is seen. The boxes are uncontrolled and keyed by stone: a stone
+ * that leaves the filter takes its box with it. Closed after a 付け替え: the
+ * job is done, and the feed below is fetched again by the garden.
+ */
+function RetagDisclosure(props: {
+  stones: TagSummary[];
+  period: Period | null;
+  /** The filter in words, as the feed's live region says it — the confirm repeats it. */
+  narrowedBy: string[];
+  tagOptions: TagSummary[];
+  /** While a 苔片 is being edited: a 付け替え would pull its form from under the reader. */
+  locked: boolean;
+  onRetagged: (result: RetagResult) => void;
+  onSessionLost: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [count, setCount] = useState<number | null>(null);
+  const [add, setAdd] = useState<TagsFields>(EMPTY_TAGS);
+  // The change waiting in the confirm dialog, which is mounted only then.
+  const [pending, setPending] = useState<RetagChange | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const confirmRef = useRef<HTMLDialogElement | null>(null);
+  const { stones, period, onSessionLost } = props;
+
+  useEffect(() => {
+    if (pending !== null) confirmRef.current?.showModal();
+  }, [pending]);
+
+  // The count follows the filter while the fold is open, and is dropped the
+  // moment the filter moves, so a stale number never sits over a new set.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setCount(null);
+    countPosts(feedQuery(stones, period))
+      .then((r) => {
+        if (!cancelled) setCount(r.count);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        if (isApiError(e) && e.status === 401) onSessionLost();
+        else setError(describeApiError(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, stones, period, onSessionLost]);
+
+  const apply = async (change: RetagChange) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await retagPosts(feedQuery(stones, period), {
+        add: change.add,
+        remove: change.remove.map((t) => t.id),
+      });
+      setAdd(EMPTY_TAGS);
+      setOpen(false);
+      props.onRetagged(result);
+    } catch (e) {
+      if (isApiError(e) && e.status === 401) onSessionLost();
+      else setError(describeApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <details className="feed-retag" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>まとめて付け替える</summary>
+      <form
+        className="feed-retag-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const checked = new Set(new FormData(e.currentTarget).getAll("remove").map(String));
+          const change: RetagChange = {
+            // The text still typed in the tag field is a stone too (stonesOf).
+            add: stonesOf(add),
+            remove: stones.filter((t) => checked.has(t.id)),
+          };
+          if (isEmptyChange(change)) {
+            setError("足す石か外す石を、1 つは選んでください。");
+            return;
+          }
+          setError(null);
+          setPending(change);
+        }}
+      >
+        <p className="hint feed-retag-scope" role="status">
+          {count === null
+            ? "…"
+            : `${props.narrowedBy.join("と")}で絞った ${count} 片が対象です（読み込んでいない分も含む）。`}
+        </p>
+        <TagField
+          id="retag-add"
+          label="足す石"
+          options={props.tagOptions}
+          value={add}
+          onChange={setAdd}
+        />
+        <fieldset className="feed-retag-remove">
+          <legend>外す石</legend>
+          <div className="feed-retag-choices">
+            {stones.map((t) => (
+              <label key={t.id}>
+                <input type="checkbox" name="remove" value={t.id} />
+                {t.name}
+              </label>
+            ))}
+          </div>
+          <p className="hint">外せるのは絞り込んでいる石だけ（見えている苔片が全部持っている石）。</p>
+        </fieldset>
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
+        <div className="composer-actions">
+          <button type="submit" disabled={busy || props.locked}>
+            付け替える
+          </button>
+          {props.locked && <span className="hint">編集中の苔片を閉じてから。</span>}
+        </div>
+      </form>
+      {/* The confirm, as the delete's: what changes and how many, before it is
+          written. Only the explicit 付け替える submit carries "retag". */}
+      {pending !== null && (
+        <dialog
+          ref={confirmRef}
+          className="confirm"
+          closedby="any"
+          aria-labelledby="confirm-retag"
+          onClose={() => {
+            const decided = confirmRef.current?.returnValue === "retag";
+            setPending(null);
+            if (decided) void apply(pending);
+          }}
+        >
+          <p id="confirm-retag">
+            <strong>{retagSentence(props.narrowedBy, count, pending)}</strong>元に戻せません。
+          </p>
+          <form method="dialog" className="confirm-actions">
+            <button type="submit" value="cancel">
+              やめる
+            </button>
+            <button type="submit" value="retag" className="danger">
+              付け替える
+            </button>
+          </form>
+        </dialog>
+      )}
+    </details>
   );
 }
 

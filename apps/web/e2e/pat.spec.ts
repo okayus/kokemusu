@@ -149,6 +149,8 @@ test("PAT: mint → Bearer post lands encrypted → write-only wall → revoke k
   // rejected requests carry no body, per the unread-body rule above)…
   expect((await sender.patch("/api/posts/any-id", { headers: bearer })).status()).toBe(403);
   expect((await sender.delete("/api/posts/any-id", { headers: bearer })).status()).toBe(403);
+  // …nor retag a whole filter of it (付け替え, the collection PATCH)…
+  expect((await sender.patch("/api/posts?tag=x", { headers: bearer })).status()).toBe(403);
   // …and a PAT can never mint another PAT.
   const mintAttempt = await sender.post("/api/tokens", { headers: bearer });
   expect(mintAttempt.status()).toBe(403);
