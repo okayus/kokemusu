@@ -50,7 +50,6 @@
       "Bash(git push *main)",
       "Bash(git push *main *)",
       "Bash(git push * --delete *)",
-      "Bash(git push * :*)",
       "Bash(gh auth *)",
       "Bash(gh api *)",
       "Bash(npx skills update*)"
@@ -74,6 +73,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start.sh",
+            "args": [],
             "timeout": 10
           }
         ]
@@ -86,7 +86,14 @@
           {
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-pr-merge.sh",
+            "args": [],
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-push-delete.sh",
+            "args": [],
+            "timeout": 10
           }
         ]
       }

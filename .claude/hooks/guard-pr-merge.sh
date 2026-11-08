@@ -24,15 +24,18 @@ case "$cmd" in
 esac
 
 [ "$(grep -o 'gh pr merge' <<<"$cmd" | wc -l)" -eq 1 ] || deny "gh pr merge は 1 回に 1 PR だけにする"
-args=" ${cmd#*gh pr merge} "
+# この gh pr merge の引数だけを見る。語に付いた区切り記号（"71;"）と改行も文の切れ目にする
+rest=${cmd#*gh pr merge}
+rest=${rest//[;&|]/ ; }
+rest=${rest//$'\n'/ ; }
+args=" ${rest%%;*} "
 case "$args" in *" --admin"*) deny "--admin は使わない（ruleset を迂回する）" ;; esac
 case "$args" in *" --auto "*) ;; *) deny "merge は gh pr merge --auto --squash <PR番号> の形だけ（required check を待たせる）" ;; esac
-case "$args" in *" --squash "*) ;; *) deny "merge は --squash で行う" ;; esac
+case "$args" in *" --squash "* | *" -s "*) ;; *) deny "merge は --squash で行う" ;; esac
 
 pr=""
 for tok in $args; do
   case "$tok" in
-    "&&" | "||" | ";" | "|") break ;;
     -*) ;;
     */pull/[0-9]*)
       pr=${tok##*/pull/}

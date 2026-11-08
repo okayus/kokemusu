@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SessionStart hook: セッション開始・再開・/clear・compact 後に「いま」を注入する。
-# SessionStart の stdout はそのまま Claude のコンテキストに入る（PreCompact / Stop の stdout は捨てられる）。
+# SessionStart の stdout はそのまま Claude のコンテキストに入る（Stop の stdout は捨てられ、PreCompact の stdout は圧縮の要約への指示になる）。
 # ホスト（CLAUDE_PROJECT_DIR=リポ）でもコンテナ（/workspace）でも同じに動く。失敗してもセッションは止めない。
 set -u
 root="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
