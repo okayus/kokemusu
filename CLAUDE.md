@@ -5,7 +5,7 @@
 ## 進捗の持ち方
 
 - 進捗と次の一手は `docs/status.md`（SessionStart hook が毎回注入する）、履歴は `docs/log.md` と git。このファイルには規約だけを書く。
-- `status.md` は 40 行 / 3 KB 以内、見出しは「フェーズ / 次の 3 手 / 詰まり・人手待ち / 進行中 PR」の 4 つで固定。終わった項目は消して `log.md` の先頭へ 1 行で移す（取り消し線は使わない）。8 行を超える節は `docs/plans/<topic>.md` に切り出す。書き戻しはユーザが打つ `/handoff`、上限の検査は `.claude/hooks/check-status.sh`（CI も走らせる）。
+- `status.md` は 40 行 / 3 KB 以内、見出しは「フェーズ / 次の 3 手 / 詰まり・人手待ち / 進行中 PR」の 4 つで固定。終わった項目は消して `log.md` の先頭へ 1 行で移す（取り消し線は使わない）。8 行を超える節は `docs/plans/<topic>.md` に切り出す。書き戻しはユーザが打つ `/handoff`、上限の検査は `.claude/hooks/check-status.sh`（CI も走らせる）。`docs/roadmap.md` のチェックも `/handoff` で付け、機能 PR では付けない。
 
 ## 確定済みの決定（根拠は ADR）
 
@@ -13,7 +13,7 @@
 - リポは public。私的データ、`.dev.vars`、`.docker/sandbox.env`、D1 のダンプはコミットしない。
 - 本番 URL と WebAuthn の RP_ID は `kokemusu.shiraoka.workers.dev`。RP_ID を変えると登録済みのパスキーがすべて無効になるので、`wrangler.jsonc` の `name` / `vars.RP_ID` / `vars.ORIGIN` は変えない。
 - 認証はパスキー（single-user）、API からの投稿は PAT（Bearer）。kokemusu は送り側を知らない（ADR-0002）。送り側の契約は `docs/senders.md` と生成物 `docs/senders/posts.schema.json`（`createPostSchema` から `pnpm test` が生成し、一致を検査する）。`createPostSchema`（wire）を変える PR は `vitest -u` で再生成し、`docs/senders.md` の変更履歴に 1 行足し、公開している送り側を確かめる。上限や鍵を他所に転記しない（ADR-0008）。
-- 本文はアプリ層で暗号化する（鍵 `BODY_KEY` は Worker Secret）。日時・タグなどのメタデータは平文で、可視化と集計はメタデータだけで成り立たせる（ADR-0001）。
+- 本文はアプリ層で暗号化する（鍵 `BODY_KEY` は Worker Secret）。暗号文の列は本文だけで、新しく足す列も平文のメタデータにする。可視化と集計はメタデータだけで成り立たせる。自由記述を足すなら本文に含め、平文の列を足したら `docs/security.md` の平文側に理由を書く（ADR-0001）。
 
 ## コマンドと罠
 
@@ -32,6 +32,7 @@
 ## git と merge
 
 - `claude/<topic>` に commit し、push して `gh pr create` する。PR の題は Conventional Commits で書く（commit が 2 つ以上だと `--fill` の題がブランチ名になる — #39）。PR 本文の修正は `gh pr comment` で行う（`gh pr edit` は古い gh で落ちる）。
+- コードを変える PR（`apps/web/src/`、`apps/web/worker/`、`apps/web/drizzle/`）は、arm の前にコンテナで `pnpm e2e` を流し、結果を PR に書く（CI は e2e を走らせない）。
 - CI が green になったのを確かめたら、`gh pr merge --auto --squash <PR番号>` で arm してよい（`--auto` は required check `ci` が通るまで merge を待たせる）。`--auto` なしの merge と `--admin` は使わない。持ち主に merge を頼まれたときは `/merge` の手順で進める。
 - `apps/web/drizzle/`、`.github/**`、`.claude/**`、`docs/adr/**` を触る PR は自分から arm しない。持ち主が差分を見たうえで merge を頼んだときだけ（PR ができる前の「merge まで進めて」は含まない）、`/merge` で arm する。migration の PR はさらに、merge の直前にホストで `node ~/.config/d1-backup/d1-bookmark.mjs kokemusu <PR番号>` を実行してもらい、D1 Time Travel の bookmark が PR にコメントされるまで arm しない（コンテナには Cloudflare の資格情報がない）。既存行の書き換え・テーブルの再構築・DROP を含む migration なら、PR 本文に戻し方を書く。
 - token は印字しない・URL に埋めない・`gh auth login` しない。コンテナでは token は `./shell.sh` が開いたシェルにだけある（無いシェルでは push できない）。ホストでは持ち主の gh の認証で push と PR 操作ができる。
