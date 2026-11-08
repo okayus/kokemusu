@@ -17,7 +17,7 @@
 
 ## コマンドと罠
 
-- 開発はコンテナ内で行う。ルートから `pnpm dev`（コンテナ 5173 → ホスト 5273）、`pnpm check`、`pnpm test`、`pnpm build`。CI と同じ検査はルートで `pnpm run ci`（`pnpm ci` は pnpm 本体の別コマンドになる）。e2e はコンテナ内で `pnpm e2e`（`apps/web/e2e/README.md`）。
+- pnpm はコンテナで走らせる。ルートから `pnpm dev`（コンテナ 5173 → ホスト 5273）、`pnpm check`、`pnpm test`、`pnpm build`。CI と同じ検査はルートで `pnpm run ci`（`pnpm ci` は pnpm 本体の別コマンドになる）。e2e はコンテナ内で `pnpm e2e`（`apps/web/e2e/README.md`）。
 - ホストで開いたセッションでは、編集と git はホストで行い、pnpm はコンテナに投げる（起動は `./up.sh`、実行は `docker exec kokemusu-dev pnpm run ci`）。ホストで pnpm・npx を走らせない（`pnpm exec` も）。依存のコードが隔離の外で動き、コンテナの `node_modules` も壊れる。作業ツリーはコンテナと共有しているので、ブランチの切り替えはコンテナ側にも効く。
 - `pnpm check` は `wrangler types` で `worker-configuration.d.ts`（gitignore）を作ってから tsc を走らせる。単体テストは Cloudflare plugin を通さず、Node で `app.request()` を呼ぶ。
 - ローカルの変数は `apps/web/.dev.vars`（`.dev.vars.example` をコピーし、`RP_ID=localhost`）。
@@ -35,5 +35,5 @@
 - コードを変える PR（`apps/web/src/`、`apps/web/worker/`、`apps/web/drizzle/`）は、arm の前にコンテナで `pnpm e2e` を流し、結果を PR に書く（CI は e2e を走らせない）。
 - CI が green になったのを確かめたら、`gh pr merge --auto --squash <PR番号>` で arm してよい（`--auto` は required check `ci` が通るまで merge を待たせる）。`--auto` なしの merge と `--admin` は使わない。持ち主に merge を頼まれたときは `/merge` の手順で進める。
 - `apps/web/drizzle/`、`.github/**`、`.claude/**`、`docs/adr/**` を触る PR は自分から arm しない。持ち主が差分を見たうえで merge を頼んだときだけ（PR ができる前の「merge まで進めて」は含まない）、`/merge` で arm する。migration の PR はさらに、merge の直前にホストで `node ~/.config/d1-backup/d1-bookmark.mjs kokemusu <PR番号>` を実行してもらい、D1 Time Travel の bookmark が PR にコメントされるまで arm しない（コンテナには Cloudflare の資格情報がない）。既存行の書き換え・テーブルの再構築・DROP を含む migration なら、PR 本文に戻し方を書く。
-- token は印字しない・URL に埋めない・`gh auth login` しない。コンテナでは token は `./shell.sh` が開いたシェルにだけある（無いシェルでは push できない）。ホストでは持ち主の gh の認証で push と PR 操作ができる。
+- token は印字しない・URL に埋めない・`gh auth` 系は使わない。コンテナでは token は `./shell.sh` が開いたシェルにだけある（無いシェルでは push できない）。ホストでは持ち主の gh の認証で push と PR 操作ができる。
 - `.github/workflows/**` はコンテナの token では push できない（workflows 権限がない）。CI の中身は `package.json` の `ci` script、`.node-version`、`.claude/hooks/` で変えられる。
