@@ -8,8 +8,6 @@ argument-hint: "[一言メモ（任意）]"
 
 ユーザからの一言メモ: $ARGUMENTS（空なら無視）。
 
-frontmatter の `effort: medium` は、定型の書き戻しをセッションの effort（max）で回さないため。この skill が動くターンだけに効く（2026-09-20）。
-
 ## 手順（この順で。省略しない）
 
 1. **現状把握**: `git status -sb`、`git log --oneline -10`、`gh pr list --state open`（使えない環境なら飛ばす）、`docs/status.md`、`head -10 docs/log.md` を読む。このセッションで「終わったこと / 残ったこと / 詰まったこと」を 3 行で整理する。
@@ -19,7 +17,7 @@ frontmatter の `effort: medium` は、定型の書き戻しをセッション�
 5. `bash .claude/hooks/check-status.sh` を実行し、OK になるまで 3 を直す。
 6. **commit → PR → merge**: `git fetch --prune` してから、`origin/main` を base に `claude/handoff-YYYY-MM-DD` を切り（同じ日の 2 回目は `-2`）、`docs(status): <要約>` で commit する。
    - **同名のローカルブランチが前回の handoff から残っていることがある**（squash merge で消えるのはリモート側だけ）。`git switch -c` が「already exists」で落ちたら、その stale なブランチを消して `origin/main` から切り直す。古い base の上に載せると、その後に merge された実装 PR を revert する差分になる。commit したら `git diff --stat origin/main..HEAD` が `docs/` だけであることを見る。
-   - **push・`gh pr create`・`gh pr merge --auto --squash` までユーザに確認せず進めてよい**（2026-09-20 のユーザ指示。matatabetai と同じ運用）。docs だけの PR に限る — `docs/adr/**` を含むときと実装 PR（`apps/web/drizzle/` / `.github/**` / `.claude/**`）は CLAUDE.md どおり人間の merge を待つ。
+   - **push・`gh pr create`・`gh pr merge --auto --squash` までユーザに確認せず進めてよい**（2026-09-20 のユーザ指示。matatabetai と同じ運用）。docs だけの PR に限る。`docs/adr/**`、`apps/web/drizzle/`、`.github/**`、`.claude/**` を含む PR は、CLAUDE.md どおり持ち主の merge を待つ。
    - arm したら merge されたかまで見届ける。CI が green なのに OPEN のままなら `gh pr merge --auto --squash <PR番号>` を打ち直す。
    - **handoff commit を次の feature ブランチに「同乗」させない**（2026-09-20 廃止）。未 push の commit がローカルにだけ残り、次セッションのプロンプトに cherry-pick の指示が常駐し、log の行が main から欠けた（#35）。
 7. 最後に「次セッションの出発点」（status.md「次の 3 手」の 1 手目）を 1 行で報告する。
