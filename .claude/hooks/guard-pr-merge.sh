@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # PreToolUse(Bash): gh pr merge を次のときに止める（exit 2 = 拒否。stderr が Claude に返る）。
-#  - gh pr merge --auto --squash <PR番号> 以外の形。--auto なしは required check を待たず、--admin は ruleset を迂回する
+#  - gh pr merge --auto --squash <PR番号> 以外の形。--auto なしは required check を待たず、--admin は ruleset を迂回する。
+#    ただし PR が clean（required check が通り merge できる）なら --auto なしの --squash も通す。コンテナの gh 2.23 は
+#    clean な PR への --auto を "Pull request is in clean status" で弾くので、その逃げ道（matatabetai log 2026-09-05）
 #  - apps/web/drizzle/ を含む PR に、24 時間以内の D1 Time Travel bookmark のコメントが無い（merge = 本番 D1 への適用）
 # PR の中身を確かめられないときも止める。migration を素通しにしないため。
 # 見るのは命令の位置にある gh pr merge だけ。heredoc の本文（commit メッセージなど）と、他の命令の引数の中の語は見ない。
@@ -84,7 +86,8 @@ done
 args=" $args "
 case "$args" in *" --admin"*) deny "--admin は使わない（ruleset を迂回する）" ;; esac
 case "$args" in *" --disable-auto "*) exit 0 ;; esac
-case "$args" in *" --auto "*) ;; *) deny "merge は gh pr merge --auto --squash <PR番号> の形だけ（--auto は required check の green を待たせる）" ;; esac
+need_clean=0
+case "$args" in *" --auto "*) ;; *) need_clean=1 ;; esac
 case "$args" in *" --squash "* | *" -s "*) ;; *) deny "merge は --squash で行う" ;; esac
 
 other_repo="$repo 以外の PR は、そのリポのセッションで merge する"
@@ -118,8 +121,11 @@ for tok in $args; do
 done
 [ "$n" -eq 1 ] || deny "対象の PR を 1 つに決められない（gh pr merge --auto --squash <PR番号> と書く）"
 
-info=$(gh pr view "$pr" -R "$repo" --json files,changedFiles,comments 2>/dev/null) ||
+info=$(gh pr view "$pr" -R "$repo" --json files,changedFiles,comments,mergeStateStatus 2>/dev/null) ||
   deny "PR #$pr の変更ファイルを取得できない（gh の認証かネットワークを確かめる）"
+if [ "$need_clean" -eq 1 ] && [ "$(jq -r '.mergeStateStatus // ""' <<<"$info")" != CLEAN ]; then
+  deny "--auto なしの merge は、CI が green で clean な PR だけ。それ以外は gh pr merge --auto --squash <PR番号> で arm する"
+fi
 listed=$(jq '.files | length' <<<"$info")
 total=$(jq '.changedFiles' <<<"$info")
 [ "$listed" -ge "$total" ] 2>/dev/null ||

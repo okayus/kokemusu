@@ -19,7 +19,7 @@ argument-hint: "[PR番号（省略時は現在のブランチの PR）]"
 3. **CI と e2e**: `gh pr checks <PR>`。red なら merge せず、失敗した job と最初のエラーを報告して終わる。pending は待ってよい。コードを変える PR（`apps/web/src/`・`apps/web/worker/`・`apps/web/drizzle/`）は、PR に `pnpm e2e` の結果が書かれていることも見る。無ければコンテナで流す（ホストのセッションなら `docker exec kokemusu-dev pnpm e2e`）。落ちたら merge せず報告して終わる。
 4. **merge**: `gh pr merge --auto --squash <PR>`（`--auto` なしの即時 merge は使わない）。merge されるまで見届ける。待つときは Monitor の until ループを使う（`sleep N && …` の連結はハーネスに止められる）:
    `until [ "$(gh pr view <PR> --json state -q .state)" = MERGED ]; do sleep 10; done`
-   CI が green なのに OPEN のままなら、同じ `gh pr merge --auto --squash <PR>` を打ち直す。
+   CI が green なのに OPEN のままなら、同じ `gh pr merge --auto --squash <PR>` を打ち直す。「Pull request is in clean status」で弾かれたら（コンテナの gh 2.23）、`gh pr merge --squash <PR>` を使う（hook が clean を確かめる）。
 5. **本番反映の確認**（`docs/` と `*.md` だけの PR は Workers Builds が走らないので飛ばす）: merge commit の sha を `gh pr view <PR> --json mergeCommit -q .mergeCommit.oid` で取り、public リポなので未認証の
    `curl -s https://api.github.com/repos/okayus/kokemusu/commits/<sha>/check-runs`
    で `Workers Builds: kokemusu` が `success` になるのを待つ。そのあと `curl -s -o /dev/null -w '%{http_code}' https://kokemusu.shiraoka.workers.dev/health` が 200。migration を含んでいたら、適用は Workers Builds の deploy command が行う。事後確認の SQL は PR 本文のものを持ち主に渡す（コンテナからは本番 D1 を読めない）。
