@@ -12,13 +12,13 @@
 - デプロイは Workers Builds（キーレス）で、GitHub に Cloudflare の資格情報を置かない。`main` は ruleset（PR 必須・required check `ci`・force push 禁止・bypass なし）。
 - リポは public。私的データ、`.dev.vars`、`.docker/sandbox.env`、D1 のダンプはコミットしない。
 - 本番 URL と WebAuthn の RP_ID は `kokemusu.shiraoka.workers.dev`。RP_ID を変えると登録済みのパスキーがすべて無効になるので、`wrangler.jsonc` の `name` / `vars.RP_ID` / `vars.ORIGIN` は変えない。
-- 認証はパスキー（single-user）、API からの投稿は PAT（Bearer）。kokemusu は送り側を知らない（ADR-0002）。送り側の契約は `docs/senders.md` と生成物 `docs/senders/posts.schema.json`（`createPostSchema` から `pnpm test` が生成し、一致を検査する）。wire を変える PR は `vitest -u` で再生成し、`docs/senders.md` の変更履歴に 1 行足し、公開している送り側を確かめる。上限や鍵を他所に転記しない（ADR-0008）。
+- 認証はパスキー（single-user）、API からの投稿は PAT（Bearer）。kokemusu は送り側を知らない（ADR-0002）。送り側の契約は `docs/senders.md` と生成物 `docs/senders/posts.schema.json`（`createPostSchema` から `pnpm test` が生成し、一致を検査する）。`createPostSchema`（wire）を変える PR は `vitest -u` で再生成し、`docs/senders.md` の変更履歴に 1 行足し、公開している送り側を確かめる。上限や鍵を他所に転記しない（ADR-0008）。
 - 本文はアプリ層で暗号化する（鍵 `BODY_KEY` は Worker Secret）。日時・タグなどのメタデータは平文で、可視化と集計はメタデータだけで成り立たせる（ADR-0001）。
 
 ## コマンドと罠
 
 - 開発はコンテナ内で行う。ルートから `pnpm dev`（コンテナ 5173 → ホスト 5273）、`pnpm check`、`pnpm test`、`pnpm build`。CI と同じ検査はルートで `pnpm run ci`（`pnpm ci` は pnpm 本体の別コマンドになる）。e2e はコンテナ内で `pnpm e2e`（`apps/web/e2e/README.md`）。
-- ホストで開いたセッションでは、編集と git はホストで行い、pnpm はコンテナに投げる（起動は `./up.sh`、実行は `docker exec kokemusu-dev pnpm run ci`）。ホストで pnpm を走らせない（`pnpm exec` も）。コンテナの `node_modules` が壊れる。作業ツリーはコンテナと共有しているので、ブランチの切り替えはコンテナ側にも効く。
+- ホストで開いたセッションでは、編集と git はホストで行い、pnpm はコンテナに投げる（起動は `./up.sh`、実行は `docker exec kokemusu-dev pnpm run ci`）。ホストで pnpm・npx を走らせない（`pnpm exec` も）。依存のコードが隔離の外で動き、コンテナの `node_modules` も壊れる。作業ツリーはコンテナと共有しているので、ブランチの切り替えはコンテナ側にも効く。
 - `pnpm check` は `wrangler types` で `worker-configuration.d.ts`（gitignore）を作ってから tsc を走らせる。単体テストは Cloudflare plugin を通さず、Node で `app.request()` を呼ぶ。
 - ローカルの変数は `apps/web/.dev.vars`（`.dev.vars.example` をコピーし、`RP_ID=localhost`）。
 - migration（`apps/web/drizzle/`）を書く前に okayus-skills の skill `cloudflare-d1-drizzle-migration` を読む。
@@ -31,8 +31,8 @@
 
 ## git と merge
 
-- コンテナで `claude/<topic>` に commit し、push して `gh pr create` する。PR の題は Conventional Commits で書く（commit が 2 つ以上だと `--fill` の題がブランチ名になる — #39）。PR 本文の修正は `gh pr comment` で行う（`gh pr edit` は古い gh で落ちる）。
-- CI が green なら `gh pr merge --auto --squash <PR番号>` で auto-merge を arm してよい（required check `ci` が通ったときに GitHub が squash merge する）。`--auto` なしの merge と `--admin` は使わない。持ち主に merge を頼まれたときは `/merge` の手順で進める。
-- `apps/web/drizzle/`、`.github/**`、`.claude/**`、`docs/adr/**` を触る PR は自分から arm しない。持ち主が差分を見たうえで merge を頼んだときだけ、`/merge` で arm する。migration の PR はさらに、merge の直前にホストで `node ~/.config/d1-backup/d1-bookmark.mjs kokemusu <PR番号>` を実行してもらい、D1 Time Travel の bookmark が PR にコメントされるまで arm しない（コンテナには Cloudflare の資格情報がない）。既存行の書き換え・テーブルの再構築・DROP を含む migration なら、PR 本文に戻し方を書く。
+- `claude/<topic>` に commit し、push して `gh pr create` する。PR の題は Conventional Commits で書く（commit が 2 つ以上だと `--fill` の題がブランチ名になる — #39）。PR 本文の修正は `gh pr comment` で行う（`gh pr edit` は古い gh で落ちる）。
+- CI が green になったのを確かめたら、`gh pr merge --auto --squash <PR番号>` で arm してよい（`--auto` は required check `ci` が通るまで merge を待たせる）。`--auto` なしの merge と `--admin` は使わない。持ち主に merge を頼まれたときは `/merge` の手順で進める。
+- `apps/web/drizzle/`、`.github/**`、`.claude/**`、`docs/adr/**` を触る PR は自分から arm しない。持ち主が差分を見たうえで merge を頼んだときだけ（PR ができる前の「merge まで進めて」は含まない）、`/merge` で arm する。migration の PR はさらに、merge の直前にホストで `node ~/.config/d1-backup/d1-bookmark.mjs kokemusu <PR番号>` を実行してもらい、D1 Time Travel の bookmark が PR にコメントされるまで arm しない（コンテナには Cloudflare の資格情報がない）。既存行の書き換え・テーブルの再構築・DROP を含む migration なら、PR 本文に戻し方を書く。
 - token は印字しない・URL に埋めない・`gh auth login` しない。コンテナでは token は `./shell.sh` が開いたシェルにだけある（無いシェルでは push できない）。ホストでは持ち主の gh の認証で push と PR 操作ができる。
 - `.github/workflows/**` はコンテナの token では push できない（workflows 権限がない）。CI の中身は `package.json` の `ci` script、`.node-version`、`.claude/hooks/` で変えられる。
