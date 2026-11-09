@@ -22,4 +22,4 @@
 
 ## 進行中 PR
 
-- #72 ハーネスの見直し（CLAUDE.md を規約と罠に、ホストの allow を外す、merge と削除 push を hook で止める）。`.claude/**` を含むので持ち主の merge 待ち。
+- なし。
