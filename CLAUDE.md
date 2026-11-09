@@ -1,45 +1,39 @@
-# 苔むす (kokemusu) — プロジェクト指示
+# 苔むす (kokemusu)
 
-> 個人用の日記 Web アプリ。ツイート感覚で 1 日に何度も投稿し、タグごとに積み上げて「これまで自分が何をしてきたか」をグラフィカルに振り返る。ソーシャル機能なし・完全プライベート・各自セルフホスト。
+個人用の日記 Web アプリ。ツイート感覚で 1 日に何度も投稿し、タグごとに積み上がった記録を可視化で振り返る。ソーシャル機能なし・1 インスタンス 1 人・各自セルフホスト。用語は `CONTEXT.md`、決定は `docs/adr/`、設計は `docs/`（`security.md` が最重要。可視化が核心で `visualization.md`）。
 
-このファイルは**規約と目次だけ**（コンテナ内も含めどのセッションでも最初に読まれる）。進捗と次の一手は `docs/status.md`（SessionStart hook が自動注入）、履歴は `docs/log.md` と git、決定は `docs/adr/` と `CONTEXT.md`。**ここに進捗・履歴・完了報告を書かない。**
+## 進捗の持ち方
 
-## 進捗の持ち方（status hub）
+- 進捗と次の一手は `docs/status.md`（SessionStart hook が毎回注入する）、履歴は `docs/log.md` と git。このファイルには規約だけを書く。
+- `status.md` は 40 行 / 3 KB 以内、見出しは「フェーズ / 次の 3 手 / 詰まり・人手待ち / 進行中 PR」の 4 つで固定。終わった項目は消して `log.md` の先頭へ 1 行で移す（取り消し線は使わない）。8 行を超える節は `docs/plans/<topic>.md` に切り出す。書き戻しはユーザが打つ `/handoff`、上限の検査は `.claude/hooks/check-status.sh`（CI も走らせる）。`docs/roadmap.md` のチェックも `/handoff` で付け、機能 PR では付けない。
 
-- `docs/status.md` = いまのハブ。**40 行 / 3 KB 上限**、見出しは「フェーズ / 次の 3 手 / 詰まり・人手待ち / 進行中 PR」の 4 つ固定。終わった項目は消して `docs/log.md` の先頭へ 1 行（取り消し線は禁止）。8 行を超える節は `docs/plans/<topic>.md` に切り出し、完了したら削除。
-- セッションの区切りでユーザが `/handoff` を打つ（書き換え → log → `.claude/hooks/check-status.sh` → commit）。CI も同じ検査を走らせる。
-- `/compact` するときは、変更したファイル一覧と「次の 3 手」の 1 手目を必ず要約に残す。
+## 確定済みの決定（根拠は ADR）
 
-## まず読むドキュメント
+- デプロイは Workers Builds（キーレス）で、GitHub に Cloudflare の資格情報を置かない。`main` は ruleset（PR 必須・required check `ci`・force push 禁止・bypass なし）。
+- リポは public。私的データ、`.dev.vars`、`.docker/sandbox.env`、D1 のダンプはコミットしない。
+- 本番 URL と WebAuthn の RP_ID は `kokemusu.shiraoka.workers.dev`。RP_ID を変えると登録済みのパスキーがすべて無効になるので、`wrangler.jsonc` の `name` / `vars.RP_ID` / `vars.ORIGIN` は変えない。
+- 認証はパスキー（single-user）、API からの投稿は PAT（Bearer）。kokemusu は送り側を知らない（ADR-0002）。送り側の契約は `docs/senders.md` と生成物 `docs/senders/posts.schema.json`（`createPostSchema` から `pnpm test` が生成し、一致を検査する）。`createPostSchema`（wire）を変える PR は `vitest -u` で再生成し、`docs/senders.md` の変更履歴に 1 行足し、公開している送り側を確かめる。上限や鍵を他所に転記しない（ADR-0008）。
+- 本文はアプリ層で暗号化する（鍵 `BODY_KEY` は Worker Secret）。暗号文の列は本文だけで、新しく足す列も平文のメタデータにする。可視化と集計はメタデータだけで成り立たせる。自由記述を足すなら本文に含め、平文の列を足したら `docs/security.md` の平文側に理由を書く（ADR-0001）。
 
-- `README.md` 概要と目次 ／ `docs/concept.md` 名前の由来・メタファー ／ `docs/features.md` `docs/visualization.md` 機能と可視化（可視化が核心）
-- `docs/security.md` セキュリティ設計（最重要） ／ `docs/tech-stack.md` `docs/data-model.md` ／ `docs/dev-environment.md` サンドボックス・token 注入・Workers Builds・骨格 ／ `docs/roadmap.md` フェーズと「決めること」 ／ `CONTEXT.md` 用語 ／ `docs/adr/` 決定
+## コマンドと罠
 
-## 確定済みの決定（要点。根拠と経緯は docs / ADR）
+- pnpm はコンテナで走らせる。ルートから `pnpm dev`（コンテナ 5173 → ホスト 5273）、`pnpm check`、`pnpm test`、`pnpm build`。CI と同じ検査はルートで `pnpm run ci`（`pnpm ci` は pnpm 本体の別コマンドになる）。e2e はコンテナ内で `pnpm e2e`（`apps/web/e2e/README.md`）。
+- ホストで開いたセッションでは、編集と git はホストで行い、pnpm はコンテナに投げる（起動は `./up.sh`、実行は `docker exec kokemusu-dev pnpm run ci`）。ホストで pnpm・npx を走らせない（`pnpm exec` も）。依存のコードが隔離の外で動き、コンテナの `node_modules` も壊れる。作業ツリーはコンテナと共有しているので、ブランチの切り替えはコンテナ側にも効く。
+- `pnpm check` は `wrangler types` で `worker-configuration.d.ts`（gitignore）を作ってから tsc を走らせる。単体テストは Cloudflare plugin を通さず、Node で `app.request()` を呼ぶ。
+- ローカルの変数は `apps/web/.dev.vars`（`.dev.vars.example` をコピーし、`RP_ID=localhost`）。
+- migration（`apps/web/drizzle/`）を書く前に okayus-skills の skill `cloudflare-d1-drizzle-migration` を読む。
 
-- **デプロイ = Cloudflare Workers + D1、経路は Workers Builds（キーレス）**: GitHub に Cloudflare トークンを置かない。`main` は ruleset（PR 必須・required check `ci`・force push 禁止・bypass なし）。リポは **public**（私的データ・`.dev.vars`・`.docker/sandbox.env`・D1 ダンプは決してリポに入れない）。
-- **本番 URL = `https://kokemusu.shiraoka.workers.dev`**（subdomain なしの URL は存在しない）。**WebAuthn の RP_ID = `kokemusu.shiraoka.workers.dev`** を初回パスキー登録前に固定する（変更すると登録済みパスキーが全部無効。custom domain へ移るなら登録より前）。`wrangler.jsonc` の `name` / `vars.RP_ID` / `vars.ORIGIN` は変更しない。
-- **アプリ認証 = パスキー（single-user）、API 自動投稿 = PAT（Bearer）**。受け側 = kokemusu が発行し、送り側を知らない（ADR-0002）。**送り側が読む契約は `docs/senders.md` ＋ 生成物 `docs/senders/posts.schema.json`**（`createPostSchema` から `pnpm test` が生成・一致検査。wire を変える PR は `vitest -u` で再生成 → 変更履歴 → 公開送り側の確認。上限や鍵を他所に転記しない — ADR-0008）。
-- **本文は Phase 1 からアプリ層で暗号化**（鍵 `BODY_KEY` = Worker Secret、1Password にも控える。見出し `title` は 2026-09-06 に廃止 — ADR-0006）。日時・タグ等のメタデータは平文で可視化集計と両立（ADR-0001）。端末側 E2E は不採用。
-- **React 19 + Vite + TS ／ Hono ／ D1 + Drizzle**、wrangler 4 + `@cloudflare/vite-plugin` 1.x、**node は host / sandbox / CI / Workers Builds とも 24**。pnpm workspace: `apps/web` に SPA（`src/`）+ Worker（`worker/`）+ `drizzle/` + `wrangler.jsonc`。`packages/core` はロジックが生えたら。型は `wrangler types`（`pnpm check` = `wrangler types && tsc --noEmit`、`worker-configuration.d.ts` は gitignore）。単体テストは Cloudflare plugin を通さず Node で `app.request()`。ローカルは `apps/web/.dev.vars`（`.dev.vars.example` をコピー、`RP_ID=localhost`）。
-- 開発はサンドボックス（Docker + egress firewall）内。ホスト側 dev ポート **5273**。
+## 書き方
 
-## 働き方の規約
+- TypeScript は関数だけで書き、`class` を使わない。ドメインロジックは純粋関数に寄せ、I/O は境界に置く。
+- UI はブラウザのネイティブ機能を先に使う。`<dialog>`、popover、`<details>`、フォームのネイティブ検証、anchor positioning、container queries、`:has()` を React で作り直さない（詳しくは skill `modern-web-guidance`）。可視化は自作の SVG。
+- API は記憶で断定せず、公式 docs で確かめる（`cloudflare-docs` MCP、`context7` MCP、各サイトの `/llms.txt`）。コンテナの firewall は allowlist 外の URL を通さない。Claude Code 自体の機能・設定は https://code.claude.com/docs/llms.txt で確かめる。
 
-- **TypeScript は関数のみで書く。`class` を使わない。** ドメインロジックは副作用のない純粋関数に寄せ、I/O は境界に押し出す。
-- **デプロイ基盤を先に通してからロジックを載せる**。歩く骨格は本番稼働済み（ロジック = ゼロ）。認証 / CSP / スキーマは骨格に載せない。実スキーマ投入前に skill `cloudflare-d1-drizzle-migration` 必読。
-- **公式ドキュメントの調べ方（3 層。事前学習の記憶で API を断定しない）**: 1. `context7` MCP（`resolve-library-id` → `query-docs`。Cloudflare は `cloudflare-docs` MCP を最優先）→ 2. `llms.txt` の直読み（`hono.dev` `orm.drizzle.team` `react.dev` `vite.dev` `vitest.dev` `zod.dev` `developers.cloudflare.com` の `/llms.txt`。目次 → 必要ページ。`llms-full.txt` は最後の手段）→ 3. WebSearch → WebFetch（allowlist 外の URL は取得できない → 1 に戻る）。
-- **HTML / CSS / UI を書く前に `modern-web-guidance` を読む**: `<dialog>`・popover・`<details>`・`<form>` のネイティブ検証・anchor positioning・container queries・subgrid・view transitions・`:has()` を React / JS で再発明しない。可視化は自作 SVG が基本（`docs/visualization.md`）。
-- **git**: コンテナ内で `claude/<topic>` に commit → `git push -u origin claude/<topic>` → `gh pr create --fill --title "<Conventional Commits の題>"`（commit が 2 つ以上だと `--fill` の題はブランチ名になり、squash の subject に残る — #39）→ PR の URL を報告（PR 本文の修正は `gh pr comment`。`gh pr edit` は古い `gh` が Projects classic の GraphQL エラーで落ちる）。**merge**: CI green を確認したら `gh pr merge --auto --squash <PR番号>` で auto-merge を arm してよい（required check `ci` が通ったときだけ GitHub が squash merge する。`--auto` なしの即時 merge と `gh api` は使わない）。**例外 — `apps/web/drizzle/`（migration。merge = Workers Builds の deploy command で本番 D1 に適用）・`.github/**`・`.claude/**`・`docs/adr/**` を触る PR は arm せず人間の merge を待つ**。**migration の PR は、merge の前にホストで `node ~/.config/d1-backup/d1-bookmark.mjs kokemusu <PR番号>` を実行し、D1 Time Travel の bookmark が PR にコメントされていることを条件にする**（コンテナは Cloudflare の資格情報を持たないので取れない。持ち主に「マージして」と言われても、`gh pr view <PR番号> --comments` に bookmark が無ければ arm せず、このコマンドを案内する。既存行を書き換える / rebuild / DROP を含むなら PR 本文に戻し方も書く）。状態は `gh pr view` / `gh pr checks`。**token は印字しない（`echo $GH_TOKEN` 禁止）・`gh auth login` しない・URL に埋めない。** `.github/workflows/**` は人間がホストから push（コンテナの token に `workflows` 権限が無い）— ただし CI の中身は yaml を触らずに変えられる（ci.yml は安定シェル: 実体は `package.json` の `ci` script・`.node-version`・`.claude/hooks/`。action 更新は Dependabot）。merge 後は `git fetch --prune`。
-- セキュリティ最優先（`docs/security.md`）。
-- Claude Code 自体の機能・設定で不明な点は https://code.claude.com/docs/llms.txt を WebFetch して確認する。
+## git と merge
 
-## ツールセット（共有設定。詳細は `docs/dev-environment.md`）
-
-- `.claude/settings.json`: 日常コマンドの allow。deny = force push・`main` への push（`HEAD:main` 等の refspec 形も）・リモートブランチ削除（`--delete` 形と `git push origin :branch` の refspec 形の両方）・`gh auth`・`gh api`（コンテナ既定の bypassPermissions では deny だけが効く）。`gh pr merge` は 2026-08-29 に deny から外し `--auto --squash` 形のみ allow（運用規約は上記）。`hooks.SessionStart` → `.claude/hooks/session-start.sh`。
-- `.mcp.json`: `cloudflare-docs`（認証不要）と `context7`（キー無し）。`.claude/skills/`: `grill-with-docs`（決定を `CONTEXT.md` / ADR に落とす）、`handoff`（進捗の書き戻し）、`modern-web-guidance`（出自と版は `skills-lock.json`。更新はコンテナ内で `npx skills add GoogleChrome/modern-web-guidance --skill modern-web-guidance -a claude-code --copy -y` を打ち直す。`npx skills update` は本体を `.agents/` に移して `.claude/skills/` 側を symlink にし、以後の更新が `.claude/**` の人手 merge を外れるので使わない）。
-- GitHub token は **`./shell.sh` が開くシェルにだけ** 注入（`op read` で解決 → `docker exec -it -e GH_TOKEN kokemusu-dev`。対話プロセスを `op run` で包むと TTY が壊れる）。コンテナ設定には載せない（`./up.sh` = plain `docker compose up -d`、資格情報なし・冪等）。op 無しのシェルは token 無し = fail closed。firewall allowlist と反映手順（`docker compose down && docker compose build && ./up.sh`）は `docs/dev-environment.md` §1。
-
-## 参照スキル（okayus-skills。コンテナには `~/.claude/skills:ro`）
-
-`agent-status-hub`（この status hub の出典。hook / `/handoff` / 検査の雛形）／ `claude-code-docker-sandbox` ／ `sandboxed-agent-github-token-via-1password`（push / PR 経路）／ `cloudflare-mcp-claude-tooling` ／ `cloudflare-workers-deploy-skeleton` ／ `cloudflare-workers-builds-keyless-deploy`（0.3.0、dash 手順の walkthrough 付き）／ `cloudflare-d1-drizzle-migration` ／ `cloudflare-workers-passkey-auth`（single-user 変種。UNVERIFIED を実装時に書き戻す）／ `cloudflare-workers-pat-bearer-auth` ／ `cloudflare-workers-e2e-playwright` `playwright-e2e-in-docker-sandbox` ／ `cloudflare-workers-bot-scan-defense` ／ `cloudflare-d1-keyless-host-backup`（ホストの週次 timer が全 D1 を export。dump は `~/backups/d1/`。migration 前の bookmark と復元手順もここ。`wrangler d1 export` の生 dump は親テーブル順でなく D1 に戻せない）
+- `claude/<topic>` に commit し、push して `gh pr create` する。PR の題は Conventional Commits で書く（commit が 2 つ以上だと `--fill` の題がブランチ名になる — #39）。PR 本文の修正は `gh pr comment` で行う（`gh pr edit` は古い gh で落ちる）。
+- コードを変える PR（`apps/web/src/`、`apps/web/worker/`、`apps/web/drizzle/`）は、arm の前にコンテナで `pnpm e2e` を流し、結果を PR に書く（CI は e2e を走らせない）。
+- CI が green になったのを確かめたら、`gh pr merge --auto --squash <PR番号>` で arm してよい（`--auto` は required check `ci` が通るまで merge を待たせる）。コンテナの gh（2.23）は、green で clean な PR への `--auto` を「Pull request is in clean status」で弾く。そのときだけ `gh pr merge --squash <PR番号>` を使う（hook が clean を確かめる）。それ以外の `--auto` なしの merge と `--admin` は使わない。持ち主に merge を頼まれたときは `/merge` の手順で進める。
+- `apps/web/drizzle/`、`.github/**`、`.claude/**`、`docs/adr/**` を触る PR は自分から arm しない。持ち主が差分を見たうえで merge を頼んだときだけ（PR ができる前の「merge まで進めて」は含まない）、`/merge` で arm する。migration の PR はさらに、merge の直前にホストで `node ~/.config/d1-backup/d1-bookmark.mjs kokemusu <PR番号>` を実行してもらい、D1 Time Travel の bookmark が PR にコメントされるまで arm しない（コンテナには Cloudflare の資格情報がない）。既存行の書き換え・テーブルの再構築・DROP を含む migration なら、PR 本文に戻し方を書く。
+- token は印字しない・URL に埋めない・`gh auth` 系は使わない。コンテナでは token は `./shell.sh` が開いたシェルにだけある（無いシェルでは push できない）。ホストでは持ち主の gh の認証で push と PR 操作ができる。
+- `.github/workflows/**` はコンテナの token では push できない（workflows 権限がない）。CI の中身は `package.json` の `ci` script、`.node-version`、`.claude/hooks/` で変えられる。

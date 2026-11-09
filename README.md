@@ -55,6 +55,4 @@ pnpm workspace。`pnpm dev`（コンテナ内 5173 → ホスト 5273）/ `pnpm 
 
 ## ステータス
 
-🌱 **Phase 0（土台）** ── 企画 docs、開発サンドボックス、public リポ ＋ `main` ruleset、**デプロイ骨格（`apps/web`、ロジック = ゼロ）** まで。
-次は人手で Cloudflare 側（`wrangler d1 create kokemusu-db` → Workers Builds 接続）→ `https://kokemusu.shiraoka.workers.dev/health` が 200 になったら Phase 1。
-未決定事項は [docs/roadmap.md](docs/roadmap.md) の「決めること」を参照。
+いまのフェーズと次の一手は [docs/status.md](docs/status.md)、節目の履歴は [docs/log.md](docs/log.md)、未決定事項は [docs/roadmap.md](docs/roadmap.md) の「決めること」。

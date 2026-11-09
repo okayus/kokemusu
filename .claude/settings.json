@@ -1,23 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pnpm install:*)",
-      "Bash(pnpm add:*)",
-      "Bash(pnpm run:*)",
-      "Bash(pnpm test:*)",
-      "Bash(pnpm dev:*)",
-      "Bash(pnpm build:*)",
-      "Bash(pnpm lint:*)",
-      "Bash(pnpm typecheck:*)",
-      "Bash(pnpm -r:*)",
-      "Bash(pnpm --filter:*)",
-      "Bash(node:*)",
-      "Bash(npx:*)",
-      "Bash(wrangler dev:*)",
-      "Bash(wrangler d1:*)",
       "Bash(wrangler tail:*)",
       "Bash(wrangler whoami:*)",
-      "Bash(wrangler types:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
@@ -26,7 +11,6 @@
       "Bash(git remote -v:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git checkout:*)",
       "Bash(git switch:*)",
       "Bash(git fetch:*)",
       "Bash(git push origin claude/*)",
@@ -62,15 +46,29 @@
       "Bash(git push * --force*)",
       "Bash(git push --force*)",
       "Bash(git push -f *)",
-      "Bash(git push *main)",
-      "Bash(git push *main *)",
+      "Bash(git push * main)",
+      "Bash(git push * main *)",
+      "Bash(git push *:main)",
+      "Bash(git push *:main *)",
+      "Bash(git push *:refs/heads/main)",
+      "Bash(git push *:refs/heads/main *)",
       "Bash(git push * --delete *)",
-      "Bash(git push * :*)",
       "Bash(gh auth *)",
-      "Bash(gh api *)"
+      "Bash(gh api *)",
+      "Bash(npx skills update*)"
     ]
   },
   "enableAllProjectMcpServers": false,
+  "skillOverrides": {
+    "sandboxed-agent-git-relay": "name-only",
+    "cloudflare-cron-to-discord": "name-only",
+    "cloudflare-d1-weekly-backup-via-pr": "name-only",
+    "cloudflare-api-token-permissions": "name-only",
+    "cloudflare-workers-host-synthetic-check": "name-only",
+    "cloudflare-workflows-for-long-tasks": "name-only",
+    "cloudflare-workers-space-membership-invite": "name-only",
+    "cloudflare-r2-private-image-upload": "name-only"
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -78,7 +76,29 @@
           {
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start.sh",
+            "args": [],
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-pr-merge.sh",
+            "args": [],
+            "timeout": 30,
+            "onFailure": "block"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-push-delete.sh",
+            "args": [],
+            "timeout": 10,
+            "onFailure": "block"
           }
         ]
       }

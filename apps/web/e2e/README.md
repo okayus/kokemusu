@@ -20,7 +20,7 @@ pnpm e2e:server     # サーバーだけ立てておく。以後の pnpm e2e は
 - Chromium はイメージに焼き込み済み（`.docker/Dockerfile`、`PLAYWRIGHT_VERSION` = `@playwright/test` の版）。`playwright install` は不要で、CDN は firewall で不達。
 - `pnpm dev`（5173）とは別ポートなので同居できる。
 - CI では回さない（`playwright.config.ts` 冒頭の理由）。`pnpm check` が spec の型だけ CI で見る。merge 前にここで流す。
-- 失敗時は `test-results/` に trace（`retain-on-failure`）。ホストで `pnpm exec playwright show-trace test-results/<...>/trace.zip`。
+- 失敗時は `test-results/` に trace（`retain-on-failure`）。trace.zip は https://trace.playwright.dev に読み込んで見る（"Trace Viewer loads the trace entirely in your browser and does not transmit any data externally" — ホストで pnpm を走らせない）。
 
 ## 詰まったら
 
@@ -34,5 +34,5 @@ pnpm e2e:server     # サーバーだけ立てておく。以後の pnpm e2e は
 | `Executable doesn't exist at .../chromium-XXXX` | image の Chromium と `@playwright/test` の版ずれ。`docker-compose.yml` の `PLAYWRIGHT_VERSION` と揃えて rebuild |
 | あるリクエストの **次** が 500 `Network connection lost` になり、直後に `wrangler dev` が `✘ [ERROR]` で exit する | 直前のリクエストが **body 付きなのに Worker が body を読まずに応答した**（例: セッション門で 401、CSRF で 403）。wrangler dev の proxy（ProxyWorker → user worker の keep-alive）が壊れる。4.125.0 / 4.128.0 で実測（2026-09-02）、本番の runtime では起きない。**spec の規約: body を読む前に拒否されるリクエストには body を付けない**（Worker は変えない） |
 | 新しく足した UI / spec **だけ**が「要素が見つからない」で落ちる（他は green） | 前のセッションの `pnpm e2e:server` が生き残り、`reuseExistingServer: true` が**古いビルド**を掴んでいる。`ss -tlnp \| grep 5183` で workerd を見つけて親の `wrangler dev` ごと kill → 次の `pnpm e2e` が作り直す（2026-09-03 実測） |
-| Chromium が起動しない（sandbox） | `DEVCONTAINER` が無い環境。コンテナ内で流すか、ホストなら Playwright の Chromium を `playwright install` |
+| Chromium が起動しない（sandbox） | `DEVCONTAINER` が無い環境。コンテナ内で流す（ホストに Playwright を入れない。依存のコードを隔離の外で動かさない） |
 | 単独では通る spec が `pnpm e2e`（全 spec）だと at-rest の件数検査（`toHaveLength(1)` 等）で落ちる | 4 spec は **1 つの sqlite を共有**する（global-setup のリセットは 1 回だけ、以後は積み上がる。登録も「既存 user にパスキーを足す」で通る）。`WHERE kind = 'input'` のような形の条件は前の spec の行も拾う → 自分が作った行の `id` で引く（2026-09-05、当時のゴールデンパスが見出し付き苔片を残すようになって PAT spec の `WHERE title IS NOT NULL` が落ちた。見出しは ADR-0006 で消えたが教訓は同じ） |
