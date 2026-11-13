@@ -10,15 +10,16 @@
 
 ## 次の 3 手
 
-1. **エクスポートの決定**（`grill-with-docs`: 形式（JSON / Markdown）・範囲（全部 / 期間 / 石）・出し方（設定 UI / API＋PAT）・復号は Worker が `BODY_KEY` で（ADR-0001）・ADR-0003（物理削除）の受け皿 → ADR-0009 ＋ docs。実装は次の PR、純粋関数（整形）と I/O（D1 → 復号 → 応答）を分ける）。
-2. **実データ目視 ＋ 石の目盛り**（持ち主が本番で #51〜#70 を見る: 見かた 2 つ・選んだ石・厚み・右下の ✓・同じ石に積む の向き・年表の吹き出し・#70 の付け替え（確認文と受領の言葉、統合に使うと空の石が残る → タグ運用の統合 / 削除が要るか）・#66 の隠れる / 薄れる。`nodeRadius` は量 ≈ 46 で飽和 — 据え置きか決める）。
-3. **skill 書き戻し**（log #32〜#66 の罠 → `cloudflare-d1-drizzle-migration`（CHECK 追加も再構築 recipe）/ `playwright-e2e-in-docker-sandbox`（SVG の % 高さ・flex の max-content・anchor の名前・`isMobile` は iOS の文字拡大を再現しない）/ `cloudflare-workers-e2e-playwright`（ゴールデンパスの `timeout`）/ `cloudflare-workers-pat-bearer-auth` / `cloudflare-mcp-claude-tooling`（upstream は api.github.com contents で読む））→ 累積グラフ → `Idempotency-Key`。
+1. **見直しの手当て**（[plans/review-2026-11.md](plans/review-2026-11.md)。migration なしの小 PR を順に: ① hono・zod の更新と、改行入りのパスでも付くセキュリティヘッダの固定 ② 空の石を補完から外す ③ 付け替えの `add` 上限 ④ Cron で期限切れ session を掃除）。
+2. **エクスポートの決定**（`grill-with-docs`: 形式（JSON / Markdown）・範囲（全部 / 期間 / 石）・出し方（設定 UI / API＋PAT）・復号は Worker が `BODY_KEY` で（ADR-0001）・ADR-0003（物理削除）の受け皿 → ADR-0009 ＋ docs。実装は次の PR、純粋関数（整形）と I/O（D1 → 復号 → 応答）を分ける。再認証を入れるかも同じ grill で決める — 同 plans ⑥）。
+3. **実データ目視 ＋ 石の目盛り**（持ち主が本番で #51〜#70 を見る: 見かた 2 つ・選んだ石・厚み・右下の ✓・同じ石に積む の向き・年表の吹き出し・#70 の付け替え（確認文と受領の言葉）・#66 の隠れる / 薄れる。`nodeRadius` は量 ≈ 46 で飽和 — 据え置きか決める。総草の年の切り替えを足すかも決める — 同 plans ⑤）。
+
+その後: skill 書き戻し（[plans/skill-writeback.md](plans/skill-writeback.md)）→ 累積グラフ → `Idempotency-Key`。
 
 ## 詰まり・人手待ち
 
 - **#64 の実機確認（人手）**: iPhone の Chrome で Markdown の苔片の文字と幅が戻ったか。確認の仕方 = 長い 1 行のコードブロックを含む苔片を開き、横スクロールが出ないこと・文字が他の苔片と同じ大きさであること。まだ広がる苔片があれば本文（編集フォームの生テキスト）を貼る。
-
-- 要実測: 付け替えの更新文が D1 の bound parameter 上限（1 文 100）を超える疑い。石が多いと 500 になり得る（2026-11-08、机上の目算で 102〜144）。`toSQL().params.length` で測って確かめる。
+- **開発機の不調（人手）**: 2026-10-23 から、無関係なプロセスが数分間に相次いで落ちる（メモリ上の 1 bit が落ちる。11-14 は `pnpm test` が `Worker exited unexpectedly` で 3 連敗、数分後に全通過）。テストや git が SIGILL / SIGSEGV / abort で落ちたら、コードを疑う前に数分おいて再実行する。手当て: memtest86+ と BIOS のメモリ設定。
 
 ## 進行中 PR
 
