@@ -193,9 +193,17 @@ test("PAT: mint → Bearer post lands encrypted → write-only wall → revoke k
   expect(storedPost[0]?.kind).toBe("input");
   expect([storedPost[0]?.first_day, storedPost[0]?.last_day]).toEqual([yesterday, yesterday]);
 
-  // Revoke in the settings UI. The row stays, marked dead.
+  // Revoke in the settings UI, through the native confirm: Esc keeps the
+  // token, 失効する kills it. The row stays, marked dead.
   await page.getByText("API トークン（PAT）").click();
-  await page.getByRole("button", { name: "失効" }).click();
+  await page.getByRole("button", { name: "失効", exact: true }).click();
+  const confirm = page.getByRole("dialog");
+  await expect(confirm).toContainText("トークン「e2e-sender」を失効します。");
+  await page.keyboard.press("Escape");
+  await expect(confirm).toBeHidden();
+  expect((await sender.get("/api/auth/me", { headers: bearer })).status()).toBe(200);
+  await page.getByRole("button", { name: "失効", exact: true }).click();
+  await confirm.getByRole("button", { name: "失効する" }).click();
   await expect(page.getByText("失効済み")).toBeVisible();
 
   // The revoked token is gone for the sender — reads and writes alike.
