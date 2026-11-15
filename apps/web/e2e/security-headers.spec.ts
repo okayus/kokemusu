@@ -5,8 +5,9 @@ import { expect, test } from "@playwright/test";
 // and the CSP is the STRICT production one — no 'unsafe-inline', which is also
 // the proof that e2e looks at the build artifact and not at vite dev / DEV_CSP.
 // e2e runs over http, so HSTS must be absent here; its https form is fixed by
-// worker/middleware/security-headers.test.ts.
-for (const path of ["/", "/some/client/route", "/health", "/api/auth/me"]) {
+// worker/middleware/security-headers.test.ts. `/x%0A` guards GHSA-h7mg-cq63-vhpq:
+// hono < 4.13.16 skips `app.use("*")` for a path holding a line terminator.
+for (const path of ["/", "/some/client/route", "/x%0A", "/health", "/api/auth/me"]) {
   test(`security headers on ${path}`, async ({ request }) => {
     const res = await request.get(path);
     const h = res.headers();
