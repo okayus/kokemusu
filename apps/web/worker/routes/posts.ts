@@ -136,10 +136,13 @@ export const retagFilterSchema = feedFilterSchema.refine(
  * the stones to take off, by id (the filter's own, in the UI; any of the
  * reader's on the wire). One of the two at least. Strict like the composer's:
  * a key the shape does not name is a 400, never silently dropped (ADR-0006).
+ * Each side holds at most MAX_TAGS_PER_SET: the touch in retagStatements
+ * binds the filter plus one subquery per stone on either side — 65 at the
+ * widest, under D1's 100 per statement.
  */
 export const retagSchema = z
   .strictObject({
-    add: z.array(z.string().min(1).max(MAX_TAG_CHARS)).max(MAX_TAGS_PER_POST).optional(),
+    add: z.array(z.string().min(1).max(MAX_TAG_CHARS)).max(MAX_TAGS_PER_SET).optional(),
     remove: z.array(z.string().min(1).max(64)).max(MAX_TAGS_PER_SET).optional(),
   })
   .refine((b) => (b.add?.length ?? 0) + (b.remove?.length ?? 0) > 0, "nothing to change");
