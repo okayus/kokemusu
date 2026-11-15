@@ -517,7 +517,7 @@ function TimelineRowItem(props: {
               maxLength={100}
               placeholder="石の名前"
               aria-label={`${label} に足す石`}
-              // The form appears on explicit request (＋), so focus follows the intent.
+              // oxlint-disable-next-line jsx-a11y/no-autofocus -- the form appears on explicit request (＋), so focus follows the intent
               autoFocus
             />
             <button type="submit">足す</button>

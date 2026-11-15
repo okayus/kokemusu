@@ -119,6 +119,7 @@ export function TagField(props: {
       {/* The anchor the list hangs from (position: relative); the box is dressed
           as the input, and a tap anywhere in it lands in the text. */}
       <div className="tag-field-anchor">
+      {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the click only hands focus to the input, where a keyboard already is */}
       <div className="tag-field-box" onClick={() => inputRef.current?.focus()}>
         {value.tags.length > 0 && (
           <ul className="tag-field-chips" role="list">
@@ -182,6 +183,7 @@ export function TagField(props: {
       {/* Mounted while closed (hidden) so aria-controls always points at it. */}
       <ul id={listId} role="listbox" className="tag-field-options" hidden={!expanded} aria-label="石の候補">
         {rows.map((row, i) => (
+          // oxlint-disable-next-line jsx-a11y/click-events-have-key-events -- the keys are the input's: it walks the options through aria-activedescendant
           <li
             key={row.kind === "stone" ? row.id : "new"}
             id={`${listId}-${i}`}

@@ -273,19 +273,24 @@ export function TagGraphChart(props: {
         if (p === undefined) return null;
         const hidden = !reach.has(node.id);
         return (
-          <Stone
-            key={node.id}
-            node={node}
-            at={p}
-            pressed={chosen.has(node.id)}
-            hidden={hidden}
-            far={
-              nearSpot !== null && !hidden && node.id !== spot && !nearSpot.has(node.id)
-            }
-            onStoneTap={props.onStoneTap}
-            onInterest={setInterest}
-            onInterestEnd={endInterest}
-          />
+          // The hover text hangs from a wrapper outside the accessibility tree.
+          // Inside the button, axe-core 4.14 counts a <title> as text the name
+          // has to contain (WCAG 2.5.3), and it never fits next to the label.
+          <g key={node.id} role="none">
+            <title>{nodeTitle(node)}</title>
+            <Stone
+              node={node}
+              at={p}
+              pressed={chosen.has(node.id)}
+              hidden={hidden}
+              far={
+                nearSpot !== null && !hidden && node.id !== spot && !nearSpot.has(node.id)
+              }
+              onStoneTap={props.onStoneTap}
+              onInterest={setInterest}
+              onInterestEnd={endInterest}
+            />
+          </g>
         );
       })}
     </svg>
@@ -400,7 +405,6 @@ function Stone(props: {
       }}
       onBlur={() => props.onInterestEnd(node.id)}
     >
-      <title>{nodeTitle(node)}</title>
       {/* An invisible disc keeps young stones (r → R_MIN) tappable. */}
       <circle className="tg-hit" cx={at.x} cy={at.y} r={Math.max(at.r, 16)} />
       <circle className="tg-stone" cx={at.x} cy={at.y} r={at.r} fill={node.color ?? undefined} />

@@ -491,7 +491,7 @@ dialog.compose h2 {
    so nothing spills past the field. */
 .thickness-ticks {
   position: relative;
-  block-size: 1.25rem;
+  block-size: 1.5rem;
   --thumb: 16px;
 }
 
@@ -505,7 +505,8 @@ dialog.compose h2 {
   border: 0;
   border-radius: 0.25rem;
   font-size: 0.75rem;
-  line-height: 1.25rem;
+  /* 24px tall: WCAG 2.5.8's minimum target, with the slider right above. */
+  line-height: 1.5rem;
   color: var(--quiet);
   white-space: nowrap;
 }
