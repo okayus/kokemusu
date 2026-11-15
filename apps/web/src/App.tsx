@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { describeApiError, isApiError } from "./api";
 import {
@@ -905,12 +905,7 @@ function RetagDisclosure(props: {
   const [pending, setPending] = useState<RetagChange | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const confirmRef = useRef<HTMLDialogElement | null>(null);
   const { stones, period, onSessionLost } = props;
-
-  useEffect(() => {
-    if (pending !== null) confirmRef.current?.showModal();
-  }, [pending]);
 
   // The count follows the filter while the fold is open, and is dropped the
   // moment the filter moves, so a stale number never sits over a new set.
@@ -1009,32 +1004,21 @@ function RetagDisclosure(props: {
           {props.locked && <span className="hint">編集中の苔片を閉じてから。</span>}
         </div>
       </form>
-      {/* The confirm, as the delete's: what changes and how many, before it is
-          written. Only the explicit 付け替える submit carries "retag". */}
+      {/* What changes and how many, before it is written. */}
       {pending !== null && (
-        <dialog
-          ref={confirmRef}
-          className="confirm"
-          closedby="any"
-          aria-labelledby="confirm-retag"
-          onClose={() => {
-            const decided = confirmRef.current?.returnValue === "retag";
+        <ConfirmDialog
+          labelId="confirm-retag"
+          message={
+            <>
+              <strong>{retagSentence(props.narrowedBy, count, pending)}</strong>元に戻せません。
+            </>
+          }
+          action="付け替える"
+          onClose={(confirmed) => {
             setPending(null);
-            if (decided) void apply(pending);
+            if (confirmed) void apply(pending);
           }}
-        >
-          <p id="confirm-retag">
-            <strong>{retagSentence(props.narrowedBy, count, pending)}</strong>元に戻せません。
-          </p>
-          <form method="dialog" className="confirm-actions">
-            <button type="submit" value="cancel">
-              やめる
-            </button>
-            <button type="submit" value="retag" className="danger">
-              付け替える
-            </button>
-          </form>
-        </dialog>
+        />
       )}
     </details>
   );
@@ -1135,15 +1119,6 @@ function PostEntry(props: {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const confirmRef = useRef<HTMLDialogElement | null>(null);
-
-  // The confirm dialog is mounted only while confirming — a permanently
-  // mounted (closed) one would keep a hidden copy of the 苔片's text in the
-  // DOM. showModal is imperative on purpose: the `open` attribute would show
-  // it non-modal, without backdrop or focus trap.
-  useEffect(() => {
-    if (confirming) confirmRef.current?.showModal();
-  }, [confirming]);
 
   const fault = (e: unknown) => {
     if (isApiError(e) && e.status === 401) props.onSessionLost();
@@ -1348,37 +1323,24 @@ function PostEntry(props: {
           削除
         </button>
       </div>
-      {/* Native modal: showModal traps focus and handles Esc; closedby="any"
-          adds backdrop light-dismiss where supported. Esc/backdrop/やめる all
-          close with an empty returnValue — only the explicit 削除する submit
-          carries "delete". */}
       {confirming && (
-        <dialog
-          ref={confirmRef}
-          className="confirm"
-          closedby="any"
-          aria-labelledby={`confirm-delete-${p.id}`}
-          onClose={() => {
-            const decided = confirmRef.current?.returnValue === "delete";
+        <ConfirmDialog
+          labelId={`confirm-delete-${p.id}`}
+          message={
+            <>
+              <strong>この苔片を削除します。</strong>元に戻せません。
+            </>
+          }
+          action="削除する"
+          onClose={(confirmed) => {
             setConfirming(false);
-            if (decided) void destroy();
+            if (confirmed) void destroy();
           }}
         >
-          <p id={`confirm-delete-${p.id}`}>
-            <strong>この苔片を削除します。</strong>元に戻せません。
-          </p>
           <blockquote className="confirm-preview">
             {p.body.length > 120 ? `${p.body.slice(0, 120)}…` : p.body}
           </blockquote>
-          <form method="dialog" className="confirm-actions">
-            <button type="submit" value="cancel">
-              やめる
-            </button>
-            <button type="submit" value="delete" className="danger">
-              削除する
-            </button>
-          </form>
-        </dialog>
+        </ConfirmDialog>
       )}
     </li>
   );
@@ -1392,6 +1354,8 @@ function PostEntry(props: {
 function TokensSection() {
   const [tokens, setTokens] = useState<TokenSummary[] | null>(null);
   const [created, setCreated] = useState<CreatedToken | null>(null);
+  // The token waiting in the confirm dialog, which is mounted only then.
+  const [revoking, setRevoking] = useState<TokenSummary | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1501,11 +1465,7 @@ function TokensSection() {
                 {t.revokedAt !== null && <> ／ 失効 {fmtDate(t.revokedAt)}</>}
               </p>
               {t.revokedAt === null && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void run(() => revokeToken(t.id))}
-                >
+                <button type="button" disabled={busy} onClick={() => setRevoking(t)}>
                   失効
                 </button>
               )}
@@ -1513,12 +1473,30 @@ function TokensSection() {
           ))}
         </ul>
       )}
+      {revoking !== null && (
+        <ConfirmDialog
+          labelId="confirm-revoke"
+          message={
+            <>
+              <strong>トークン「{revoking.name}」を失効します。</strong>
+              このトークンで積む送り側は 401 で断られます。元に戻せません。
+            </>
+          }
+          action="失効する"
+          onClose={(confirmed) => {
+            setRevoking(null);
+            if (confirmed) void run(() => revokeToken(revoking.id));
+          }}
+        />
+      )}
     </>
   );
 }
 
 function DevicesSection() {
   const [devices, setDevices] = useState<CredentialSummary[] | null>(null);
+  // The passkey waiting in the confirm dialog, which is mounted only then.
+  const [removing, setRemoving] = useState<CredentialSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1575,13 +1553,29 @@ function DevicesSection() {
               <button
                 type="button"
                 disabled={busy || devices.length <= 1}
-                onClick={() => void run(() => removeCredential(d.id))}
+                onClick={() => setRemoving(d)}
               >
                 削除
               </button>
             </li>
           ))}
         </ul>
+      )}
+      {removing !== null && (
+        <ConfirmDialog
+          labelId="confirm-remove-device"
+          message={
+            <>
+              <strong>「{removing.deviceName ?? "名前のない端末"}」のパスキーを削除します。</strong>
+              その端末のパスキーではログインできなくなります。
+            </>
+          }
+          action="削除する"
+          onClose={(confirmed) => {
+            setRemoving(null);
+            if (confirmed) void run(() => removeCredential(removing.id));
+          }}
+        />
       )}
       <form
         onSubmit={(e) => {
@@ -1602,5 +1596,52 @@ function DevicesSection() {
         </button>
       </form>
     </>
+  );
+}
+
+/**
+ * The confirm before an action that cannot be taken back. Native modal:
+ * showModal traps focus and handles Esc, and closedby="any" adds backdrop
+ * light-dismiss where supported. Esc, the backdrop and やめる close with an
+ * empty returnValue; only the action's own submit carries "confirm". やめる
+ * comes first, so the initial focus lands on the safe choice. The caller
+ * mounts it only while asking: a closed dialog would keep a hidden copy of
+ * what it names in the DOM, and a fresh element has no stale returnValue.
+ */
+function ConfirmDialog(props: {
+  labelId: string;
+  message: ReactNode;
+  /** The action button's label — 削除する, 失効する, … */
+  action: string;
+  /** Extra content under the message, such as a preview of what dies. */
+  children?: ReactNode;
+  onClose: (confirmed: boolean) => void;
+}) {
+  const ref = useRef<HTMLDialogElement | null>(null);
+  // Imperative on purpose: the `open` attribute would show it non-modal,
+  // without backdrop or focus trap. StrictMode runs this twice in dev.
+  useEffect(() => {
+    const dialog = ref.current;
+    if (dialog !== null && !dialog.open) dialog.showModal();
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className="confirm"
+      closedby="any"
+      aria-labelledby={props.labelId}
+      onClose={() => props.onClose(ref.current?.returnValue === "confirm")}
+    >
+      <p id={props.labelId}>{props.message}</p>
+      {props.children}
+      <form method="dialog" className="confirm-actions">
+        <button type="submit" value="cancel">
+          やめる
+        </button>
+        <button type="submit" value="confirm" className="danger">
+          {props.action}
+        </button>
+      </form>
+    </dialog>
   );
 }
