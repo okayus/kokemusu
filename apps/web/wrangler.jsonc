@@ -60,8 +60,8 @@
     }
   ],
   "triggers": {
-    // Hourly at minute 15 (avoids the minute-0 crowd). The handler only logs in
-    // the skeleton; it proves the Cron registration works (`wrangler tail`).
+    // Hourly at minute 15 (avoids the minute-0 crowd). The handler sweeps the
+    // expired sessions and logs the count (worker/cron.ts, `wrangler tail`).
     "crons": ["15 * * * *"]
   }
 }
