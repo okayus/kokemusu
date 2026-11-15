@@ -46,6 +46,41 @@ test("each surface answers with its own content type; /api is never cached", asy
   expect(api.headers()["cache-control"]).toBe("no-store");
 });
 
+// The SPA fallback answers a path with no file behind it with index.html and a
+// 200, so a forgotten icon would still "load". The content type is what tells
+// a shipped file from the fallback.
+test("the icons and the manifest index.html points at are files of their own", async ({
+  request,
+}) => {
+  const html = await (await request.get("/")).text();
+  const hrefs = [...html.matchAll(/<link rel="(?:icon|apple-touch-icon|manifest)"[^>]*>/g)].map(
+    ([tag]) => /href="([^"]+)"/.exec(tag)?.[1] ?? "",
+  );
+  expect(hrefs).toEqual([
+    "/favicon.ico",
+    "/icon.svg",
+    "/apple-touch-icon.png",
+    "/manifest.webmanifest",
+  ]);
+
+  const manifest = await request.get("/manifest.webmanifest");
+  expect(manifest.headers()["content-type"]).toContain("application/manifest+json");
+  const { icons } = (await manifest.json()) as { icons: { src: string; type: string }[] };
+  expect(icons.length).toBeGreaterThan(0);
+
+  const expected = [
+    ["/favicon.ico", "image/vnd.microsoft.icon"],
+    ["/icon.svg", "image/svg+xml"],
+    ["/apple-touch-icon.png", "image/png"],
+    ...icons.map((icon) => [icon.src, icon.type]),
+  ] as const;
+  for (const [path, type] of expected) {
+    const res = await request.get(path);
+    expect(res.status(), path).toBe(200);
+    expect(res.headers()["content-type"], path).toContain(type);
+  }
+});
+
 test("a non-GET /api request without a matching Origin is refused", async ({ request }) => {
   const foreign = await request.post("/api/auth/login/begin", {
     headers: { Origin: "https://evil.example" },
