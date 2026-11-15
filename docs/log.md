@@ -3,6 +3,13 @@
 1 行 = 1 節目（PR の merge・ADR・人手作業の完了・本番の状態変化）。`- YYYY-MM-DD 何を（#PR / ADR / skill）`。
 自動ロードはされない。必要なら `head -20 docs/log.md`。作業中の試行錯誤は書かない（git log と PR にある）。
 
+- 2026-11-15 週次バックアップの失敗に気づく手当て（plans ⑦）: 前提を訂正 — `d1-backup.mjs` は失敗時に notify-send するが、一度きりで見落とす。ホストの app-check（毎日 09:05）が `~/backups/d1/last-run.json` を読み、8 日より古いか `ok:false` なら失敗にする。okayus-skills #51（host-synthetic-check 0.3.0・d1-keyless-host-backup 0.2.1）。
+- 2026-11-15 毎週月曜 09:17 JST に `pnpm audit --prod` を回す workflow「Audit」を足す（#82。`ci` には入れない — 新しい勧告で無関係な PR を赤くしないため）。
+- 2026-11-15 パスキーの削除と PAT の失効を確認ダイアログ経由にする（#81。苔片の削除・付け替えと共通の `ConfirmDialog`、ネイティブ `<dialog>` ＋ `closedby="any"`、安全側が初期フォーカス）。
+- 2026-11-15 毎時の Cron で期限切れの session を消す（#80。`DELETE FROM session WHERE expires_at < scheduledTime`、件数をログに出す。e2e は `/cdn-cgi/local/scheduled` で確認）。
+- 2026-11-15 付け替えの足す石を 20 までにする（#79。最悪の bound parameter は 65 = 1 ＋ 24 ＋ 20 ＋ 20、D1 の 100 未満）。
+- 2026-11-15 苔片が 1 つも無い石をタグ欄の候補から外す（#78。`/api/tags` に `EXISTS`、行は消さない）。
+- 2026-11-15 hono 4.13.18・zod 4.6.7 に上げ、改行入りのパスにもセキュリティヘッダが付くことを単体と e2e で固定（#77。本番の `/x%0A` に CSP と `X-Frame-Options: DENY` が付くのを確認）。
 - 2026-11-14 コードと本番の見直し → 手当て 6 件を `docs/plans/review-2026-11.md` へ（実測: lockfile は 09-04 から不変で `pnpm audit --prod` は 11 件。本番は改行入りのパスにセキュリティヘッダを付けない — hono 4.13.3、GHSA-h7mg-cq63-vhpq。認証の素通りは無し — 単体ハーネスで 24 route・1,812 通り）。
 - 2026-11-14 付け替えの bound parameter を実測し、status の「要実測」を閉じる（`toSQL().params.length`: 最悪 144 = 20 石 ＋ 期間両端・足す 99・外す 20。1 石・期間なしでも足す 99 で 102〜103。100 を超えるのは、足す石がすべて既存で 足す ＋ 外す ≥ 76 のとき。直しは plans/review-2026-11.md ③）。
 - 2026-11-09 ハーネスの見直しを merge（CLAUDE.md を規約と罠に絞り、ホストの allow を外し、merge の形と削除 push を hook で止める。#72）。
