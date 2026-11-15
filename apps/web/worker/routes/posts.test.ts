@@ -1,6 +1,6 @@
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
-import { MAX_TAGS_PER_POST, MAX_TAGS_PER_SET } from "../core/tag";
+import { D1_MAX_BOUND_PARAMETERS, MAX_TAGS_PER_POST, MAX_TAGS_PER_SET } from "../core/tag";
 import { createDb } from "../db";
 import { app } from "../index";
 import { TEST_ORIGIN, testEnv } from "../test-support";
@@ -419,10 +419,10 @@ describe("retagSchema — the change of a 付け替え", () => {
     expect(retagSchema.safeParse({ add: ["x"], title: "見出し" }).success).toBe(false);
   });
 
-  it("caps the sides where the composer and the ?tags= set are capped", () => {
+  it("caps both sides where the ?tags= set is capped", () => {
     const names = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`);
-    expect(retagSchema.safeParse({ add: names(MAX_TAGS_PER_POST) }).success).toBe(true);
-    expect(retagSchema.safeParse({ add: names(MAX_TAGS_PER_POST + 1) }).success).toBe(false);
+    expect(retagSchema.safeParse({ add: names(MAX_TAGS_PER_SET) }).success).toBe(true);
+    expect(retagSchema.safeParse({ add: names(MAX_TAGS_PER_SET + 1) }).success).toBe(false);
     expect(retagSchema.safeParse({ remove: names(MAX_TAGS_PER_SET) }).success).toBe(true);
     expect(retagSchema.safeParse({ remove: names(MAX_TAGS_PER_SET + 1) }).success).toBe(false);
     expect(retagSchema.safeParse({ remove: ["x".repeat(65)] }).success).toBe(false);
@@ -522,20 +522,22 @@ describe("retagStatements — every statement writes THROUGH the filter (feature
     expect(q.params).toEqual([1, ...filterParams, "t2", "t1"]);
   });
 
-  it("binds the filter and the stone, however many 苔片 the filter holds", () => {
+  it("binds the filter and the stones, however many 苔片 the filter holds", () => {
+    const ids = (prefix: string) => Array.from({ length: MAX_TAGS_PER_SET }, (_, i) => `${prefix}${i}`);
+    // The widest the schemas let through: a full set with both period ends,
+    // and full sides of stones that all exist (no new stone, so the touch
+    // keeps its per-stone condition).
     const stmts = retagStatements(db, {
-      cond: feedCondition(db, "u", Array.from({ length: MAX_TAGS_PER_SET }, (_, i) => `s${i}`), {
-        from: "2026-01-01",
-        to: "2026-12-31",
-      }),
+      cond: feedCondition(db, "u", ids("s"), { from: "2026-01-01", to: "2026-12-31" }),
       now: 1,
       newTags: [],
-      addIds: ["a1"],
-      removeIds: ["s0"],
+      addIds: ids("a"),
+      removeIds: ids("s"),
     });
-    // The widest statement: the touch, with the set twice over (not exists /
-    // exists once each) — under D1's 100 bound parameters per statement.
+    // The touch: now + the filter (user, 20 stones, the count, 2 ends) + one
+    // not exists per stone put on + one exists per stone taken off.
     const widest = Math.max(...stmts.map((s) => s.toSQL().params.length));
-    expect(widest).toBeLessThan(100);
+    expect(widest).toBe(1 + 24 + 20 + 20);
+    expect(widest).toBeLessThan(D1_MAX_BOUND_PARAMETERS);
   });
 });
