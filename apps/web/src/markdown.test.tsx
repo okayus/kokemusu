@@ -22,8 +22,9 @@ describe("Markdown の構造", () => {
   it("チェックリストは読み取り専用のチェック印になる", () => {
     const html = md("- [x] 済\n- [ ] まだ");
     expect(html).toContain('<li class="md-task"><input type="checkbox"');
-    expect(html).toContain('checked=""/>済');
-    expect(html).toContain('disabled=""/>まだ');
+    // 押せない印にも名前が要る（axe の label）。名前は状態そのもの。
+    expect(html).toContain('aria-label="済み" checked=""/>済');
+    expect(html).toContain('aria-label="未了"/>まだ');
     expect(html.match(/checked/g)).toHaveLength(1);
     expect(html.match(/disabled/g)).toHaveLength(2);
   });

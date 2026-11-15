@@ -1,0 +1,20 @@
+{
+  // Accessibility lint for the JSX (`pnpm lint` runs it over src/). What it
+  // cannot see — contrast, names computed at runtime — is e2e/a11y.spec.ts's.
+  "plugins": ["jsx-a11y"],
+  "rules": {
+    // SVG has no <button>, and role="status" on a <p> is a live region as it stands.
+    "jsx-a11y/prefer-tag-over-role": "off",
+    // role="list" is deliberate: Safari drops list semantics under list-style: none.
+    "jsx-a11y/no-redundant-roles": "off",
+    // oxlint 1.93 rejects `nickname`, a valid autofill token; axe checks the rendered value.
+    "jsx-a11y/autocomplete-valid": "off",
+    // Fires on <datalist>'s <option value>, which needs no label.
+    "jsx-a11y/control-has-associated-label": "off",
+    // The WAI-ARIA combobox (src/TagField.tsx) is a <ul role="listbox"> of <li role="option">.
+    "jsx-a11y/no-noninteractive-element-to-interactive-role": [
+      "warn",
+      { "ul": ["listbox"], "li": ["option"] }
+    ]
+  }
+}

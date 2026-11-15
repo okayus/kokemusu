@@ -17,7 +17,7 @@
 
 ## コマンドと罠
 
-- pnpm はコンテナで走らせる。ルートから `pnpm dev`（コンテナ 5173 → ホスト 5273）、`pnpm check`、`pnpm test`、`pnpm build`。CI と同じ検査はルートで `pnpm run ci`（`pnpm ci` は pnpm 本体の別コマンドになる）。e2e はコンテナ内で `pnpm e2e`（`apps/web/e2e/README.md`）。
+- pnpm はコンテナで走らせる。ルートから `pnpm dev`（コンテナ 5173 → ホスト 5273）、`pnpm check`、`pnpm lint`（oxlint の jsx-a11y）、`pnpm test`、`pnpm build`。CI と同じ検査はルートで `pnpm run ci`（`pnpm ci` は pnpm 本体の別コマンドになる）。e2e はコンテナ内で `pnpm e2e`（`apps/web/e2e/README.md`）。
 - ホストで開いたセッションでは、編集と git はホストで行い、pnpm はコンテナに投げる（起動は `./up.sh`、実行は `docker exec kokemusu-dev pnpm run ci`）。ホストで pnpm・npx を走らせない（`pnpm exec` も）。依存のコードが隔離の外で動き、コンテナの `node_modules` も壊れる。作業ツリーはコンテナと共有しているので、ブランチの切り替えはコンテナ側にも効く。
 - `pnpm check` は `wrangler types` で `worker-configuration.d.ts`（gitignore）を作ってから tsc を走らせる。単体テストは Cloudflare plugin を通さず、Node で `app.request()` を呼ぶ。
 - ローカルの変数は `apps/web/.dev.vars`（`.dev.vars.example` をコピーし、`RP_ID=localhost`）。

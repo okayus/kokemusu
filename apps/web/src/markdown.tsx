@@ -237,7 +237,13 @@ function listItem(item: Tokens.ListItem, key: string): ReactNode {
     <li key={key} className={item.task ? "md-task" : undefined}>
       {item.task && (
         // 読み物としてのチェック印。押しても本文は変わらない（編集は編集フォームで）。
-        <input type="checkbox" checked={item.checked === true} readOnly disabled />
+        <input
+          type="checkbox"
+          checked={item.checked === true}
+          readOnly
+          disabled
+          aria-label={item.checked === true ? "済み" : "未了"}
+        />
       )}
       {content}
     </li>
