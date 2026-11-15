@@ -53,4 +53,20 @@ describe("securityHeaders", () => {
     expect(res.headers.get("content-type")).toContain("text/html");
     expect(res.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
   });
+
+  // hono < 4.13.16 skips `app.use("*")` for a path holding a line terminator
+  // (GHSA-h7mg-cq63-vhpq).
+  it.each(["/x%0A", "/x%0D", "/x%E2%80%A8", "/x%E2%80%A9", "/some%0A/client/route"])(
+    "a path with a line terminator still gets the headers: %s",
+    async (path) => {
+      const res = await app.request(path, {}, PROD_ENV);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      expect(res.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
+      expect(res.headers.get("X-Frame-Options")).toBe("DENY");
+      expect(res.headers.get("Strict-Transport-Security")).toBe(
+        "max-age=31536000; includeSubDomains",
+      );
+      expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    },
+  );
 });
