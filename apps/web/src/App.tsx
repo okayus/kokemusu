@@ -562,28 +562,31 @@ function Garden(props: {
       );
     });
     // Tags may have moved between stones, days along the axis — the 総草, the
-    // 年表 and つながり follow.
+    // 年表 and つながり follow. The completion list too, even with no stone
+    // left on this 苔片: a stone it let go of may now be empty (GET /api/tags).
     setMossVersion((v) => v + 1);
-    if (updated.tags.length > 0) {
-      void listTags()
-        .then(setTagOptions)
-        .catch(() => {});
-    }
+    void listTags()
+      .then(setTagOptions)
+      .catch(() => {});
   };
 
   const handleDeleted = (id: string) => {
     setError(null);
     setPosts((current) => (current === null ? current : current.filter((p) => p.id !== id)));
     // The moss lightens — the visible receipt that the 苔片 is gone (ADR-0003).
+    // Its stones may be empty now, out of the completion list.
     setMossVersion((v) => v + 1);
+    void listTags()
+      .then(setTagOptions)
+      .catch(() => {});
   };
 
   const handleRetagged = (result: RetagResult) => {
     setError(null);
     // Stones moved on 苔片 loaded and not: the page is fetched again under the
     // same filter (a 苔片 that lost a filtered stone is out of it now), the
-    // map and the 年表 follow, and a new spelling is a new stone for the
-    // completion list. The receipt says how many.
+    // map and the 年表 follow, and the completion list gains a new spelling
+    // and loses a stone emptied. The receipt says how many.
     reloadFeed();
     setMossVersion((v) => v + 1);
     void listTags()
