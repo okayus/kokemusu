@@ -1001,7 +1001,8 @@ test("register → post → today's moss darkens → reload → logout → login
   // fold closes and the filter is empty — no 苔片 wears 「付替」 now. At rest
   // the three carry 「付替後」, the two keep 「相棒」, and the stone 「付替」
   // stays registered, empty (merging or removing a stone is 石の運用, not
-  // 付け替え). Released, the cards wear the new stone. Still at a phone's width.
+  // 付け替え), and out of the suggestions. Released, the cards wear the new
+  // stone. Still at a phone's width.
   for (const [body, tags] of [
     ["付替 1", ["付替", "相棒"]],
     ["付替 2", ["付替", "相棒"]],
@@ -1043,6 +1044,15 @@ test("register → post → today's moss darkens → reload → logout → login
     )[0]?.c;
   expect(stoneIdOf("付替")).toBeTruthy();
   expect([wearers("付替"), wearers("付替後"), wearers("相棒")]).toEqual([0, 3, 2]);
+  // The emptied stone is out of the suggestions (GET /api/tags lists only the
+  // stones some 苔片 wears), so its spelling is offered as a new stone.
+  await retag.locator("summary").click();
+  await addField.fill("付替");
+  await expect(retag.getByRole("option", { name: "付替後" })).toBeVisible();
+  await expect(retag.getByRole("option", { name: "「付替」を新しい石に" })).toBeVisible();
+  await expect(retag.getByRole("option", { name: "付替", exact: true })).toHaveCount(0);
+  await addField.press("Escape");
+  await retag.locator("summary").click();
   await page.locator(".feed-filter").getByRole("button", { name: "解除" }).click();
   await expect(timeline.getByRole("button", { name: "「付替後」で絞り込む" })).toHaveCount(3);
 
