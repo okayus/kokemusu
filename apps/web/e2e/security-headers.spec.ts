@@ -7,7 +7,9 @@ import { expect, test } from "@playwright/test";
 // e2e runs over http, so HSTS must be absent here; its https form is fixed by
 // worker/middleware/security-headers.test.ts. `/x%0A` guards GHSA-h7mg-cq63-vhpq:
 // hono < 4.13.16 skips `app.use("*")` for a path holding a line terminator.
-for (const path of ["/", "/some/client/route", "/x%0A", "/health", "/api/auth/me"]) {
+// `/積む` is the door a 送り側 links to (ADR-0009) — the SPA fallback like any
+// client route, named here because outside pages open it.
+for (const path of ["/", "/some/client/route", "/積む", "/x%0A", "/health", "/api/auth/me"]) {
   test(`security headers on ${path}`, async ({ request }) => {
     const res = await request.get(path);
     const h = res.headers();

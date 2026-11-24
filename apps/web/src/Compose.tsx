@@ -11,6 +11,11 @@
 // carry-over of tags to the next 苔片 (a forgotten stone would grow moss on the
 // wrong rock, and it counts in every visualization), and no carry-over of a
 // past day either.
+//
+// A 苔片 handed over by a link (渡す, ADR-0009) opens here too, as the 書きかけ,
+// with the one it displaced set aside (draft.ts): the dialog says both, offers
+// 捨てる for the handed one, and spending it — 積む or 捨てる — brings the top
+// of the aside back for the next open.
 import { useEffect, useId, useRef, useState, type CSSProperties, type Ref } from "react";
 import { describeApiError, isApiError } from "./api";
 import {
@@ -23,7 +28,17 @@ import {
   thicknessNote,
   type DaysFields,
 } from "./days";
-import { EMPTY_DRAFT, loadDraft, saveDraft, type Draft } from "./draft";
+import {
+  EMPTY_DRAFT,
+  isEmptyDraft,
+  loadDrafts,
+  resume,
+  saveDraft,
+  saveDrafts,
+  spend,
+  type Draft,
+  type Drafts,
+} from "./draft";
 import { submitOnCmdEnter } from "./form";
 import { KIND_CHOICES, type PostKind } from "./kind";
 import { Markdown } from "./markdown";
@@ -42,9 +57,36 @@ export type ComposeSeed = { tags: string[]; kind: PostKind | null };
 
 /**
  * What opens the dialog: `seed` is the 苔片's stones and 向き for 同じ石に積む;
- * null means resume the draft as it was left (積む / `n`).
+ * null means resume the draft as it was left (積む / `n` / a link to /積む —
+ * which may have just put a handed 苔片 there).
  */
 export type ComposeRequest = { seed: ComposeSeed | null };
+
+/**
+ * What the dialog opens on (pure, so the tests and the mount agree): the
+ * 書きかけ and the aside as stored, the top of the aside brought back to an
+ * emptied 書きかけ (draft.ts resume), then 同じ石に積む's stones and 向き over
+ * whatever that leaves — the body and the days stay as they were.
+ */
+export function openDrafts(stored: Drafts, seed: ComposeSeed | null): Drafts {
+  const drafts = resume(stored);
+  return seed === null
+    ? drafts
+    : { ...drafts, current: { ...drafts.current, tags: seed.tags, tagText: "", kind: seed.kind } };
+}
+
+/** The dialog's two notes (2026-11-24 grill ②) — what it holds and what waits under it. */
+export function composeNotes(current: Pick<Draft, "handed">, asideCount: number): string[] {
+  return [
+    ...(current.handed ? ["リンクで渡された苔片です。積むを押すまで苔片にはなりません。"] : []),
+    ...(asideCount > 0
+      ? [
+          `書きかけ ${asideCount} 件を脇に置いています。` +
+            (current.handed ? "これを積むか捨てると戻ります。" : "これを積むと戻ります。"),
+        ]
+      : []),
+  ];
+}
 
 /** A 苔片's stones by name — what the edit form starts from, and the stones half of `seedOf`. */
 export const stoneNames = (tags: TagSummary[]): string[] => tags.map((t) => t.name);
@@ -381,6 +423,8 @@ export const COMPOSE_DAYS_HINT =
  * successful submit closes with "posted", and `onCreated` fires from the close
  * handler — after the browser has given focus back to whatever opened the
  * dialog — so the garden can travel to the new 苔片 without being undone.
+ * 捨てる closes with "discarded" the same way, and `onDiscarded` says whether a
+ * 書きかけ came back from the aside.
  */
 export function ComposeDialog(props: {
   seed: ComposeSeed | null;
@@ -389,23 +433,25 @@ export function ComposeDialog(props: {
   /** The feed's server-decided today — the date fields' ceiling. */
   today: string | null;
   onCreated: (created: PostItem) => void;
+  /** 捨てる: the handed 苔片 is gone; `restored` — a 書きかけ came back from the aside. */
+  onDiscarded: (restored: boolean) => void;
   onClose: () => void;
   onSessionLost: () => void;
 }) {
   // The whole entry is one Draft: resumed from storage, and 同じ石に積む replaces
   // the stones and the 向き — the body and the days are whatever was left there.
-  const [fields, setFields] = useState<Draft>(() => {
-    const draft = loadDraft() ?? EMPTY_DRAFT;
-    return props.seed === null
-      ? draft
-      : { ...draft, tags: props.seed.tags, tagText: "", kind: props.seed.kind };
-  });
+  // `opened.aside` is what the notes count; spending reads the aside afresh
+  // (spendDraft), so a link received in another tab meanwhile is never dropped.
+  const [opened] = useState<Drafts>(() => openDrafts(loadDrafts(), props.seed));
+  const [fields, setFields] = useState<Draft>(opened.current);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
   const createdRef = useRef<PostItem | null>(null);
   const headingId = useId();
+  const notesId = useId();
+  const notes = composeNotes(fields, opened.aside.length);
 
   useEffect(() => {
     dialogRef.current?.showModal();
@@ -414,19 +460,27 @@ export function ComposeDialog(props: {
     bodyRef.current?.focus();
   }, []);
 
-  // 同じ石に積む replaced the tag field and the 向き: the draft must say so too,
-  // or a close before any keystroke would resume the previous ones. Mount only.
-  const seeded = useRef(false);
+  // What the dialog opened on is what storage must say too — 同じ石に積む
+  // replaced the stones and the 向き, an emptied 書きかけ took the top of the
+  // aside — or a close before any keystroke would resume the old ones. `opened`
+  // never changes, so this runs on mount (twice under StrictMode, to the same end).
   useEffect(() => {
-    if (seeded.current || props.seed === null) return;
-    seeded.current = true;
-    saveDraft(fields);
-  }, [props.seed, fields]);
+    saveDrafts(opened);
+  }, [opened]);
 
   const update = (patch: Partial<Draft>) => {
     const next = { ...fields, ...patch };
     setFields(next);
     saveDraft(next);
+  };
+
+  // 積んだ or 捨てた: the 書きかけ goes, and the top of the aside — as stored
+  // now — comes back for the next open. True when one did.
+  const restoredRef = useRef(false);
+  const spendDraft = () => {
+    const next = spend(loadDrafts().aside);
+    saveDrafts(next);
+    restoredRef.current = !isEmptyDraft(next.current);
   };
 
   const submit = async () => {
@@ -445,8 +499,10 @@ export function ComposeDialog(props: {
         kind: fields.kind,
         ...stackingInput(fields),
       });
-      // Spent: nothing carries over (features.md §1).
-      update(EMPTY_DRAFT);
+      // Spent: nothing carries over (features.md §1) — but a 書きかけ set aside
+      // for a handed 苔片 comes back for the next open.
+      spendDraft();
+      setFields(EMPTY_DRAFT);
       createdRef.current = created;
       dialogRef.current?.close("posted");
     } catch (e) {
@@ -458,16 +514,27 @@ export function ComposeDialog(props: {
     }
   };
 
+  // 捨てる (a handed 苔片 only): it goes, unposted — no confirm, since the
+  // link that handed it can hand it again.
+  const discard = () => {
+    if (busy) return;
+    spendDraft();
+    dialogRef.current?.close("discarded");
+  };
+
   return (
     <dialog
       ref={dialogRef}
       className="compose"
       closedby="any"
       aria-labelledby={headingId}
+      aria-describedby={notes.length > 0 ? notesId : undefined}
       onClose={() => {
-        const created = dialogRef.current?.returnValue === "posted" ? createdRef.current : null;
+        const how = dialogRef.current?.returnValue;
+        const created = how === "posted" ? createdRef.current : null;
         props.onClose();
         if (created !== null) props.onCreated(created);
+        else if (how === "discarded") props.onDiscarded(restoredRef.current);
       }}
     >
       <form
@@ -478,6 +545,13 @@ export function ComposeDialog(props: {
         }}
       >
         <h2 id={headingId}>積む</h2>
+        {notes.length > 0 && (
+          <div className="compose-notes" id={notesId}>
+            {notes.map((note) => (
+              <p key={note}>{note}</p>
+            ))}
+          </div>
+        )}
         <BodyField
           id="post-body"
           label="いまの苔片"
@@ -520,6 +594,13 @@ export function ComposeDialog(props: {
           <button type="button" disabled={busy} onClick={() => dialogRef.current?.close()}>
             閉じる
           </button>
+          {/* Only for a handed 苔片, and there from the first frame — it never
+              appears under a pointer on its way to 閉じる. */}
+          {fields.handed && (
+            <button type="button" className="danger" disabled={busy} onClick={discard}>
+              捨てる
+            </button>
+          )}
           <span className="hint">⌘/Ctrl + Enter でも積めます</span>
         </div>
       </form>

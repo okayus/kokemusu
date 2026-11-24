@@ -13,6 +13,7 @@
 - リポは public。私的データ、`.dev.vars`、`.docker/sandbox.env`、D1 のダンプはコミットしない。
 - 本番 URL と WebAuthn の RP_ID は `kokemusu.shiraoka.workers.dev`。RP_ID を変えると登録済みのパスキーがすべて無効になるので、`wrangler.jsonc` の `name` / `vars.RP_ID` / `vars.ORIGIN` は変えない。
 - 認証はパスキー（single-user）、API からの投稿は PAT（Bearer）。kokemusu は送り側を知らない（ADR-0002）。送り側の契約は `docs/senders.md` と生成物 `docs/senders/posts.schema.json`（`createPostSchema` から `pnpm test` が生成し、一致を検査する）。`createPostSchema`（wire）を変える PR は `vitest -u` で再生成し、`docs/senders.md` の変更履歴に 1 行足し、公開している送り側を確かめる。上限や鍵を他所に転記しない（ADR-0008）。
+- PAT を持てない外のページは、積む前の苔片を `/積む#post=<JSON>` の fragment で渡す（中身はサーバーに届かず、積むのは持ち主。ADR-0009）。リンクの読み手 `src/handover.ts` は `createPostSchema` の規則を写したもので、`worker/senders-contract.test.ts` の表が一致を検査する。wire を変えるときは両方を直す。
 - 本文はアプリ層で暗号化する（鍵 `BODY_KEY` は Worker Secret）。暗号文の列は本文だけで、新しく足す列も平文のメタデータにする。可視化と集計はメタデータだけで成り立たせる。自由記述を足すなら本文に含め、平文の列を足したら `docs/security.md` の平文側に理由を書く（ADR-0001）。
 
 ## コマンドと罠

@@ -17,19 +17,23 @@ export const VIEWS: readonly { view: View; path: string; label: string }[] = [
 const CHRONICLE_PATH = "/年表";
 
 /**
- * The view a pathname names. The browser hands the path back percent-encoded
- * (`/%E5%B9%B4%E8%A1%A8`), so it is decoded first; a malformed escape, like any
- * unknown path, is the 投稿一覧.
+ * A pathname as the app compares it: the browser hands the path back
+ * percent-encoded (`/%E5%B9%B4%E8%A1%A8`), so it is decoded, and a trailing
+ * slash is dropped. Null for a malformed escape — a path that names nothing.
  */
-export function viewOf(pathname: string): View {
+export function pathKey(pathname: string): string | null {
   let decoded: string;
   try {
     decoded = decodeURIComponent(pathname);
   } catch {
-    return "posts";
+    return null;
   }
-  const trimmed = decoded.length > 1 && decoded.endsWith("/") ? decoded.slice(0, -1) : decoded;
-  return trimmed === CHRONICLE_PATH ? "chronicle" : "posts";
+  return decoded.length > 1 && decoded.endsWith("/") ? decoded.slice(0, -1) : decoded;
+}
+
+/** The view a pathname names: a malformed escape, like any unknown path, is the 投稿一覧. */
+export function viewOf(pathname: string): View {
+  return pathKey(pathname) === CHRONICLE_PATH ? "chronicle" : "posts";
 }
 
 /** The path a view lives at — what the nav links point to and pushState writes. */

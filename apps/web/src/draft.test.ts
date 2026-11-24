@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_DRAFT, isEmptyDraft, parseDraft } from "./draft";
+import {
+  EMPTY_DRAFT,
+  isEmptyDraft,
+  MAX_ASIDE,
+  parseAside,
+  parseDraft,
+  receiveHanded,
+  resume,
+  spend,
+  type Draft,
+} from "./draft";
 
 describe("parseDraft", () => {
   it("reads a full draft", () => {
@@ -23,7 +33,17 @@ describe("parseDraft", () => {
       firstDay: "2026-09-01",
       lastDay: "2026-09-05",
       thickness: 60,
+      handed: false,
     });
+  });
+
+  it("reads `handed` only when it is true — a draft saved before the link (2026-11-24) is the owner's own", () => {
+    const handed = (value: unknown) =>
+      parseDraft(JSON.stringify({ body: "本文", tags: [], handed: value }))?.handed;
+    expect(handed(true)).toBe(true);
+    expect(handed(false)).toBe(false);
+    expect(handed("true")).toBe(false);
+    expect(parseDraft(JSON.stringify({ body: "本文", tags: [] }))?.handed).toBe(false);
   });
 
   it("reads a draft saved before the 向き radio, 日を選ぶ and the 厚み slider as 未分類・今日・毎日", () => {
@@ -94,5 +114,76 @@ describe("isEmptyDraft", () => {
 
   it("does not count the 厚み — a moved slider with no range to show it is nothing to resume", () => {
     expect(isEmptyDraft({ ...EMPTY_DRAFT, thickness: 60 })).toBe(true);
+  });
+});
+
+describe("the aside — a 書きかけ a handed 苔片 displaced (ADR-0009, 2026-11-24 grill ②)", () => {
+  const own: Draft = { ...EMPTY_DRAFT, body: "設計メモ", tags: ["kokemusu"] };
+  const handed: Draft = {
+    ...EMPTY_DRAFT,
+    body: "[題](https://example.com/n)",
+    tags: ["透き通る", "os"],
+    kind: "input",
+    firstDay: "2026-11-23",
+    handed: true,
+  };
+  const other: Draft = { ...handed, body: "[別の題](https://example.com/m)" };
+
+  it("a handed 苔片 takes an empty dialog and sets nothing aside", () => {
+    expect(receiveHanded({ current: EMPTY_DRAFT, aside: [] }, handed)).toEqual({
+      current: handed,
+      aside: [],
+    });
+  });
+
+  it("sets the 書きかけ aside, on top, and takes the dialog — nothing is overwritten", () => {
+    expect(receiveHanded({ current: own, aside: [] }, handed)).toEqual({
+      current: handed,
+      aside: [own],
+    });
+    expect(receiveHanded({ current: handed, aside: [own] }, other)).toEqual({
+      current: other,
+      aside: [own, handed],
+    });
+  });
+
+  it("moves nothing when the same 苔片 is handed over itself (the link tapped again)", () => {
+    expect(receiveHanded({ current: handed, aside: [own] }, { ...handed })).toEqual({
+      current: handed,
+      aside: [own],
+    });
+    // With a 一言 added it is no longer the same: the 一言 goes aside rather than away.
+    const withWord = { ...handed, body: `${handed.body}\n\nよかった` };
+    expect(receiveHanded({ current: withWord, aside: [] }, handed)).toEqual({
+      current: handed,
+      aside: [withWord],
+    });
+  });
+
+  it(`refuses — null, nothing moves — once ${MAX_ASIDE} wait aside`, () => {
+    const full = Array.from({ length: MAX_ASIDE }, (_, i) => ({ ...own, body: `メモ ${i}` }));
+    expect(receiveHanded({ current: other, aside: full }, handed)).toBeNull();
+    expect(receiveHanded({ current: other, aside: full.slice(1) }, handed)?.aside).toHaveLength(MAX_ASIDE);
+    // An empty dialog needs no room aside.
+    expect(receiveHanded({ current: EMPTY_DRAFT, aside: full }, handed)?.current).toEqual(handed);
+  });
+
+  it("spending brings the top of the aside back, or leaves the dialog empty", () => {
+    expect(spend([own, handed])).toEqual({ current: handed, aside: [own] });
+    expect(spend([own])).toEqual({ current: own, aside: [] });
+    expect(spend([])).toEqual({ current: EMPTY_DRAFT, aside: [] });
+  });
+
+  it("opening on a 書きかけ emptied by hand brings the top back; anything else opens as left", () => {
+    expect(resume({ current: EMPTY_DRAFT, aside: [own] })).toEqual({ current: own, aside: [] });
+    expect(resume({ current: handed, aside: [own] })).toEqual({ current: handed, aside: [own] });
+    expect(resume({ current: EMPTY_DRAFT, aside: [] })).toEqual({ current: EMPTY_DRAFT, aside: [] });
+  });
+
+  it("reads the stored aside entry by entry, passing over what is not a draft or holds nothing", () => {
+    expect(parseAside(JSON.stringify([own, handed]))).toEqual([own, handed]);
+    expect(parseAside(JSON.stringify([own, { body: 1 }, EMPTY_DRAFT, null, handed]))).toEqual([own, handed]);
+    expect(parseAside(JSON.stringify(own))).toEqual([]);
+    expect(parseAside("{not json")).toEqual([]);
   });
 });

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { MAX_TAGS_PER_POST } from "./core/tag";
+import { readHandedPost } from "../src/handover";
+import { parseStacking } from "./core/stacking";
+import { MAX_TAGS_PER_POST, normalizeTagName } from "./core/tag";
 import { createPostSchema } from "./routes/posts";
 
 // The contract a 送り側 reads (docs/senders.md, ADR-0008) has two halves: the
@@ -112,5 +114,95 @@ describe("docs/senders/posts.schema.json (the published sender contract)", () =>
     expect(accepts({ body: "苔", thickness: 101 })).toBe(false);
     expect(accepts({ body: "苔", kind: "sideways" })).toBe(false);
     expect(accepts({ body: "" })).toBe(false);
+  });
+});
+
+// The second door (docs/senders.md「リンクで渡す」, ADR-0009): a link hands the
+// 積む dialog the same body, as JSON in its fragment, and src/handover.ts reads
+// it in the browser with the route's rules spelled once more (the SPA must not
+// import Worker modules). The table holds the two to one answer — a body opens
+// through the link exactly when the route would take it — for every rule that
+// needs no today. The ones that do are pinned after it, each to its stated
+// difference.
+
+/** A today later than every day in the table, so the route's today-bound rules decide nothing there. */
+const TODAY = "2026-11-24";
+
+/** The route's answer to a body (routes/posts.ts POST /): the schema, a stone that folds to nothing, the days. */
+function routeTakes(body: unknown): boolean {
+  const parsed = createPostSchema.safeParse(body);
+  if (!parsed.success) return false;
+  if ((parsed.data.tags ?? []).some((name) => normalizeTagName(name) === "")) return false;
+  return parseStacking(parsed.data, TODAY) !== null;
+}
+
+const linkOpens = (body: unknown): boolean => readHandedPost(JSON.stringify(body)).ok;
+
+const range = { firstDay: "2026-11-01", lastDay: "2026-11-20" };
+const names = (n: number, width = 2) => Array.from({ length: n }, (_, i) => `${i}`.padStart(width, "x"));
+
+const BODIES: [string, unknown][] = [
+  ["the smallest body", { body: "苔" }],
+  ["a note handed over by 透き通る", { body: "[題](https://example.com/n)", tags: ["os", "透き通る"], kind: "input", firstDay: "2026-11-23" }],
+  ["every key", { body: "苔", tags: ["a"], kind: "both", ...range, thickness: 60 }],
+  ["an unknown key", { body: "苔", source: "sukitooru" }],
+  ["the retired 見出し", { body: "苔", title: "題" }],
+  ["no body", { tags: ["a"] }],
+  ["a numeric body", { body: 1 }],
+  ["an empty body", { body: "" }],
+  ["a blank body", { body: " \n　" }],
+  ["a body of 20,000", { body: "苔".repeat(20_000) }],
+  ["a body of 20,001", { body: "苔".repeat(20_001) }],
+  ["tags as text", { body: "苔", tags: "a" }],
+  ["tags: null", { body: "苔", tags: null }],
+  ["no tags", { body: "苔", tags: [] }],
+  [`${MAX_TAGS_PER_POST} tags`, { body: "苔", tags: names(MAX_TAGS_PER_POST) }],
+  [`${MAX_TAGS_PER_POST + 1} tags`, { body: "苔", tags: names(MAX_TAGS_PER_POST + 1) }],
+  ["an empty tag", { body: "苔", tags: [""] }],
+  ["a tag that folds to nothing", { body: "苔", tags: ["　 "] }],
+  ["a tag of 100", { body: "苔", tags: names(1, 100) }],
+  ["a tag of 101", { body: "苔", tags: names(1, 101) }],
+  ["a numeric tag", { body: "苔", tags: [1] }],
+  ["one stone spelled twice", { body: "苔", tags: ["TS", "ts"] }],
+  ["kind input", { body: "苔", kind: "input" }],
+  ["kind output", { body: "苔", kind: "output" }],
+  ["kind null", { body: "苔", kind: null }],
+  ["a kind it does not know", { body: "苔", kind: "read" }],
+  ["a numeric kind", { body: "苔", kind: 1 }],
+  ["a past day", { body: "苔", firstDay: "2026-11-23" }],
+  ["today, named", { body: "苔", firstDay: TODAY }],
+  ["a day the calendar lacks", { body: "苔", firstDay: "2026-02-30" }],
+  ["a day spelled with slashes", { body: "苔", firstDay: "2026/11/23" }],
+  ["firstDay: null", { body: "苔", firstDay: null }],
+  ["a single day named twice", { body: "苔", firstDay: "2026-11-20", lastDay: "2026-11-20" }],
+  ["a single day with a null 厚み", { body: "苔", firstDay: "2026-11-20", thickness: null }],
+  ["a single day with a 厚み", { body: "苔", firstDay: "2026-11-20", thickness: 60 }],
+  ["today with a 厚み", { body: "苔", thickness: 100 }],
+  ["a range with its 厚み", { body: "苔", ...range, thickness: 60 }],
+  ["a range without a 厚み", { body: "苔", ...range }],
+  ["a range with a null 厚み", { body: "苔", ...range, thickness: null }],
+  ["a 厚み of 0", { body: "苔", ...range, thickness: 0 }],
+  ["a 厚み of 101", { body: "苔", ...range, thickness: 101 }],
+  ["a 厚み of 60.5", { body: "苔", ...range, thickness: 60.5 }],
+  ["a 厚み as text", { body: "苔", ...range, thickness: "60" }],
+  ["an inverted pair", { body: "苔", firstDay: "2026-11-20", lastDay: "2026-11-01", thickness: 60 }],
+  ["an array", [{ body: "苔" }]],
+  ["a string", "苔"],
+  ["null", null],
+];
+
+describe("the link door (リンクで渡す) reads the body POST /api/posts reads", () => {
+  it.each(BODIES)("%s: the link opens exactly when the route takes it", (_label, body) => {
+    expect(linkOpens(body)).toBe(routeTakes(body));
+  });
+
+  it("leaves the rules that need today to the dialog's date fields, and refuses lastDay alone", () => {
+    // The route refuses a day not yet come and one past the 1200-month floor;
+    // the link opens them, and the date field's max / min stop 積む.
+    expect([routeTakes({ body: "苔", firstDay: "2026-11-25" }), linkOpens({ body: "苔", firstDay: "2026-11-25" })]).toEqual([false, true]);
+    expect([routeTakes({ body: "苔", firstDay: "1900-01-01" }), linkOpens({ body: "苔", firstDay: "1900-01-01" })]).toEqual([false, true]);
+    // lastDay alone means today 〜 lastDay to the route, taken only when it IS
+    // today; the dialog would read it as that one day, so the link refuses it.
+    expect([routeTakes({ body: "苔", lastDay: TODAY }), linkOpens({ body: "苔", lastDay: TODAY })]).toEqual([true, false]);
   });
 });
