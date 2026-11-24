@@ -3,6 +3,7 @@
 1 行 = 1 節目（PR の merge・ADR・人手作業の完了・本番の状態変化）。`- YYYY-MM-DD 何を（#PR / ADR / skill）`。
 自動ロードはされない。必要なら `head -20 docs/log.md`。作業中の試行錯誤は書かない（git log と PR にある）。
 
+- 2026-11-24 外のページがリンクで積む前の苔片を渡す入口 `/積む#post=<POST /api/posts の body の JSON>` を本番に（#87、ADR-0009。透き通るの依頼。fragment なのでサーバーとログに中身は届かず、積むのは持ち主。API が 400 の中身は開かず理由を出す、書きかけは脇に置いて積む／捨てるで戻す（5 件まで）、未ログインは URL に残してログイン後に開く。契約は senders.md「リンクで渡す」、規則の写し `src/handover.ts` は senders-contract.test.ts の表で createPostSchema と照合）。
 - 2026-11-15 週次バックアップの失敗に気づく手当て（plans ⑦）: 前提を訂正 — `d1-backup.mjs` は失敗時に notify-send するが、一度きりで見落とす。ホストの app-check（毎日 09:05）が `~/backups/d1/last-run.json` を読み、8 日より古いか `ok:false` なら失敗にする。okayus-skills #51（host-synthetic-check 0.3.0・d1-keyless-host-backup 0.2.1）。
 - 2026-11-15 毎週月曜 09:17 JST に `pnpm audit --prod` を回す workflow「Audit」を足す（#82。`ci` には入れない — 新しい勧告で無関係な PR を赤くしないため）。
 - 2026-11-15 パスキーの削除と PAT の失効を確認ダイアログ経由にする（#81。苔片の削除・付け替えと共通の `ConfirmDialog`、ネイティブ `<dialog>` ＋ `closedby="any"`、安全側が初期フォーカス）。
