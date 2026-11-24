@@ -387,6 +387,20 @@ dialog.compose h2 {
   margin-block-end: 0.75rem;
 }
 
+/* What the dialog holds and what waits under it (渡す, ADR-0009): quiet lines
+   under the heading, above the body, held together by a moss rule. */
+.compose-notes {
+  margin-block: 0 0.75rem;
+  padding-inline-start: 0.6rem;
+  border-inline-start: 3px solid var(--moss);
+  font-size: 0.85rem;
+  color: var(--quiet);
+}
+
+.compose-notes p {
+  margin-block: 0;
+}
+
 @media (max-width: 30rem) {
   dialog.compose {
     inline-size: 100%;

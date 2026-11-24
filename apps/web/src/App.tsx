@@ -29,7 +29,8 @@ import {
   thicknessLabel,
   type DaysFields,
 } from "./days";
-import { clearDraft } from "./draft";
+import { clearDrafts, loadDrafts, saveDrafts } from "./draft";
+import { arrivalAt, isComposePath, readHandover } from "./handover";
 import { HeatmapSection } from "./Heatmap";
 import { KIND_LABELS, parseKind, type PostKind } from "./kind";
 import { Markdown } from "./markdown";
@@ -95,7 +96,16 @@ export function App() {
     );
   }
   if (auth.state.status === "anonymous") {
-    return <AnonymousView onLogin={auth.login} onRegister={auth.register} />;
+    // A link that hands a 苔片 over (ADR-0009) waits in the address bar through
+    // the login — passkeys never leave the page — and opens once authed.
+    const { pathname, hash } = window.location;
+    return (
+      <AnonymousView
+        handing={isComposePath(pathname) && readHandover(hash) !== null}
+        onLogin={auth.login}
+        onRegister={auth.register}
+      />
+    );
   }
   return (
     <AuthedView user={auth.state.user} onLogout={auth.logout} onSessionLost={auth.toAnonymous} />
@@ -103,6 +113,8 @@ export function App() {
 }
 
 function AnonymousView(props: {
+  /** A link to /積む handed a 苔片 over: it opens right after the login. */
+  handing: boolean;
   onLogin: () => Promise<void>;
   onRegister: (input: {
     displayName: string;
@@ -130,6 +142,9 @@ function AnonymousView(props: {
       <header className="hero">
         <h1>苔むす</h1>
         <p className="quiet">ことばを積んで、苔を育てる。</p>
+        {props.handing && (
+          <p className="hint">ログインすると、リンクで渡された苔片が積むダイアログで開きます。</p>
+        )}
       </header>
 
       {!supportsPasskeys() && (
@@ -234,6 +249,23 @@ function AuthedView(props: {
   const noticeAction = notice?.action;
   const openCompose = useCallback(() => setCompose({ seed: null }), []);
   useComposeShortcut(openCompose);
+  // A link to /積む (ADR-0009): the 積む dialog's own entry, and the door a
+  // 送り側 hands a 苔片 through (#post=…). Read once, here, where a session is
+  // certain; the URL goes back to / first, so a reload does not open it again
+  // and the fragment leaves the address bar. Under StrictMode the second run
+  // finds / and does nothing.
+  useEffect(() => {
+    const { pathname, hash } = window.location;
+    const arrival = arrivalAt(pathname, hash, loadDrafts());
+    if (arrival === null) return;
+    window.history.replaceState(null, "", "/");
+    if (!arrival.open) {
+      setError(arrival.problem);
+      return;
+    }
+    if (arrival.drafts !== null) saveDrafts(arrival.drafts);
+    setCompose({ seed: null });
+  }, []);
   // 見かた (features.md §3): 投稿一覧 or 年表, read from and written to the URL.
   const { view, show } = useView();
   return (
@@ -244,8 +276,8 @@ function AuthedView(props: {
           <button
             type="button"
             onClick={() => {
-              // A shared machine keeps no half-written 苔片 after logout.
-              clearDraft();
+              // A shared machine keeps no half-written 苔片 after logout — nor any set aside.
+              clearDrafts();
               void props.onLogout().catch((e) => setError(describeAuthError(e)));
             }}
           >
@@ -665,6 +697,11 @@ function Garden(props: {
           tagOptions={tagOptions}
           today={today}
           onCreated={handleCreated}
+          onDiscarded={(restored) =>
+            props.onNotice({
+              text: restored ? "渡された苔片を捨て、書きかけを戻しました" : "渡された苔片を捨てました",
+            })
+          }
           onClose={props.onComposeClose}
           onSessionLost={props.onSessionLost}
         />

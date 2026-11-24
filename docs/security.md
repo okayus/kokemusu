@@ -15,6 +15,7 @@
 | ホスティング事業者がデータを覗く（CF/VPS） | **守備範囲外**（VPS の業者と同程度に信頼する。端末側 E2E (C) は不採用 — [ADR-0001](adr/0001-body-encrypted-at-app-layer.md)） |
 | XSS（Markdown 描画経由） | HTML 文字列を作らない描画（[ADR-0004](adr/0004-markdown-renders-to-react-elements.md)）、CSP |
 | CSRF | SameSite Cookie ＋ Origin チェック（Bearer PAT は免除） |
+| 外のページが積むダイアログに中身を入れる（リンクで渡す） | 入れるだけで投稿しない（積むは持ち主の押下＝いつもの Origin 検査を通る POST）。中身は URL の fragment で、サーバーにもログにも届かない（[ADR-0009](adr/0009-hand-over-by-link-fragment.md)） |
 | 依存ライブラリの脆弱性 | 依存最小化、定期更新、監査 |
 
 ## 認証
@@ -58,6 +59,9 @@
 - → **向き（インプット／アウトプット）と積み上がる「日」の範囲も平文側**（2026-09-06、[ADR-0005](adr/0005-post-axis-is-day-range.md)）:
   偏りの可視化と総草の軸に要る。漏れて分かるのは「いつ・どの石に・吸ったか出したか・いくつ」までで、何をしたかは暗号化された本文にしか無い。
 - 最初の実データより前に入れる（平文が D1・Time Travel・バックアップに残る期間を作らない）。
+- → **リンクで渡す中身は fragment で運ぶ**（2026-11-24、[ADR-0009](adr/0009-hand-over-by-link-fragment.md)）: `/積む#post=<JSON>` の `#` より後ろは
+  ブラウザがサーバーへ送らないので、Worker と Workers Logs（URL を記録し、query は既定で伏せない）に本文の平文が残らない。
+  平文が残るのは持ち主の端末の閲覧履歴と書きかけ（localStorage）だけで、入力欄の書きかけと同じ信頼境界（ログアウトで脇の書きかけも消す）。
 
 ### 鍵の運用（`BODY_KEY`）
 
@@ -77,6 +81,7 @@
   `http` / `https` / `mailto` と相対のみ、画像は `<img>` にせずリンクにする（外部画像は閲覧を漏らす）。
 - セキュリティヘッダ一式（`X-Content-Type-Options` `Referrer-Policy` `X-Frame-Options`/frame-ancestors 等）。
 - CSRF 対策（SameSite ＋ 非 GET は `Origin` ヘッダが `ORIGIN` と一致することを要求。`Authorization: Bearer` 付きは免除＝Cookie を持たないので偽造できない）。
+  リンクで渡す入口 `/積む` は SPA の GET で、何も書かない —— ほかのページが飛ばしてもダイアログに中身が入るだけで、書きかけは脇に置かれ、積むのは持ち主の押下だけ（ADR-0009）。
 - API は最小限の公開面。ヘルスチェック等から情報を漏らさない。
 
 ## バックアップと可搬性

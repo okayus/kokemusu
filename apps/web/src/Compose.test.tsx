@@ -1,14 +1,17 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ComposeDialog,
+  composeNotes,
   DaysDisclosure,
   DaysField,
   isComposeShortcut,
+  openDrafts,
   seedOf,
   stoneNames,
   type ComposeSeed,
 } from "./Compose";
+import { EMPTY_DRAFT, type Draft } from "./draft";
 
 describe("isComposeShortcut — `n` opens the dialog only when the key would otherwise do nothing", () => {
   const plain = {
@@ -87,6 +90,7 @@ describe("ComposeDialog", () => {
         tagOptions={[]}
         today={today}
         onCreated={() => {}}
+        onDiscarded={() => {}}
         onClose={() => {}}
         onSessionLost={() => {}}
       />,
@@ -185,6 +189,116 @@ describe("ComposeDialog", () => {
     expect(html).not.toContain('name="title"');
     expect(html).toContain(">閉じる</button>");
     expect(html).not.toContain("やめる");
+  });
+
+  it("says nothing and offers no 捨てる for the owner's own 書きかけ", () => {
+    const html = render(null);
+    expect(html).not.toContain("compose-notes");
+    expect(html.match(/<dialog [^>]*>/)?.[0]).not.toContain("aria-describedby");
+    expect(html).not.toContain("捨てる");
+  });
+});
+
+/** A Map behind the three calls draft.ts makes — Node has no localStorage. */
+function stubStorage(entries: Record<string, unknown>): void {
+  const store = new Map(Object.entries(entries).map(([key, value]) => [key, JSON.stringify(value)]));
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, value),
+    removeItem: (key: string) => void store.delete(key),
+  });
+}
+
+describe("ComposeDialog with a 苔片 handed over by a link (渡す, ADR-0009)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const handed: Draft = {
+    ...EMPTY_DRAFT,
+    body: "[題](https://example.com/n)",
+    tags: ["透き通る", "os"],
+    kind: "input",
+    firstDay: "2026-11-23",
+    handed: true,
+  };
+  const own: Draft = { ...EMPTY_DRAFT, body: "設計メモ", tags: ["kokemusu"] };
+  const render = () =>
+    renderToStaticMarkup(
+      <ComposeDialog
+        seed={null}
+        tagOptions={[]}
+        today="2026-11-24"
+        onCreated={() => {}}
+        onDiscarded={() => {}}
+        onClose={() => {}}
+        onSessionLost={() => {}}
+      />,
+    );
+
+  it("opens on the handed 苔片 — body, stones, 向き, day — and says what it is and what waits aside", () => {
+    stubStorage({ "kokemusu.draft.v1": handed, "kokemusu.draft.aside.v1": [own] });
+    const html = render();
+    expect(html).toMatch(/<textarea[^>]*id="post-body"[^>]*>\[題\]\(https:\/\/example\.com\/n\)<\/textarea>/);
+    expect(html).toContain("<span>透き通る</span>");
+    expect(html).toContain("<span>os</span>");
+    expect(html).toContain('<input type="radio" name="kind" checked="" value="input"/>インプット');
+    expect(inputTag(html, "post-first-day")).toContain('value="2026-11-23"');
+    const notes = html.match(/<div class="compose-notes" id="([^"]+)">(.*?)<\/div>/);
+    expect(notes?.[2]).toBe(
+      "<p>リンクで渡された苔片です。積むを押すまで苔片にはなりません。</p>" +
+        "<p>書きかけ 1 件を脇に置いています。これを積むか捨てると戻ります。</p>",
+    );
+    // A reader hears the notes with the dialog's name.
+    expect(html).toContain(`aria-describedby="${notes?.[1] ?? "?"}"`);
+  });
+
+  it("offers 捨てる after 閉じる, never in the submit's place", () => {
+    stubStorage({ "kokemusu.draft.v1": handed });
+    const html = render();
+    expect(html).toContain('<button type="button" class="danger">捨てる</button>');
+    expect(html.indexOf(">閉じる</button>")).toBeLessThan(html.indexOf(">捨てる</button>"));
+    expect(html.match(/type="submit"/g)).toHaveLength(1);
+  });
+
+  it("brings the top of the aside back when the 書きかけ was emptied by hand", () => {
+    stubStorage({ "kokemusu.draft.aside.v1": [own] });
+    const html = render();
+    expect(html).toMatch(/<textarea[^>]*id="post-body"[^>]*>設計メモ<\/textarea>/);
+    expect(html).not.toContain("compose-notes");
+  });
+});
+
+describe("openDrafts — what the dialog opens on", () => {
+  const own: Draft = { ...EMPTY_DRAFT, body: "設計メモ", tags: ["kokemusu"], kind: "output" };
+
+  it("lays 同じ石に積む's stones and 向き over the 書きかけ, keeping its body and days", () => {
+    expect(openDrafts({ current: own, aside: [] }, { tags: ["読書"], kind: null })).toEqual({
+      current: { ...own, tags: ["読書"], kind: null },
+      aside: [],
+    });
+  });
+
+  it("brings the aside's top back to an empty 書きかけ before seeding it", () => {
+    expect(openDrafts({ current: EMPTY_DRAFT, aside: [own] }, { tags: ["読書"], kind: "input" })).toEqual({
+      current: { ...own, tags: ["読書"], kind: "input" },
+      aside: [],
+    });
+  });
+});
+
+describe("composeNotes — the dialog's two notes", () => {
+  it("names a handed 苔片, and the 書きかけ waiting under whatever is up", () => {
+    expect(composeNotes({ handed: false }, 0)).toEqual([]);
+    expect(composeNotes({ handed: true }, 0)).toEqual([
+      "リンクで渡された苔片です。積むを押すまで苔片にはなりません。",
+    ]);
+    expect(composeNotes({ handed: true }, 2)).toEqual([
+      "リンクで渡された苔片です。積むを押すまで苔片にはなりません。",
+      "書きかけ 2 件を脇に置いています。これを積むか捨てると戻ります。",
+    ]);
+    // No 捨てる without a handed 苔片 up — only 積む spends it.
+    expect(composeNotes({ handed: false }, 1)).toEqual(["書きかけ 1 件を脇に置いています。これを積むと戻ります。"]);
   });
 });
 

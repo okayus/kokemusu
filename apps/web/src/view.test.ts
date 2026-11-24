@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pathOf, viewOf, VIEWS } from "./view";
+import { pathKey, pathOf, viewOf, VIEWS } from "./view";
 
 describe("viewOf — the view a URL path names", () => {
   it("reads the 年表's path, raw or as the browser percent-encodes it", () => {
@@ -25,5 +25,16 @@ describe("pathOf — the nav's hrefs round-trip through viewOf", () => {
       expect(pathOf(v.view)).toBe(v.path);
       expect(viewOf(pathOf(v.view))).toBe(v.view);
     }
+  });
+});
+
+describe("pathKey — a path as the app compares it", () => {
+  it("decodes the browser's escapes and drops a trailing slash, but not the root's", () => {
+    expect(pathKey("/%E7%A9%8D%E3%82%80/")).toBe("/積む");
+    expect(pathKey("/")).toBe("/");
+  });
+
+  it("is null for a malformed escape", () => {
+    expect(pathKey("/%E5")).toBeNull();
   });
 });
